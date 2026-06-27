@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Pre-push hook — runs all check scripts before allowing a push.
+# Install with: git config core.hooksPath .githooks
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec "$REPO_ROOT/scripts/runChecks.sh"

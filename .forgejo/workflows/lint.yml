@@ -1,0 +1,45 @@
+---
+name: lint
+on:
+  workflow_dispatch:
+
+  push:
+    branches: [develop]
+  pull_request: {}
+
+jobs:
+  yamllint:
+    name: yamllint
+    runs-on: docker
+    container:
+      image: cytopia/yamllint:latest
+    steps:
+      - name: Setup Node
+        run: |
+          apk add --update npm
+
+      - name: Checkout
+        uses: https://code.forgejo.org/actions/checkout@v6
+
+      - name: Run yamllint
+        run: |
+          yamllint .
+
+  shellcheck:
+    name: shellcheck
+    runs-on: docker
+    container:
+      image: koalaman/shellcheck-alpine:latest
+    steps:
+      - name: Setup Node
+        run: |
+          apk add --update npm
+
+      - name: Checkout
+        uses: https://code.forgejo.org/actions/checkout@v6
+
+      - name: Run shellcheck
+        run: |
+          set -euo pipefail
+          find . -type f -name '*.sh' -not -path './node_modules/*' -print0 \
+            | xargs -0 -r shellcheck

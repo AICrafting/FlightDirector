@@ -1,0 +1,19 @@
+{
+  "name": "cerebralgardens",
+  "owner": {
+    "name": "Cerebral Gardens",
+    "email": "dave@cerebralgardens.com"
+  },
+  "metadata": {
+    "description": "Cerebral Gardens' Claude Code plugins."
+  },
+  "plugins": [
+    {
+      "name": "lightspeed",
+      "source": "./lightspeed",
+      "description": "Opinionated workflows for a Forgejo repo from within a session — filing, triaging, and working issues through their lifecycle, plus label bootstrapping — via the forgejo MCP server.",
+      "version": "0.1.0",
+      "keywords": ["forgejo", "issues", "pull-requests", "workflow", "triage", "mcp"]
+    }
+  ]
+}
