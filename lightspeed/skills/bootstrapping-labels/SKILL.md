@@ -50,40 +50,77 @@ The dispatcher needs a per-repo API token. Ask the user to create a **least-priv
 the host (`write:repository`, `write:issue`, `write:misc` — not an all-orgs admin token; see
 [lightspeed-setup.md](../../references/lightspeed-setup.md)). Then:
 
-1. Add `.lightspeed.secrets.json` to `.gitignore` **first** (create `.gitignore` if needed).
+1. Add `.lightspeed.secrets.json` **and** `.worktrees/` to `.gitignore` **first** (create
+   `.gitignore` if needed). `.worktrees/` is where `working-an-issue` creates per-issue git
+   worktrees — they must be ignored so they don't appear as untracked content in the repo.
 2. Write `.lightspeed.secrets.json` at the repo root:
    ```json
    { "code": { "token": "<the token>" } }
    ```
 
-## Step 3: Workflow preferences
+## Step 3: Workflow preferences — stage pipeline preset
 
-Ask the two repo-level questions the other skills need:
+Ask which promotion pipeline the repo uses. Present three options:
 
-1. **Merge strategy** — *"When an issue is approved, merge via a pull request, or a direct git
-   merge into the trunk branch?"* → `mergeStrategy`: `"pr"` or `"direct"`.
-2. **Trunk branch** — confirm the integration branch (`develop`? `main`?) → `code.trunkBranch`.
+**(a) Simple — `develop → main`**
+Feature branches fork from `develop`, integrate there directly, then promote to `main` via PR:
+```json
+"stages": [
+  { "name": "develop", "merge": "direct", "gate": "pre-merge" },
+  { "name": "main",    "merge": "pr" }
+]
+```
+
+**(b) Multi-stage — `develop → qa → main`**
+Same as (a) but an intermediate `qa` branch sits between integration and production. Issues stay
+open (`Ready #N`) after merging to `qa` so users can verify before the final promotion to `main`:
+```json
+"stages": [
+  { "name": "develop", "merge": "direct", "gate": "pre-merge" },
+  { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa" },
+  { "name": "main",    "merge": "pr" }
+]
+```
+
+**(c) Advanced / custom** — capture a custom ordered list of stages (name + per-hop `merge` and
+optional `gate`), or tell the user they can hand-edit `code.stages` in `.lightspeed.json`
+afterward per [lightspeed-setup.md](../../references/lightspeed-setup.md).
+
+**Defaults explained briefly:**
+- Feature branches fork from `stages[0]` (the first integration branch).
+- `merge: "direct"` integrates by merging locally; `merge: "pr"` opens a pull request for the hop.
+- `gate: "pre-merge"` runs checks before merging; `gate: "post-merge-qa"` keeps the issue open
+  (`Ready #N`) after the hop so the user can verify the change in that environment before closing.
+- The user can always edit `.lightspeed.json` later to adjust stages.
 
 ## Step 4: Write the initial config
 
-Write `.lightspeed.json` at the repo root with coordinates + preferences (the `labels` map gets
-finalized in Step 8; start it from the defaults):
+Write `.lightspeed.json` at the repo root with coordinates + the chosen stage pipeline (the
+`labels` map gets finalized in Step 8; start it from the defaults). Example for preset (b):
 
 ```json
 {
-  "code": { "backend": "forgejo", "owner": "…", "repo": "…",
-            "api": "https://…/api/v1", "trunkBranch": "develop" },
-  "mergeStrategy": "direct",
-  "gate": "pre-merge",
-  "labels": { "status": { "in-progress": "status/in progress", "to-test": "status/to test",
-                          "blocked": "status/blocked", "deferred": "status/deferred" },
-              "model": { "opus": "model/opus", "sonnet": "model/sonnet",
-                         "haiku": "model/haiku", "fable": "model/fable" } }
+  "code": { "backend": "forgejo", "owner": "…", "repo": "…", "api": "https://…/api/v1",
+    "stages": [
+      { "name": "develop", "merge": "direct", "gate": "pre-merge" },
+      { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa" },
+      { "name": "main",    "merge": "pr" }
+    ] },
+  "labels": {
+    "status": { "in-progress": "status/in progress", "to-test": "status/to test",
+                "blocked": "status/blocked", "deferred": "status/deferred",
+                "review": "status/review", "qa": "status/qa" },
+    "model": { "opus": "model/opus", "sonnet": "model/sonnet",
+               "haiku": "model/haiku", "fable": "model/fable" }
+  }
 }
 ```
 
-If a config already exists, show the diff and confirm before overwriting — don't clobber
-hand-edits. From here the dispatcher works.
+Use the `stages` array from the chosen preset (a), (b), or the user's custom pipeline. All six
+status roles (`in-progress`, `to-test`, `blocked`, `deferred`, `review`, `qa`) are seeded so the
+reconcile step in Steps 6–8 ensures the corresponding labels exist. If a config already exists,
+show the diff and confirm before overwriting — don't clobber hand-edits. From here the dispatcher
+works.
 
 ## Step 5: Load defaults and existing labels
 
