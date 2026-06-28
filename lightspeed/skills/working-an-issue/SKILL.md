@@ -34,9 +34,9 @@ merge config fields or hand-merge here. Config + verbs:
   when it "obviously works", not to "save a round-trip." The user tests and says merge. Until
   then, the branch stays unmerged. This is the rule the whole skill exists to protect.
 - **One branch, one worktree, per issue.** All work for an issue lives on its own branch in its
-  own worktree under `.worktrees/` — never commit an issue's work straight onto the trunk branch.
-- **Each issue gets its own worktree under `.worktrees/` (already gitignored)** — that's what
-  enables working several issues in parallel. Never reuse one worktree for two issues.
+  own worktree under `.worktrees/` (already gitignored) — never commit an issue's work straight
+  onto the trunk branch. Each issue's own worktree is what enables working several issues in
+  parallel; never reuse one worktree for two issues.
 - **Keep the board honest.** Every lifecycle transition updates the status label, so the issue's
   state always matches reality. `issues set-status` is atomic — it adds the new status and
   removes the others in one call, so the board can never show two states. Don't do the work and
@@ -53,8 +53,9 @@ merge config fields or hand-merge here. Config + verbs:
 
 ```
 # stages[0] is the first integration branch; fork the feature worktree from it.
+# Run this from the repo root.
 BASE="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config '.code.stages[0].name')"
-git worktree add ".worktrees/<N>-<slug>" -b "feature/<N>-<slug>" "$BASE"
+git worktree add -b "feature/<N>-<slug>" ".worktrees/<N>-<slug>" "$BASE"
 # Do the work inside .worktrees/<N>-<slug>.
 "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues set-status --number N --status in-progress
 ```
@@ -81,8 +82,9 @@ it's ready to test, on which branch:
 
 Only after explicit approval:
 
-1. **Promote the branch** `feature/<N>-<slug>` → `stages[0]` using `promoting-a-branch` (it
-   applies the hop's merge strategy and gate). Do not hand-merge here.
+1. **Promote the branch** `feature/<N>-<slug>` → `stages[0]` using `promoting-a-branch` (invoke
+   the `promoting-a-branch` skill in this session — it applies the hop's merge strategy and
+   gate). Do not hand-merge here.
 2. **Clear the status labels** from the issue:
    ```
    "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues clear-status --number N
@@ -107,7 +109,8 @@ Only after explicit approval:
    ```
    "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues close --number N
    ```
-6. **Remove the issue's worktree** once merged:
+6. **Remove the issue's worktree** once merged (run from the repo root, not from inside the
+   worktree):
    ```
    git worktree remove ".worktrees/<N>-<slug>"
    ```
@@ -121,6 +124,8 @@ Only after explicit approval:
 - Closing the issue but forgetting the finishing comment (summary / cost / model) — that record
   is the auditable point of the whole workflow.
 - **Orphaned worktrees** — if a promotion is abandoned, remove the worktree
-  (`git worktree remove --force .worktrees/<N>-<slug>`) rather than leaving it dangling.
+  (`git worktree remove --force ".worktrees/<N>-<slug>"`) rather than leaving it dangling. If you
+  abandon the work earlier (before promotion), also clear the issue's status label
+  (`issues clear-status --number N`) after removing the worktree so the board doesn't lie.
 - Hand-merging instead of delegating to `promoting-a-branch` — the merge strategy and any gate
   checks live there, not here.
