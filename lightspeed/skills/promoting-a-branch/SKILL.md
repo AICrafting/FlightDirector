@@ -65,11 +65,37 @@ issue has no plan or escape hatch, STOP — do not open the PR.**
 
 ## Step 4: Promote
 
-**`direct` hop:** local git merge into the target stage, then push.
+**`direct` hop:** merge `<branch>` into `<target>` in the checkout that already holds
+`<target>` — never `git switch` to the target from inside the feature worktree, because it
+is checked out elsewhere and git will refuse.
+
+Find where `<target>` lives with `git worktree list`, then pick a case:
 
 ```
-git switch <target> && git merge --no-ff <branch> && git push && git switch -
+# Find the root of the shared git object store (common dir one level up from .git).
+MAIN="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
 ```
+
+**Case 1 — `<target>` is checked out in a worktree (the usual case for `feature → stages[0]`,
+where the main checkout sits on `develop`):**
+
+```
+# Merge and push without touching your current (feature) worktree.
+git -C "$MAIN" merge --no-ff "$BRANCH" && git -C "$MAIN" push
+```
+
+**Case 2 — `<target>` is NOT checked out in any worktree** (e.g. promoting to a `main` stage
+that no worktree holds): use a throwaway worktree, then remove it.
+
+```
+git worktree add "$SCRATCH/promote-<target>" "<target>"
+git -C "$SCRATCH/promote-<target>" merge --no-ff "$BRANCH" && \
+    git -C "$SCRATCH/promote-<target>" push
+git worktree remove "$SCRATCH/promote-<target>"
+```
+
+> **Red flag:** Never run `git switch <target>` from inside the feature worktree — git will
+> abort with "fatal: '<target>' is already checked out at …".
 
 **`pr` hop:** open a PR into the target stage and watch CI. Assemble the body in a scratchpad
 file (Summary + the `## Test plans` block + `Ready #N` lines), then:
