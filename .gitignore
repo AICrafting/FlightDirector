@@ -29,3 +29,6 @@ prompt_log.jsonl
 
 # External references
 external/
+
+# lightspeed test rig workdir (holds a token)
+test-rig/.work/

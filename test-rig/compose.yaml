@@ -1,0 +1,21 @@
+# Disposable Forgejo for exercising the lightspeed adapters against a live API.
+# Not part of the plugin — dev tooling only. Bring up with ./up.sh, tear down with ./down.sh.
+services:
+  forgejo:
+    image: ${FORGEJO_IMAGE:-code.forgejo.org/forgejo/forgejo:11}
+    container_name: lightspeed-rig-forgejo
+    environment:
+      FORGEJO__database__DB_TYPE: sqlite3
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__server__DOMAIN: localhost
+      FORGEJO__server__HTTP_PORT: "3000"
+      FORGEJO__server__ROOT_URL: http://localhost:${RIG_PORT:-3000}/
+      FORGEJO__actions__ENABLED: "false"
+      FORGEJO__log__LEVEL: warn
+    ports:
+      - "${RIG_PORT:-3000}:3000"
+    volumes:
+      - lightspeed-rig-data:/data
+
+volumes:
+  lightspeed-rig-data:
