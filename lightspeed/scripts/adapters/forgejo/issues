@@ -83,15 +83,20 @@ case "$verb" in
     [ -n "$number" ] || die "issues set-status: --number required"
     [ -n "$role" ]   || die "issues set-status: --status required"
 
+    # The labels map (exported by the dispatcher). Default to {} without the
+    # ${VAR:-{}} idiom — the first '}' there closes the expansion and appends a
+    # stray '}', producing invalid JSON.
+    labels_json="${LS_LABELS_JSON:-}"; [ -n "$labels_json" ] || labels_json='{}'
+
     # role → configured label name; the full status set is what we manage.
-    target_name="$(printf '%s' "${LS_LABELS_JSON:-{}}" | jq -r --arg r "$role" '.status[$r] // empty')"
+    target_name="$(printf '%s' "$labels_json" | jq -r --arg r "$role" '.status[$r] // empty')"
     [ -n "$target_name" ] || die "set-status: role '$role' not found in labels.status config"
     target_id="$(label_id "$target_name")"
     [ -n "$target_id" ] || die "set-status: label '$target_name' does not exist on the repo"
 
     status_names=()
     while IFS= read -r n; do [ -n "$n" ] && status_names+=("$n"); done \
-      < <(printf '%s' "${LS_LABELS_JSON:-{}}" | jq -r '.status // {} | .[]')
+      < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[]')
 
     # Remove every *other* managed status label currently on the issue, then add target.
     current_ids="$(_api GET "/issues/${number}" | jq -c '[.labels[].id]')"
