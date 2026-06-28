@@ -1,3 +1,4 @@
+---
 # Disposable Forgejo for exercising the lightspeed adapters against a live API.
 # Not part of the plugin — dev tooling only. Bring up with ./up.sh, tear down with ./down.sh.
 services:
