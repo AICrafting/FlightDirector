@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+#
+# Forgejo CI adapter — verbs: watch log.  The two operations MCP can't do.
+# See ../../../references/adapter-contract.md.
+set -euo pipefail
+ADAPTER_NAME="forgejo/ci"
+# shellcheck source-path=SCRIPTDIR source=_common.sh
+source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+
+verb="${1:-}"; shift || true
+
+case "$verb" in
+  # Stream one line per CI state change for a commit, exit on a terminal state.
+  # Background-friendly for the Monitor tool. Resilient: a transient API/jq blip
+  # is swallowed and the poll continues, rather than killing the watcher.
+  watch)
+    sha=""; status_file=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --sha)         sha="$2"; shift 2 ;;
+      --status-file) status_file="$2"; shift 2 ;;
+      *) die "ci watch: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$sha" ] || die "ci watch: --sha required"
+
+    _write() {
+      [ -n "$status_file" ] || return 0
+      mkdir -p "$(dirname "$status_file")"
+      printf '{"sha":"%s","status":"%s"}\n' "$sha" "$1" >"$status_file"
+    }
+
+    last_id=""; last_state=""
+    while true; do
+      body="$(curl -sS -H "Authorization: token ${LS_TOKEN}" \
+        "${REPO_API}/actions/tasks?limit=20" 2>/dev/null || true)"
+      line="$(printf '%s' "$body" | jq -r --arg sha "$sha" \
+        '[.workflow_runs[]? | select((.head_sha // "")|startswith($sha))][0]
+         | select(. != null) | "\(.id) \(.status)"' 2>/dev/null || true)"
+      if [ -n "$line" ]; then
+        id="${line%% *}"; state="${line##* }"
+        if [ "$id" != "$last_id" ] || [ "$state" != "$last_state" ]; then
+          echo "task-${id} status=${state}"
+          last_id="$id"; last_state="$state"; _write "$state"
+        fi
+        case "$state" in success|failure|cancelled) exit 0 ;; esac
+      fi
+      sleep 30
+    done
+    ;;
+
+  # Best-effort: Forgejo's REST API does not serve raw job logs (that needs host
+  # access — see ADR 0001 consequences). We surface the run's status + URL from
+  # the API, and point at the web UI for the full log.
+  log)
+    sha=""; branch=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --sha)    sha="$2"; shift 2 ;;
+      --failed) branch="$2"; shift 2 ;;
+      *) die "ci log: unknown arg '$1'" ;;
+    esac; done
+    if [ -z "$sha" ] && [ -n "$branch" ]; then
+      sha="$(git rev-parse "$branch" 2>/dev/null || true)"
+    fi
+    [ -n "$sha" ] || die "ci log: --sha SHA or --failed BRANCH required"
+
+    run="$(_api GET "/actions/tasks?limit=50" \
+      | jq -c --arg sha "$sha" '[.workflow_runs[]? | select((.head_sha // "")|startswith($sha))][0] // empty')"
+    [ -n "$run" ] || die "ci log: no CI run found for ${sha}"
+    printf '%s' "$run" | jq -r \
+      '"run \(.id): status=\(.status) conclusion=\(.conclusion // "?")  \(.html_url // .url // "")"'
+    echo "ci log: Forgejo's API does not serve raw job logs — open the run URL above for the full log, or wire host-access log fetch (see ADR 0001)." >&2
+    ;;
+
+  *) die "unknown verb '${verb}' (ci: watch log)" ;;
+esac

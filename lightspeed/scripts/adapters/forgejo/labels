@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+#
+# Forgejo labels adapter — verbs: resolve.
+# See ../../../references/adapter-contract.md.
+set -euo pipefail
+ADAPTER_NAME="forgejo/labels"
+# shellcheck source-path=SCRIPTDIR source=_common.sh
+source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+
+verb="${1:-}"; shift || true
+
+case "$verb" in
+  resolve)
+    names=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --name) names+=("$2"); shift 2 ;;
+      *) die "labels resolve: unknown arg '$1'" ;;
+    esac; done
+    [ ${#names[@]} -gt 0 ] || die "labels resolve: at least one --name required"
+    for n in "${names[@]}"; do
+      printf '%s\t%s\n' "$n" "$(label_id "$n")"
+    done
+    ;;
+
+  *) die "unknown verb '${verb}' (labels: resolve)" ;;
+esac
