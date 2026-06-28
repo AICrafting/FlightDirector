@@ -65,16 +65,20 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 |-------------|----------------------------------------|--------|
 | `list`      | `--state open\|closed\|all` `--limit N` `--label NAME` (repeatable) | one row per issue: `number⇥title⇥comma,labels` |
 | `get`       | `--number N`                           | `number⇥title` then a blank line then the raw body (the one verb that emits a body) |
-| `create`    | `--title T` `--body B` (or `--body-file PATH`) | the new issue `number` |
+| `create`    | `--title T` `--body B` (or `--body-file PATH`) `--label NAME` (repeatable) | the new issue `number`; labels resolved name→id, applied at creation |
+| `update`    | `--number N` `--title T` and/or `--body B` (or `--body-file PATH`) | (nothing) — patches only the fields passed |
 | `comment`   | `--number N` `--body B` (or `--body-file PATH`) | (nothing; exit 0) |
+| `attach`    | `--number N` `--file PATH` `[--name NAME]` | the uploaded asset's `url` (multipart upload; embed it in the body) |
 | `set-status`| `--number N` `--status ROLE`           | (nothing) — resolves ROLE→label name→id internally, removes other status/* first |
 | `close`     | `--number N`                           | (nothing) |
 
 ### `labels`
 
-| Verb      | Args                          | stdout |
-|-----------|-------------------------------|--------|
-| `resolve` | `--name NAME` (repeatable)    | one row per input: `name⇥id` (empty id = not found) |
+| Verb      | Args                                     | stdout |
+|-----------|------------------------------------------|--------|
+| `list`    | (none)                                   | one row per label: `name⇥color⇥description` |
+| `resolve` | `--name NAME` (repeatable)               | one row per input: `name⇥id` (empty id = not found) |
+| `create`  | `--name NAME` `--color #RRGGBB` `[--description D]` | the new label's `id` |
 
 ### `pr` (pull request — "MR" on GitLab)
 

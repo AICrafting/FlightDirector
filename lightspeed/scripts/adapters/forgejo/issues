@@ -38,11 +38,12 @@ case "$verb" in
     ;;
 
   create)
-    title=""; body=""; body_file=""
+    title=""; body=""; body_file=""; labels=()
     while [ $# -gt 0 ]; do case "$1" in
       --title)     title="$2"; shift 2 ;;
       --body)      body="$2"; shift 2 ;;
       --body-file) body_file="$2"; shift 2 ;;
+      --label)     labels+=("$2"); shift 2 ;;
       *) die "issues create: unknown arg '$1'" ;;
     esac; done
     [ -n "$title" ] || die "issues create: --title required"
@@ -52,7 +53,64 @@ case "$verb" in
     else
       payload="$(jq -n --arg t "$title" --arg b "$body" '{title:$t, body:$b}')"
     fi
+    if [ ${#labels[@]} -gt 0 ]; then
+      ids=()
+      for n in "${labels[@]}"; do
+        id="$(label_id "$n")"
+        [ -n "$id" ] || die "issues create: label '$n' not found — create it first (labels create / bootstrapping-labels)"
+        ids+=("$id")
+      done
+      ids_json="$(printf '%s\n' "${ids[@]}" | jq -s 'map(tonumber)')"
+      payload="$(printf '%s' "$payload" | jq --argjson l "$ids_json" '. + {labels:$l}')"
+    fi
     _api POST "/issues" "$payload" | jq -r '.number'
+    ;;
+
+  update)
+    number=""; title=""; body=""; body_file=""; have_title=0; have_body=0
+    while [ $# -gt 0 ]; do case "$1" in
+      --number)    number="$2"; shift 2 ;;
+      --title)     title="$2"; have_title=1; shift 2 ;;
+      --body)      body="$2"; have_body=1; shift 2 ;;
+      --body-file) body_file="$2"; have_body=1; shift 2 ;;
+      *) die "issues update: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues update: --number required"
+    patch='{}'
+    [ "$have_title" = 1 ] && patch="$(printf '%s' "$patch" | jq --arg t "$title" '. + {title:$t}')"
+    if [ "$have_body" = 1 ]; then
+      if [ -n "$body_file" ]; then
+        [ -f "$body_file" ] || die "issues update: --body-file '$body_file' not found"
+        patch="$(printf '%s' "$patch" | jq --rawfile b "$body_file" '. + {body:$b}')"
+      else
+        patch="$(printf '%s' "$patch" | jq --arg b "$body" '. + {body:$b}')"
+      fi
+    fi
+    [ "$patch" = '{}' ] && die "issues update: nothing to change (pass --title and/or --body)"
+    _api PATCH "/issues/${number}" "$patch" >/dev/null
+    ;;
+
+  attach)
+    number=""; file=""; name=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --file)   file="$2"; shift 2 ;;
+      --name)   name="$2"; shift 2 ;;
+      *) die "issues attach: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues attach: --number required"
+    [ -f "$file" ]   || die "issues attach: --file '$file' not found"
+    [ -n "$name" ]   || name="$(basename "$file")"
+    tmp="$(mktemp)"
+    code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
+      -H "Authorization: token ${LS_TOKEN}" \
+      -F "attachment=@${file};filename=${name}" \
+      "${REPO_API}/issues/${number}/assets")" || { rm -f "$tmp"; die "attach: curl failed"; }
+    if [ "$code" -ge 400 ]; then
+      msg="$(jq -r '.message // empty' "$tmp" 2>/dev/null || true)"; rm -f "$tmp"
+      die "attach → HTTP $code${msg:+: $msg}"
+    fi
+    jq -r '.browser_download_url' "$tmp"; rm -f "$tmp"
     ;;
 
   comment)
@@ -120,5 +178,5 @@ case "$verb" in
     _api PATCH "/issues/${number}" "$(jq -n '{state:"closed"}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get create comment set-status close)" ;;
+  *) die "unknown verb '${verb}' (issues: list get create update comment attach set-status close)" ;;
 esac

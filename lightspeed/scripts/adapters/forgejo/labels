@@ -10,6 +10,10 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 verb="${1:-}"; shift || true
 
 case "$verb" in
+  list)
+    _api GET "/labels?limit=100" | jq -r '.[] | [.name, .color, (.description // "")] | @tsv'
+    ;;
+
   resolve)
     names=()
     while [ $# -gt 0 ]; do case "$1" in
@@ -22,5 +26,20 @@ case "$verb" in
     done
     ;;
 
-  *) die "unknown verb '${verb}' (labels: resolve)" ;;
+  create)
+    name=""; color=""; desc=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --name)        name="$2"; shift 2 ;;
+      --color)       color="$2"; shift 2 ;;
+      --description) desc="$2"; shift 2 ;;
+      *) die "labels create: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$name" ]  || die "labels create: --name required"
+    [ -n "$color" ] || die "labels create: --color required (e.g. #0088ff)"
+    payload="$(jq -n --arg n "$name" --arg c "$color" --arg d "$desc" \
+      '{name:$n, color:$c} + (if $d == "" then {} else {description:$d} end)')"
+    _api POST "/labels" "$payload" | jq -r '.id'
+    ;;
+
+  *) die "unknown verb '${verb}' (labels: list resolve create)" ;;
 esac
