@@ -69,15 +69,20 @@ issue has no plan or escape hatch, STOP — do not open the PR.**
 `<target>` — never `git switch` to the target from inside the feature worktree, because it
 is checked out elsewhere and git will refuse.
 
-Find where `<target>` lives with `git worktree list`, then pick a case:
+Decide which case applies, then merge. (`$SCRATCH` is the session scratchpad directory —
+write throwaway files there.)
 
 ```
 # Find the root of the shared git object store (common dir one level up from .git).
 MAIN="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+
+# Run git worktree list --porcelain and look for a line `branch refs/heads/<target>`.
+# Present → <target> is checked out (Case 1); absent → not checked out anywhere (Case 2).
+git worktree list --porcelain | grep -q "branch refs/heads/<target>"
 ```
 
-**Case 1 — `<target>` is checked out in a worktree (the usual case for `feature → stages[0]`,
-where the main checkout sits on `develop`):**
+**Case 1 — `<target>` is checked out in a worktree** (the usual case for `feature → stages[0]`,
+where the main checkout sits on `develop`): merge in that worktree's path (usually `$MAIN`).
 
 ```
 # Merge and push without touching your current (feature) worktree.
@@ -85,13 +90,14 @@ git -C "$MAIN" merge --no-ff "$BRANCH" && git -C "$MAIN" push
 ```
 
 **Case 2 — `<target>` is NOT checked out in any worktree** (e.g. promoting to a `main` stage
-that no worktree holds): use a throwaway worktree, then remove it.
+that no worktree holds): use a throwaway worktree, then remove it. The `-$$` (PID) suffix keeps
+the path unique so a crashed prior run can't collide.
 
 ```
-git worktree add "$SCRATCH/promote-<target>" "<target>"
-git -C "$SCRATCH/promote-<target>" merge --no-ff "$BRANCH" && \
-    git -C "$SCRATCH/promote-<target>" push
-git worktree remove "$SCRATCH/promote-<target>"
+git worktree add "$SCRATCH/promote-<target>-$$" "<target>"
+git -C "$SCRATCH/promote-<target>-$$" merge --no-ff "$BRANCH" && \
+    git -C "$SCRATCH/promote-<target>-$$" push
+git worktree remove "$SCRATCH/promote-<target>-$$"
 ```
 
 > **Red flag:** Never run `git switch <target>` from inside the feature worktree — git will
