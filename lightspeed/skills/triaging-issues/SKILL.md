@@ -40,13 +40,16 @@ dispatcher errors clearly; that's the cue to run `bootstrapping-labels` first.
 
 ## Step 2: Apply the workable filter
 
-**Exclude** any issue whose label column carries a status label meaning it isn't pickable
-right now — the in-progress, awaiting-test, blocked, and deferred roles. Use **this repo's**
-names from `.lightspeed.json` `labels.status` if present (e.g. awaiting-test may be
-`status/testing`); otherwise the defaults:
+**Exclude** any issue whose label column carries a status label — carrying *any* of the
+configured `labels.status` roles means the issue is already somewhere in the workflow (in
+flight, awaiting test, in review, in QA, blocked, or deferred), so it isn't a fresh pick. Use
+**this repo's** names from `.lightspeed.json` `labels.status` if present (e.g. awaiting-test
+may be `status/testing`); otherwise the defaults:
 
 - `status/in progress` — already in flight
 - `status/to test` — built, awaiting verification
+- `status/review` — in an open PR, under review
+- `status/qa` — merged, awaiting real-world verification
 - `status/blocked` — can't be started
 - `status/deferred` — intentionally not now
 
