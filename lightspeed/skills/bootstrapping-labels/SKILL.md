@@ -105,7 +105,8 @@ Write `.lightspeed.json` at the repo root with coordinates + the chosen stage pi
       { "name": "develop", "merge": "direct", "gate": "pre-merge" },
       { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa" },
       { "name": "main",    "merge": "pr" }
-    ] },
+    ],
+    "queueBatches": { "defaultModel": "sonnet" } },
   "labels": {
     "status": { "in-progress": "status/in progress", "to-test": "status/to test",
                 "blocked": "status/blocked", "deferred": "status/deferred",
@@ -115,6 +116,13 @@ Write `.lightspeed.json` at the repo root with coordinates + the chosen stage pi
   }
 }
 ```
+
+`code.queueBatches.defaultModel` sets the default model the `queue-batches` skill gives its
+worker agents (overridable per run). `sonnet` is a sensible default for mechanical implementation
+work; change it here to retarget all future parallel runs (e.g. to a newer model) without editing
+the skill. You can also add an optional `code.zones` array later — see
+[lightspeed-setup.md](../../references/lightspeed-setup.md) — to make `queue-batches` schedule
+deterministically instead of inferring zones.
 
 Use the `stages` array from the chosen preset (a), (b), or the user's custom pipeline. All six
 status roles (`in-progress`, `to-test`, `blocked`, `deferred`, `review`, `qa`) are seeded so the
