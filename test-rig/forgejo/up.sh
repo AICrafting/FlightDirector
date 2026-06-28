@@ -54,7 +54,7 @@ curl -fsS -u "$USER:$PASS" -X POST -H 'Content-Type: application/json' \
   "$API/user/repos" >/dev/null 2>&1 && say "  created" || say "  already exists (ok)"
 
 say "Seeding status labels…"
-for spec in "status/in progress:#fbca04" "status/to test:#0e8a16" "status/blocked:#b60205" "bug:#d73a4a"; do
+for spec in "status/in progress:#fbca04" "status/to test:#0e8a16" "status/blocked:#b60205" "status/review:#5319e7" "status/qa:#006b75" "bug:#d73a4a"; do
   name="${spec%%:*}"; color="${spec##*:}"
   curl -fsS -H "Authorization: token $TOKEN" -X POST -H 'Content-Type: application/json' \
     -d "$(jq -n --arg n "$name" --arg c "$color" '{name:$n,color:$c}')" \
@@ -67,7 +67,7 @@ jq -n --arg api "$API" --arg owner "$USER" --arg repo "$REPO" '{
   code: { backend:"forgejo", owner:$owner, repo:$repo, api:$api,
           stages:[ { name:"main", merge:"pr" } ] },
   labels: { status: {
-    "in-progress":"status/in progress", "to-test":"status/to test", "blocked":"status/blocked"
+    "in-progress":"status/in progress", "to-test":"status/to test", "blocked":"status/blocked", "review":"status/review", "qa":"status/qa"
   } }
 }' > "$WORK/.lightspeed.json"
 jq -n --arg t "$TOKEN" '{ code: { token:$t } }' > "$WORK/.lightspeed.secrets.json"
