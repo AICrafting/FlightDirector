@@ -48,7 +48,7 @@ Full details: [`references/lightspeed-setup.md`](references/lightspeed-setup.md)
 
 `bootstrapping-labels` seeds a consistent taxonomy idempotently — it only adds what's missing and
 **adopts your existing conventions**: if the repo already calls the awaiting-test state
-`status/qa`, it records `status/qa` for that role rather than creating its own `status/to test`,
+`status/testing`, it records `status/testing` for that role rather than creating its own `status/to test`,
 and never renames or deletes existing labels. The taxonomy is **data** in
 [`references/default-labels.md`](references/default-labels.md) (flat `bug`/`feature`/`tech-debt`,
 namespaced `model/*`, project-dependent `area/*` confirmed against the repo).

@@ -139,7 +139,7 @@ For each default label (and each role-based label — status, model), classify i
 | Outcome | Condition | What to record for the role |
 |---|---|---|
 | **EXISTS** | The repo already has that exact label name | Use that name |
-| **ADOPT** | The repo has one of its listed equivalents (or an obvious synonym) — don't duplicate | **Adopt the repo's existing name** for the role (e.g. role `awaiting-test` → `status/qa` because the repo has it) |
+| **ADOPT** | The repo has one of its listed equivalents (or an obvious synonym) — don't duplicate | **Adopt the repo's existing name** for the role (e.g. role `awaiting-test` → `status/testing` because the repo has it) |
 | **MISSING** | Neither the name nor an equivalent is present — candidate to create | Use the default name (once created) |
 
 Apply judgment beyond the table's synonyms — a repo's `Bug` (case) or `🐛 bug` clearly covers
@@ -162,7 +162,7 @@ Show one grouped plan and ask once:
 Label plan for <owner>/<repo>:
 
   CREATE  model/opus, model/sonnet, feature, tech-debt, security, ux, bug
-  ADOPT   awaiting-test ← 'status/qa'   (repo already has it; using yours)
+  ADOPT   awaiting-test ← 'status/testing'   (repo already has it; using yours)
   EXISTS  status/blocked
   AREAS   area/app, area/server, area/db   (proposed from repo layout — confirm)
 
