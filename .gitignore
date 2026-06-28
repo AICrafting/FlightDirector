@@ -31,4 +31,4 @@ prompt_log.jsonl
 external/
 
 # lightspeed test rig workdir (holds a token)
-test-rig/.work/
+test-rig/*/.work/

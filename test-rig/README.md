@@ -1,25 +1,25 @@
-# lightspeed test rig
+# Test rigs
 
-A disposable Forgejo instance for exercising the adapters against a real API. **Dev tooling —
-not part of the plugin.** Requires `docker` (+ compose) and `jq`.
+One rig per backend, each under its own folder, because the rigs are **not** uniform:
 
-```bash
-./up.sh        # start Forgejo, provision admin/token/repo/labels, write workdir config
-./smoke.sh     # run the adapter verbs against the live instance, with assertions
-./down.sh      # stop and remove the container, its volume, and the workdir
+- **Self-hostable** backends (`forgejo/`, and later `gitlab/`) run a disposable container —
+  `compose.yaml` + `up.sh`/`down.sh`.
+- **SaaS** backends (later `github/`, `jira/`, `asana/`) can't be containerized; their rigs
+  provision an ephemeral repo/token against a real test account via API, then tear it down —
+  no `compose.yaml`.
+
+What every rig has in common is the *output*: `up.sh` leaves a `.work/` directory — a throwaway
+git repo holding `.lightspeed.json` + `.lightspeed.secrets.json` pointed at the rig — which the
+adapters then run against. `.work/` is gitignored for every backend.
+
+```
+test-rig/
+  forgejo/    compose.yaml  up.sh  down.sh  smoke.sh  README.md   ← current
+  github/     up.sh  down.sh  smoke.sh  README.md                 (future, no compose)
+  …
 ```
 
-- **Port:** `3000` by default; override with `RIG_PORT=3100 ./up.sh`.
-- **Image:** `code.forgejo.org/forgejo/forgejo:11`; override with `FORGEJO_IMAGE=…`.
-- **Workdir:** `.work/` — a throwaway git repo holding `.lightspeed.json` +
-  `.lightspeed.secrets.json` pointed at the rig. Gitignored. Drive the adapters by hand from
-  there:
-
-  ```bash
-  ( cd test-rig/.work && ../../lightspeed/scripts/lightspeed issues list )
-  ```
-
-## Not covered
-
-`ci watch` / `ci log` need a registered Actions runner + a workflow to produce runs; the rig
-keeps Actions disabled. Exercise those separately when wiring CI.
+The adapter contract is backend-agnostic, so the `smoke.sh` assertions are largely the same
+across rigs — only provisioning differs. If/when a second rig lands, the shared assertions are
+a candidate to extract up to this level, driven by each backend's `up`/`down`. Not extracted
+yet (one rig — nothing to share against).

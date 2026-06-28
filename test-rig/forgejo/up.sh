@@ -81,6 +81,6 @@ $(printf '\033[32m✓ Rig ready.\033[0m')
 
 Run the smoke tests:   ./smoke.sh
 Drive the adapters by hand, e.g.:
-  ( cd "$WORK" && "$RIG_DIR/../lightspeed/scripts/lightspeed" issues list )
+  ( cd "$WORK" && "$RIG_DIR/../../lightspeed/scripts/lightspeed" issues list )
 Tear it all down:      ./down.sh
 EOF

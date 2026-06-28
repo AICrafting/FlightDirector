@@ -7,7 +7,7 @@ set -uo pipefail
 
 RIG_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$RIG_DIR/.work"
-DISP="$RIG_DIR/../lightspeed/scripts/lightspeed"
+DISP="$RIG_DIR/../../lightspeed/scripts/lightspeed"
 [ -f "$WORK/.lightspeed.json" ] || { echo "no workdir config — run ./up.sh first" >&2; exit 1; }
 
 API="$(jq -r '.code.api' "$WORK/.lightspeed.json")"
