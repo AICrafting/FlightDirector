@@ -25,14 +25,15 @@ Backend, coordinates, and preferences, across two independent axes:
 ```jsonc
 {
   "code": {
-    "backend": "forgejo",
-    "owner": "acme", "repo": "widget",
+    "backend": "forgejo", "owner": "acme", "repo": "widget",
     "api": "https://git.example.com/api/v1",
-    "trunkBranch": "develop"
+    "stages": [
+      { "name": "develop", "merge": "direct", "gate": "pre-merge" },
+      { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa" },
+      { "name": "main",    "merge": "pr" }
+    ]
   },
   "issues": { "backend": "forgejo", "owner": "acme", "repo": "planning" }, // omit to inherit code
-  "gate": "pre-merge",          // pre-merge | post-merge-qa  — where verification sits
-  "mergeStrategy": "direct",    // direct | pr                — how an issue's branch lands
   "labels": {
     "status": {
       "in-progress": "status/in progress",
@@ -51,8 +52,13 @@ Backend, coordinates, and preferences, across two independent axes:
 - **`labels`** — maps each **role** to the **actual label name this repo uses**. Skills and
   adapters speak roles and names; turning a name into its numeric id happens *inside* the
   adapter, so nothing above the adapter ever deals in label ids.
-- **`gate` / `mergeStrategy`** — consumed by `working-an-issue`. Defaults: `pre-merge`,
-  `direct`.
+- **`stages`** — ordered promotion pipeline. `stages[0]` is the first integration branch;
+  feature branches fork from it. Each hop carries its own `merge` (`direct`|`pr`) and optional
+  `gate` (`pre-merge`|`post-merge-qa`, default `pre-merge`). Consumed by `working-an-issue`
+  (uses `stages[0]`) and `promoting-a-branch` (one hop at a time).
+- Note: `trunkBranch`, `mergeStrategy`, and `gate` (single-value top-level fields) are
+  superseded by `stages`. `trunkBranch` is still read as a fallback for `stages[0]` for
+  backwards compatibility.
 
 ### `.lightspeed.secrets.json` — gitignored
 

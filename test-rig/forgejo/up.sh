@@ -64,7 +64,8 @@ done
 say "Writing config into workdir ($WORK)…"
 rm -rf "$WORK"; mkdir -p "$WORK"; git -C "$WORK" init -q
 jq -n --arg api "$API" --arg owner "$USER" --arg repo "$REPO" '{
-  code: { backend:"forgejo", owner:$owner, repo:$repo, api:$api, trunkBranch:"main" },
+  code: { backend:"forgejo", owner:$owner, repo:$repo, api:$api,
+          stages:[ { name:"main", merge:"pr" } ] },
   labels: { status: {
     "in-progress":"status/in progress", "to-test":"status/to test", "blocked":"status/blocked"
   } }

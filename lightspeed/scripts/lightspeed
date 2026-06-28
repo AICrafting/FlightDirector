@@ -63,7 +63,7 @@ backend="$(cfg_get backend)"
 LS_API="$(cfg_get api)"
 LS_OWNER="$(cfg_get owner)"
 LS_REPO="$(cfg_get repo)"
-LS_TRUNK="$(jq -r '.code.trunkBranch // empty' "$cfg")"
+LS_TRUNK="$(jq -r '(.code.trunkBranch) // (.code.stages[0].name) // empty' "$cfg")"
 LS_LABELS_JSON="$(jq -c '.labels // {}' "$cfg")"
 
 # Token: env override first, then secrets file (axis, inheriting code → issues).
