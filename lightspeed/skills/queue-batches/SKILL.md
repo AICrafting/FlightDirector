@@ -128,9 +128,11 @@ Per zone:
 
 On every `Monitor` notification: parse the log line, re-render the board, and `TaskUpdate` the
 matching issue task (`queued` → leave the task `pending`, render `○`; `starting`/`working` →
-in_progress; `complete` → completed; `blocked` → keep in_progress + append the note). A zone whose
-final line is `status=safety-valved` did not finish its queue — render that zone's header with `✗`
-and surface its unfinished issues as deferred. Match tasks by the `[<zone>] #<N>` subject prefix.
+in_progress; `complete` → completed; `blocked` → keep in_progress + append the note). When a zone's
+final line is `status=done`, render that zone's header with `⇥` (done, awaiting promotion); a final
+`status=safety-valved` means the zone did not finish its queue — render its header with `✗` and
+surface its unfinished issues as deferred. Once every zone has emitted a terminal line (`done` or
+`safety-valved`), proceed to Section 5. Match tasks by the `[<zone>] #<N>` subject prefix.
 
 ## Status log format (contract)
 
@@ -155,7 +157,7 @@ Final per-zone line: `<ts> <zone> ticket=all status=<done|safety-valved> note="�
   ○ #64 #65 queued
 ```
 
-Legend: `✓` complete · `◐` working · `?` blocked · `○` queued · `✗` zone safety-valved · `⇥` done, awaiting promotion. One line per issue.
+Legend: `✓` complete · `◐` working (also shown for `starting`) · `?` blocked · `○` queued · `✗` zone safety-valved · `⇥` done, awaiting promotion. One line per issue.
 
 ## Question routing protocol
 
