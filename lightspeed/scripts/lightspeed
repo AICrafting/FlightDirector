@@ -15,7 +15,7 @@ ADAPTERS_DIR="$SELF_DIR/adapters"
 
 die() { echo "lightspeed: $*" >&2; exit 1; }
 
-[ $# -ge 2 ] || die "usage: lightspeed <group> <verb> [args…]  (groups: issues labels pr ci)"
+[ $# -ge 2 ] || die "usage: lightspeed <group> <verb> [args…]  (groups: issues labels pr ci config)"
 group="$1"; verb="$2"; shift 2
 
 # Which config axis backs this group.
@@ -32,7 +32,7 @@ command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
 # same from the main checkout and from a linked worktree (whose gitignored
 # .lightspeed.secrets.json does not exist locally). Falls back to cwd outside a repo.
 if cdir="$(git rev-parse --git-common-dir 2>/dev/null)"; then
-  cdir="$(cd "$cdir" && pwd)"          # absolutize (valid relative to cwd)
+  cdir="$(cd "$cdir" && pwd)" || die "cannot resolve git common dir: $cdir"   # absolutize (valid relative to cwd)
   repo_root="$(dirname "$cdir")"
 else
   repo_root="$(pwd)"
