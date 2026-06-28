@@ -5,6 +5,9 @@ Everything goes through the **lightspeed dispatcher** — `scripts/lightspeed <g
 which calls the backend's REST API with `curl`. Backend-agnostic by design (Forgejo today;
 GitHub/GitLab/etc. behind the same contract later); no MCP server to install.
 
+> **New here?** The **[User Guide](GUIDE.md)** covers why you'd want this, how to install it,
+> first-time setup, and a full worked example (file → triage → work → promote).
+
 | Skill | Triggers on | Does |
 |---|---|---|
 | `filing-issues` | "file an issue", "open a ticket", "track this", "log a bug", `/issue …` | Dedupe-check → write → label → create; or confirm-then-update an existing issue |
