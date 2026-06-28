@@ -77,21 +77,23 @@ file (Summary + the `## Test plans` block + `Ready #N` lines), then:
 ```
 PR="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" pr open --head "$BRANCH" --base <target> \
         --title "…" --body-file "$SCRATCH/pr-body.md")"   # → number⇥url
+PR_NUM="$(printf '%s' "$PR" | cut -f1)"
 ```
 
 Then watch CI in the background and surface state via Monitor:
 
 ```
 "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" ci watch --sha "$(git rev-parse HEAD)" \
-   --status-file /tmp/ls-ci/$BRANCH.json
+   --status-file "$SCRATCH/ls-ci-$BRANCH.json"
 ```
 
 On failure: `ci log --failed "$BRANCH"`, fix, push, re-watch. On success: tell the user
-**"CI passed — ready to merge #<PR>."** Merge only on the user's go-ahead (`pre-merge` gate) or
-per your `post-merge-qa` policy:
+**"CI passed — ready to merge #$PR_NUM."** Merge only on the user's go-ahead (`pre-merge` gate) or
+per your `post-merge-qa` policy (`--strategy` may be `merge|squash|rebase` per the project's
+convention):
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" pr merge --number <PR> --strategy squash
+"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" pr merge --number "$PR_NUM" --strategy squash
 ```
 
 ## Step 5: Nudge linked issues per the gate
@@ -103,8 +105,10 @@ per your `post-merge-qa` policy:
   ```
   "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues set-status --number N --status qa
   ```
+  (requires a `qa` status role configured in `.lightspeed.json` `labels.status` — see
+  `bootstrapping-labels`.)
   When a later promotion carries those issues to the final stage and QA passes, close them
-  (`issues close`).
+  (`issues close --number N`).
 
 ## Common mistakes
 
