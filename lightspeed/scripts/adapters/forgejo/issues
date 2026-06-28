@@ -168,6 +168,43 @@ case "$verb" in
     _api POST "/issues/${number}/labels" "$(jq -n --argjson id "$target_id" '{labels:[$id]}')" >/dev/null
     ;;
 
+  clear-status)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues clear-status: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues clear-status: --number required"
+    labels_json="${LS_LABELS_JSON:-}"; [ -n "$labels_json" ] || labels_json='{}'
+    current_ids="$(_api GET "/issues/${number}" | jq -c '[.labels[].id]')"
+    while IFS= read -r n; do
+      [ -n "$n" ] || continue
+      id="$(label_id "$n")"; [ -n "$id" ] || continue
+      if printf '%s' "$current_ids" | jq -e --argjson id "$id" 'index($id) != null' >/dev/null; then
+        _api DELETE "/issues/${number}/labels/${id}" >/dev/null
+      fi
+    done < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[]')
+    ;;
+
+  label-add)
+    number=""; labels=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --label)  labels+=("$2"); shift 2 ;;
+      *) die "issues label-add: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues label-add: --number required"
+    [ ${#labels[@]} -gt 0 ] || die "issues label-add: at least one --label required"
+    ids=()
+    for n in "${labels[@]}"; do
+      id="$(label_id "$n")"
+      [ -n "$id" ] || die "issues label-add: label '$n' not found"
+      ids+=("$id")
+    done
+    ids_json="$(printf '%s\n' "${ids[@]}" | jq -s 'map(tonumber)')"
+    _api POST "/issues/${number}/labels" "$(jq -n --argjson l "$ids_json" '{labels:$l}')" >/dev/null
+    ;;
+
   close)
     number=""
     while [ $# -gt 0 ]; do case "$1" in
@@ -178,5 +215,5 @@ case "$verb" in
     _api PATCH "/issues/${number}" "$(jq -n '{state:"closed"}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get create update comment attach set-status close)" ;;
+  *) die "unknown verb '${verb}' (issues: list get create update comment attach set-status clear-status label-add close)" ;;
 esac

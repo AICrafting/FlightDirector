@@ -70,6 +70,8 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 | `comment`   | `--number N` `--body B` (or `--body-file PATH`) | (nothing; exit 0) |
 | `attach`    | `--number N` `--file PATH` `[--name NAME]` | the uploaded asset's `url` (multipart upload; embed it in the body) |
 | `set-status`| `--number N` `--status ROLE`           | (nothing) — resolves ROLE→label name→id internally, removes other status/* first |
+| `clear-status`| `--number N`                         | (nothing) — removes every managed `status/*` label from the issue |
+| `label-add` | `--number N` `--label NAME` (repeatable) | (nothing) — adds existing labels by name (errors if a name doesn't exist) |
 | `close`     | `--number N`                           | (nothing) |
 
 ### `labels`
