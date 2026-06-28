@@ -60,6 +60,29 @@ Backend, coordinates, and preferences, across two independent axes:
   superseded by `stages`. For backwards compatibility a legacy `trunkBranch` is still read
   **first** if present; otherwise `stages[0].name` is used.
 
+### queue-batches config (all optional)
+
+Consumed only by the `queue-batches` skill; absent keys fall back safely.
+
+```jsonc
+"code": {
+  // …existing keys (backend, owner, repo, api, stages)…
+  "zones": [ { "name": "auth", "paths": ["src/auth/**"] } ],
+  "queueBatches": { "defaultModel": "sonnet", "agentRulesFile": ".lightspeed-agent-rules.md" }
+}
+```
+
+- `code.zones` — `[{ "name": "...", "paths": ["glob", ...] }]`. Disjoint file zones used to
+  schedule parallel work so concurrently-running issues never touch the same paths. If omitted,
+  `queue-batches` infers pseudo-zones from issue bodies at triage time and warns that the
+  inferred zones are approximate.
+- `code.queueBatches.defaultModel` — worker-agent model when the user gives no per-run override.
+  Seeded by `bootstrapping-labels` during first-run setup; falls back to `sonnet` if unset.
+- `code.queueBatches.agentRulesFile` — path (repo-relative) to a markdown file of repo-specific
+  agent hard-rules / CI gotchas, injected verbatim into each worker prompt. Defaults to
+  `.lightspeed-agent-rules.md`; if that file is absent, workers run with the skill's built-in
+  safety rules only (no project-specific rules).
+
 ### `.lightspeed.secrets.json` — gitignored
 
 Just the token(s), one per axis, with the same `code → issues` inheritance:

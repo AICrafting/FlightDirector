@@ -14,6 +14,7 @@ GitHub/GitLab/etc. behind the same contract later); no MCP server to install.
 | `triaging-issues` | "what should I work on", "what's next", "quick wins", "show open issues" | Lists and filters open issues for selection (read-only) |
 | `working-an-issue` | "let's work on #N", "start issue #N", "this is ready to test", "merge #N" | Per-issue worktree → status-label → test → promote (delegated) → finish lifecycle, with a human gate before merge |
 | `promoting-a-branch` | "promote this", "promote to qa", "open a PR for this branch", "this branch is ready" | Advances the current branch one stage up the pipeline (feature → develop → qa → main), with the hop's merge strategy, gate, test-plan halt, and CI watch |
+| `queue-batches` | `/queue-batches NxM`, "work N issues in parallel", "batch these issues", "dispatch agents" | Dispatch N background agents, each working M issues sequentially through the working-an-issue lifecycle in isolated worktrees (zones), stopping at the to-test gate; serial promoting-a-branch hand-off |
 | `bootstrapping-labels` | "set up labels", "bootstrap labels", "add default labels", or a bare repo during filing | First-run setup: writes config + secrets, then reconciles a default taxonomy against existing labels and creates only what's missing |
 
 ## How it works
