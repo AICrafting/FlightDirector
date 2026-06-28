@@ -66,4 +66,4 @@ the skills use your name, not the plugin's.
 | blocked | `status/blocked` | `#d73a4a` | Can't be started | `blocked` |
 | deferred | `status/deferred` | `#c5def5` | Intentionally not now | `status/later`, `deferred`, `icebox` |
 | review | `status/review` | `#5319e7` | In an open PR awaiting review | `review`, `in-review`, `under-review` |
-| qa | `status/qa` | `#0e8a16` | Merged, awaiting real-world verification | `qa`, `awaiting-qa` |
+| qa | `status/qa` | `#006b75` | Merged, awaiting real-world verification | `qa`, `awaiting-qa` |
