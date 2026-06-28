@@ -2,7 +2,8 @@
 # Not part of the plugin — dev tooling only. Bring up with ./up.sh, tear down with ./down.sh.
 services:
   forgejo:
-    image: ${FORGEJO_IMAGE:-code.forgejo.org/forgejo/forgejo:11}
+    # Pinned to the current major for reproducibility; bump deliberately. Override per-run with FORGEJO_IMAGE.
+    image: ${FORGEJO_IMAGE:-code.forgejo.org/forgejo/forgejo:15}
     container_name: lightspeed-rig-forgejo
     environment:
       FORGEJO__database__DB_TYPE: sqlite3
