@@ -571,3 +571,21 @@ git commit -m "Document promoting-a-branch in the plugin README"
 - Full `ci log` host-access implementation (still the API-summary MVP).
 - A live multi-hop promotion walkthrough (develop→qa→main) once a repo actually defines >1 stage; the rig config uses a single `main` stage.
 ```
+
+---
+
+## Addendum — post-final-review follow-ups (2026-06-28)
+
+The final holistic review found the original plan missed the config *writer* and a worktree/direct-merge seam. Three follow-up tasks:
+
+### Task 8: bootstrapping-labels writes `stages` (preset menu) + qa/review + gitignore .worktrees
+- Step 3 offers a **pipeline preset**: (a) `develop → main`, (b) `develop → qa → main`, (c) advanced/hand-edit. Defaults per hop: `develop` = `direct`/`pre-merge`; `qa` = `pr`/`post-merge-qa`; `main` = `pr`. (Matches the user's "direct to develop, PR to main".)
+- Step 4 writes `code.stages` (not `trunkBranch`/`mergeStrategy`/`gate`), and seeds `qa`/`review` into `labels.status`.
+- Step 2 also adds `.worktrees/` to the repo `.gitignore` (alongside `.lightspeed.secrets.json`).
+- Fix the stale `lightspeed/README.md` line that still says bootstrap captures "merge strategy and trunk branch".
+
+### Task 9: promoting-a-branch direct hop is worktree-aware
+- The `direct` hop must NOT `git switch <target>` from the feature worktree (target is checked out in the main worktree → "already checked out"). Merge in the checkout holding the target: `MAIN="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"; git -C "$MAIN" merge --no-ff <branch> && git -C "$MAIN" push`. If the target isn't checked out anywhere, add a throwaway worktree for it, merge there, push, remove.
+
+### Task 10: rig exercises the post-merge-qa path
+- `test-rig/forgejo/up.sh` seeds `status/qa` + `status/review` labels and adds `qa`/`review` to the written `labels.status`, so `issues set-status --status qa` can be verified end-to-end.
