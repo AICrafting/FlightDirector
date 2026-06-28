@@ -1,6 +1,6 @@
 # lightspeed (Claude Code plugin)
 
-Four skills for running an issue + code workflow on a repo from within a Claude Code session.
+Five skills for running an issue + code workflow on a repo from within a Claude Code session.
 Everything goes through the **lightspeed dispatcher** — `scripts/lightspeed <group> <verb>` —
 which calls the backend's REST API with `curl`. Backend-agnostic by design (Forgejo today;
 GitHub/GitLab/etc. behind the same contract later); no MCP server to install.
@@ -9,7 +9,8 @@ GitHub/GitLab/etc. behind the same contract later); no MCP server to install.
 |---|---|---|
 | `filing-issues` | "file an issue", "open a ticket", "track this", "log a bug", `/issue …` | Dedupe-check → write → label → create; or confirm-then-update an existing issue |
 | `triaging-issues` | "what should I work on", "what's next", "quick wins", "show open issues" | Lists and filters open issues for selection (read-only) |
-| `working-an-issue` | "let's work on #N", "start issue #N", "this is ready to test", "merge #N" | Per-issue branch → status-label → test → merge → finish lifecycle, with a human gate before merge |
+| `working-an-issue` | "let's work on #N", "start issue #N", "this is ready to test", "merge #N" | Per-issue worktree → status-label → test → promote (delegated) → finish lifecycle, with a human gate before merge |
+| `promoting-a-branch` | "promote this", "promote to qa", "open a PR for this branch", "this branch is ready" | Advances the current branch one stage up the pipeline (feature → develop → qa → main), with the hop's merge strategy, gate, test-plan halt, and CI watch |
 | `bootstrapping-labels` | "set up labels", "bootstrap labels", "add default labels", or a bare repo during filing | First-run setup: writes config + secrets, then reconciles a default taxonomy against existing labels and creates only what's missing |
 
 ## How it works
@@ -37,8 +38,9 @@ which resolves the right backend for the axis from config and execs that backend
 ## Configuration
 
 Run `bootstrapping-labels` once per repo — it autodetects owner/repo from the git remote, asks
-your merge strategy and trunk branch, captures a token into a gitignored
-`.lightspeed.secrets.json`, writes the per-repo `.lightspeed.json`, and seeds labels. The other
+which stage pipeline to use (a preset like `develop → main` or `develop → qa → main`, or a
+custom one), captures a token into a gitignored `.lightspeed.secrets.json`, writes the per-repo
+`.lightspeed.json`, and seeds labels. The other
 skills then read that config, so they speak your repo's label names and follow your merge style.
 Full details: [`references/lightspeed-setup.md`](references/lightspeed-setup.md).
 
@@ -46,7 +48,7 @@ Full details: [`references/lightspeed-setup.md`](references/lightspeed-setup.md)
 
 `bootstrapping-labels` seeds a consistent taxonomy idempotently — it only adds what's missing and
 **adopts your existing conventions**: if the repo already calls the awaiting-test state
-`status/qa`, it records `status/qa` for that role rather than creating its own `status/to test`,
+`status/testing`, it records `status/testing` for that role rather than creating its own `status/to test`,
 and never renames or deletes existing labels. The taxonomy is **data** in
 [`references/default-labels.md`](references/default-labels.md) (flat `bug`/`feature`/`tech-debt`,
 namespaced `model/*`, project-dependent `area/*` confirmed against the repo).

@@ -17,8 +17,14 @@ All issue actions go through the **lightspeed dispatcher**; branch/merge are git
 
 The dispatcher resolves coordinates, token, and label names from `.lightspeed.json` — you pass
 **status roles** (`in-progress`, `to-test`, …) and it maps them to this repo's actual label
-names. Read two things from `.lightspeed.json` yourself for the merge step: `code.trunkBranch`
-and `mergeStrategy` (`direct` or `pr`, default `direct`). Config + verbs:
+names. Read `stages[0]` (the first integration branch) via:
+
+```
+"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config '.code.stages[0].name'
+```
+
+Merge mechanics (strategy, gate) are owned by `promoting-a-branch` — do not read single-value
+merge config fields or hand-merge here. Config + verbs:
 [lightspeed-setup.md](../../references/lightspeed-setup.md),
 [adapter-contract.md](../../references/adapter-contract.md).
 
@@ -27,8 +33,10 @@ and `mergeStrategy` (`direct` or `pr`, default `direct`). Config + verbs:
 - **Never merge to the trunk branch without explicit user approval.** Not when tests pass, not
   when it "obviously works", not to "save a round-trip." The user tests and says merge. Until
   then, the branch stays unmerged. This is the rule the whole skill exists to protect.
-- **One branch per issue.** All work for an issue lives on its own branch — never commit an
-  issue's work straight onto the trunk branch.
+- **One branch, one worktree, per issue.** All work for an issue lives on its own branch in its
+  own worktree under `.worktrees/` (already gitignored) — never commit an issue's work straight
+  onto the trunk branch. Each issue's own worktree is what enables working several issues in
+  parallel; never reuse one worktree for two issues.
 - **Keep the board honest.** Every lifecycle transition updates the status label, so the issue's
   state always matches reality. `issues set-status` is atomic — it adds the new status and
   removes the others in one call, so the board can never show two states. Don't do the work and
@@ -38,15 +46,21 @@ and `mergeStrategy` (`direct` or `pr`, default `direct`). Config + verbs:
 
 ### 1. Start work
 
-- Create a branch named for the issue: `feature/<N>-<slug>` or `bug/<N>-<slug>` — pick `feature`
-  vs `bug` from the issue's type label (`feature`/`bug`) or its content.
-- Set status to in-progress:
+- Determine the issue number `N` and derive a short slug from its title (lowercase, hyphens, no
+  special characters) — e.g. issue #42 "Add login page" → slug `add-login-page`.
+- Pick `feature` vs `bug` from the issue's type label or content.
+- Create a worktree off `stages[0]` (the first integration branch):
 
 ```
+# stages[0] is the first integration branch; fork the feature worktree from it.
+# Run this from the repo root.
+BASE="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config '.code.stages[0].name')"
+git worktree add -b "feature/<N>-<slug>" ".worktrees/<N>-<slug>" "$BASE"
+# Do the work inside .worktrees/<N>-<slug>.
 "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues set-status --number N --status in-progress
 ```
 
-Do the work on that branch.
+Do the work inside the `.worktrees/<N>-<slug>` directory.
 
 ### 2. Ready for testing
 
@@ -68,14 +82,9 @@ it's ready to test, on which branch:
 
 Only after explicit approval:
 
-1. **Merge** per the configured `mergeStrategy`:
-   - `direct` — local git merge of the issue's branch into `trunkBranch`, then push.
-   - `pr` — open a pull request from the issue's branch and merge it (base defaults to the
-     configured trunk branch):
-     ```
-     PR="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" pr open --head <branch> --title "…")"   # → number⇥url
-     "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" pr merge --number <N from PR> --strategy squash
-     ```
+1. **Promote the branch** `feature/<N>-<slug>` → `stages[0]` using `promoting-a-branch` (invoke
+   the `promoting-a-branch` skill in this session — it applies the hop's merge strategy and
+   gate). Do not hand-merge here.
 2. **Clear the status labels** from the issue:
    ```
    "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues clear-status --number N
@@ -100,6 +109,11 @@ Only after explicit approval:
    ```
    "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues close --number N
    ```
+6. **Remove the issue's worktree** once merged (run from the repo root, not from inside the
+   worktree):
+   ```
+   git worktree remove ".worktrees/<N>-<slug>"
+   ```
 
 ## Common mistakes
 
@@ -109,3 +123,9 @@ Only after explicit approval:
   lies. Transition every time.
 - Closing the issue but forgetting the finishing comment (summary / cost / model) — that record
   is the auditable point of the whole workflow.
+- **Orphaned worktrees** — if a promotion is abandoned, remove the worktree
+  (`git worktree remove --force ".worktrees/<N>-<slug>"`) rather than leaving it dangling. If you
+  abandon the work earlier (before promotion), also clear the issue's status label
+  (`issues clear-status --number N`) after removing the worktree so the board doesn't lie.
+- Hand-merging instead of delegating to `promoting-a-branch` — the merge strategy and any gate
+  checks live there, not here.

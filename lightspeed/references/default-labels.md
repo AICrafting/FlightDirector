@@ -62,6 +62,8 @@ the skills use your name, not the plugin's.
 | Role | Default label | Color | Description | Adopt the repo's label if it has… |
 |---|---|---|---|---|
 | in-progress | `status/in progress` | `#0e8a16` | In flight | `status/doing`, `in-progress`, `wip` |
-| awaiting-test | `status/to test` | `#fbca04` | Built, awaiting the user's verification | `status/qa`, `status/review`, `ready-for-test` |
+| awaiting-test | `status/to test` | `#fbca04` | Built, awaiting the user's verification | `status/testing`, `to-test`, `ready-for-test` |
 | blocked | `status/blocked` | `#d73a4a` | Can't be started | `blocked` |
 | deferred | `status/deferred` | `#c5def5` | Intentionally not now | `status/later`, `deferred`, `icebox` |
+| review | `status/review` | `#5319e7` | In an open PR awaiting review | `review`, `in-review`, `under-review` |
+| qa | `status/qa` | `#006b75` | Merged, awaiting real-world verification | `qa`, `awaiting-qa` |

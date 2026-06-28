@@ -43,7 +43,7 @@ dispatcher errors clearly; that's the cue to run `bootstrapping-labels` first.
 **Exclude** any issue whose label column carries a status label meaning it isn't pickable
 right now — the in-progress, awaiting-test, blocked, and deferred roles. Use **this repo's**
 names from `.lightspeed.json` `labels.status` if present (e.g. awaiting-test may be
-`status/qa`); otherwise the defaults:
+`status/testing`); otherwise the defaults:
 
 - `status/in progress` — already in flight
 - `status/to test` — built, awaiting verification
