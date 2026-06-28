@@ -56,7 +56,7 @@ don't use a status workflow.
 
 Each status label fills a **role** the skills reference (e.g. the "awaiting-test" role).
 The name below is the plugin default; if a repo already has an equivalent, bootstrap adopts
-**that** name for the role and records it in the per-repo config (see forgejo-setup.md), so
+**that** name for the role and records it in the per-repo config (see lightspeed-setup.md), so
 the skills use your name, not the plugin's.
 
 | Role | Default label | Color | Description | Adopt the repo's label if it has… |

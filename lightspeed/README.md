@@ -25,7 +25,7 @@ Bootstrap also asks your **merge strategy** (Forgejo PR vs. direct git merge) an
 branch, and writes everything — merge prefs plus the role→your-label-name map — to a
 per-repo **`.lightspeed.json`**. The other skills read that file, so they speak your
 repo's label names and follow your merge style. (Schema in
-[`references/forgejo-setup.md`](references/forgejo-setup.md).)
+[`references/lightspeed-setup.md`](references/lightspeed-setup.md).)
 
 It's a user-triggered skill, not an auto-run install script — because labels are created
 through the `forgejo` MCP tools (which only the agent can call), a standalone script would
@@ -39,7 +39,7 @@ create + update together because they share the dedupe-check decision tree.
 
 This plugin **does not bundle an MCP server** — it depends on one you install and register
 yourself, under the server name `forgejo`. See
-[`references/forgejo-setup.md`](references/forgejo-setup.md) for why (bundling would
+[`references/lightspeed-setup.md`](references/lightspeed-setup.md) for why (bundling would
 collide with the server you already run, and a plugin can't ship a third-party binary),
 plus install and configuration details.
 
@@ -51,7 +51,7 @@ plus install and configuration details.
   `.lightspeed.json`. That's the setup; no env vars to set by hand in the normal case
   (`FORGEJO_OWNER`/`FORGEJO_REPO` remain an optional override).
 
-Full details: [`references/forgejo-setup.md`](references/forgejo-setup.md).
+Full details: [`references/lightspeed-setup.md`](references/lightspeed-setup.md).
 
 ## MCP-only by design
 

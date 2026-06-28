@@ -10,7 +10,7 @@ board, an explicit human gate before merging, and a finishing record (summary, t
 model) left on the issue when it's done.
 
 **Setup, repo coordinates, config:** see
-[forgejo-setup.md](../../references/forgejo-setup.md). All issue actions go through
+[lightspeed-setup.md](../../references/lightspeed-setup.md). All issue actions go through
 `mcp__forgejo__*` tools; branch/merge are git.
 
 **Read `.lightspeed.json` first.** It gives you, for this repo: the `trunkBranch`, the

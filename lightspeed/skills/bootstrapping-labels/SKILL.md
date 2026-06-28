@@ -9,7 +9,7 @@ Bring a Forgejo repo up to the plugin's default label taxonomy — idempotently.
 defaults, compares against what already exists (treating equivalents as already-present),
 shows a plan, and creates only the approved missing labels.
 
-**Setup and repo coordinates:** see [forgejo-setup.md](../../references/forgejo-setup.md).
+**Setup and repo coordinates:** see [lightspeed-setup.md](../../references/lightspeed-setup.md).
 **The defaults live in** [default-labels.md](../../references/default-labels.md) — that's
 the data; this skill is the logic. All calls go through `mcp__forgejo__*` tools.
 
@@ -113,7 +113,7 @@ Ask the two repo-level questions `working-an-issue` needs:
 ## Step 8: Write the per-repo config
 
 Write `.lightspeed.json` at the repo root (see
-[forgejo-setup.md](../../references/forgejo-setup.md) for the schema) capturing the merge
+[lightspeed-setup.md](../../references/lightspeed-setup.md) for the schema) capturing the merge
 prefs and the **role → adopted-name** map you built in Steps 3–4. This is what makes the
 other skills use *this repo's* label names. Example for a repo that already had `status/qa`:
 

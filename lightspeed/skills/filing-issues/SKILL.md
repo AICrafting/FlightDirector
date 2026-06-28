@@ -9,7 +9,7 @@ Create, dedupe-check, and update issues on a Forgejo repo, through the forgejo M
 server. A 3-word input becomes a useful, specific issue by drawing on what was actually
 discussed in the session.
 
-**Setup and repo coordinates:** see [forgejo-setup.md](../../references/forgejo-setup.md).
+**Setup and repo coordinates:** see [lightspeed-setup.md](../../references/lightspeed-setup.md).
 All calls go through `mcp__forgejo__*` tools — no curl, no tokens. (Adding labels to an
 issue still needs numeric label IDs — see setup reference.)
 
