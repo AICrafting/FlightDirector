@@ -11,9 +11,9 @@
     {
       "name": "lightspeed",
       "source": "./lightspeed",
-      "description": "Opinionated workflows for a Forgejo repo from within a session — filing, triaging, and working issues through their lifecycle, plus label bootstrapping — via the forgejo MCP server.",
+      "description": "Opinionated issue + code workflow for a repo from within a session — filing, triaging, and working issues through their lifecycle, plus label bootstrapping — over the backend's REST API (Forgejo today), no MCP server required.",
       "version": "0.1.0",
-      "keywords": ["forgejo", "issues", "pull-requests", "workflow", "triage", "mcp"]
+      "keywords": ["forgejo", "issues", "pull-requests", "workflow", "triage", "labels"]
     }
   ]
 }

@@ -12,7 +12,7 @@ Add it once, then install any plugin below.
 
 | Plugin | What it does |
 |---|---|
-| [`lightspeed`](lightspeed/) | Opinionated workflows for a Forgejo repo from a session — filing, triaging, and working issues through their lifecycle, plus label bootstrapping — via the forgejo MCP server. |
+| [`lightspeed`](lightspeed/) | Opinionated issue + code workflow for a repo from a session — filing, triaging, and working issues through their lifecycle, plus label bootstrapping — over the backend's REST API (Forgejo today), no MCP server required. |
 
 ## Layout
 

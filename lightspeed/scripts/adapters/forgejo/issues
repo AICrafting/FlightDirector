@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+#
+# Forgejo issues adapter — verbs: list get create comment set-status close.
+# See ../../../references/adapter-contract.md.
+set -euo pipefail
+ADAPTER_NAME="forgejo/issues"
+# shellcheck source-path=SCRIPTDIR source=_common.sh
+source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+
+verb="${1:-}"; shift || true
+
+case "$verb" in
+  list)
+    state="open"; limit="50"; labels=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --state) state="$2"; shift 2 ;;
+      --limit) limit="$2"; shift 2 ;;
+      --label) labels+=("$2"); shift 2 ;;
+      *) die "issues list: unknown arg '$1'" ;;
+    esac; done
+    q="type=issues&state=${state}&limit=${limit}"
+    if [ ${#labels[@]} -gt 0 ]; then
+      old="$IFS"; IFS=,; q="${q}&labels=${labels[*]}"; IFS="$old"
+    fi
+    _api GET "/issues?${q}" \
+      | jq -r '.[] | [(.number|tostring), .title, ([.labels[].name] | join(","))] | @tsv'
+    ;;
+
+  get)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues get: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues get: --number required"
+    _api GET "/issues/${number}" \
+      | jq -r '([(.number|tostring), .title] | @tsv), "", (.body // "")'
+    ;;
+
+  create)
+    title=""; body=""; body_file=""; labels=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --title)     title="$2"; shift 2 ;;
+      --body)      body="$2"; shift 2 ;;
+      --body-file) body_file="$2"; shift 2 ;;
+      --label)     labels+=("$2"); shift 2 ;;
+      *) die "issues create: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$title" ] || die "issues create: --title required"
+    if [ -n "$body_file" ]; then
+      [ -f "$body_file" ] || die "issues create: --body-file '$body_file' not found"
+      payload="$(jq -n --arg t "$title" --rawfile b "$body_file" '{title:$t, body:$b}')"
+    else
+      payload="$(jq -n --arg t "$title" --arg b "$body" '{title:$t, body:$b}')"
+    fi
+    if [ ${#labels[@]} -gt 0 ]; then
+      ids=()
+      for n in "${labels[@]}"; do
+        id="$(label_id "$n")"
+        [ -n "$id" ] || die "issues create: label '$n' not found — create it first (labels create / bootstrapping-labels)"
+        ids+=("$id")
+      done
+      ids_json="$(printf '%s\n' "${ids[@]}" | jq -s 'map(tonumber)')"
+      payload="$(printf '%s' "$payload" | jq --argjson l "$ids_json" '. + {labels:$l}')"
+    fi
+    _api POST "/issues" "$payload" | jq -r '.number'
+    ;;
+
+  update)
+    number=""; title=""; body=""; body_file=""; have_title=0; have_body=0
+    while [ $# -gt 0 ]; do case "$1" in
+      --number)    number="$2"; shift 2 ;;
+      --title)     title="$2"; have_title=1; shift 2 ;;
+      --body)      body="$2"; have_body=1; shift 2 ;;
+      --body-file) body_file="$2"; have_body=1; shift 2 ;;
+      *) die "issues update: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues update: --number required"
+    patch='{}'
+    [ "$have_title" = 1 ] && patch="$(printf '%s' "$patch" | jq --arg t "$title" '. + {title:$t}')"
+    if [ "$have_body" = 1 ]; then
+      if [ -n "$body_file" ]; then
+        [ -f "$body_file" ] || die "issues update: --body-file '$body_file' not found"
+        patch="$(printf '%s' "$patch" | jq --rawfile b "$body_file" '. + {body:$b}')"
+      else
+        patch="$(printf '%s' "$patch" | jq --arg b "$body" '. + {body:$b}')"
+      fi
+    fi
+    [ "$patch" = '{}' ] && die "issues update: nothing to change (pass --title and/or --body)"
+    _api PATCH "/issues/${number}" "$patch" >/dev/null
+    ;;
+
+  attach)
+    number=""; file=""; name=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --file)   file="$2"; shift 2 ;;
+      --name)   name="$2"; shift 2 ;;
+      *) die "issues attach: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues attach: --number required"
+    [ -f "$file" ]   || die "issues attach: --file '$file' not found"
+    [ -n "$name" ]   || name="$(basename "$file")"
+    tmp="$(mktemp)"
+    code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
+      -H "Authorization: token ${LS_TOKEN}" \
+      -F "attachment=@${file};filename=${name}" \
+      "${REPO_API}/issues/${number}/assets")" || { rm -f "$tmp"; die "attach: curl failed"; }
+    if [ "$code" -ge 400 ]; then
+      msg="$(jq -r '.message // empty' "$tmp" 2>/dev/null || true)"; rm -f "$tmp"
+      die "attach → HTTP $code${msg:+: $msg}"
+    fi
+    jq -r '.browser_download_url' "$tmp"; rm -f "$tmp"
+    ;;
+
+  comment)
+    number=""; body=""; body_file=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number)    number="$2"; shift 2 ;;
+      --body)      body="$2"; shift 2 ;;
+      --body-file) body_file="$2"; shift 2 ;;
+      *) die "issues comment: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues comment: --number required"
+    if [ -n "$body_file" ]; then
+      [ -f "$body_file" ] || die "issues comment: --body-file '$body_file' not found"
+      payload="$(jq -n --rawfile b "$body_file" '{body:$b}')"
+    else
+      payload="$(jq -n --arg b "$body" '{body:$b}')"
+    fi
+    _api POST "/issues/${number}/comments" "$payload" >/dev/null
+    ;;
+
+  set-status)
+    number=""; role=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --status) role="$2"; shift 2 ;;
+      *) die "issues set-status: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues set-status: --number required"
+    [ -n "$role" ]   || die "issues set-status: --status required"
+
+    # The labels map (exported by the dispatcher). Default to {} without the
+    # ${VAR:-{}} idiom — the first '}' there closes the expansion and appends a
+    # stray '}', producing invalid JSON.
+    labels_json="${LS_LABELS_JSON:-}"; [ -n "$labels_json" ] || labels_json='{}'
+
+    # role → configured label name; the full status set is what we manage.
+    target_name="$(printf '%s' "$labels_json" | jq -r --arg r "$role" '.status[$r] // empty')"
+    [ -n "$target_name" ] || die "set-status: role '$role' not found in labels.status config"
+    target_id="$(label_id "$target_name")"
+    [ -n "$target_id" ] || die "set-status: label '$target_name' does not exist on the repo"
+
+    status_names=()
+    while IFS= read -r n; do [ -n "$n" ] && status_names+=("$n"); done \
+      < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[]')
+
+    # Remove every *other* managed status label currently on the issue, then add target.
+    current_ids="$(_api GET "/issues/${number}" | jq -c '[.labels[].id]')"
+    for n in "${status_names[@]}"; do
+      [ "$n" = "$target_name" ] && continue
+      id="$(label_id "$n")"; [ -n "$id" ] || continue
+      if printf '%s' "$current_ids" | jq -e --argjson id "$id" 'index($id) != null' >/dev/null; then
+        _api DELETE "/issues/${number}/labels/${id}" >/dev/null
+      fi
+    done
+    _api POST "/issues/${number}/labels" "$(jq -n --argjson id "$target_id" '{labels:[$id]}')" >/dev/null
+    ;;
+
+  clear-status)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues clear-status: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues clear-status: --number required"
+    labels_json="${LS_LABELS_JSON:-}"; [ -n "$labels_json" ] || labels_json='{}'
+    current_ids="$(_api GET "/issues/${number}" | jq -c '[.labels[].id]')"
+    while IFS= read -r n; do
+      [ -n "$n" ] || continue
+      id="$(label_id "$n")"; [ -n "$id" ] || continue
+      if printf '%s' "$current_ids" | jq -e --argjson id "$id" 'index($id) != null' >/dev/null; then
+        _api DELETE "/issues/${number}/labels/${id}" >/dev/null
+      fi
+    done < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[]')
+    ;;
+
+  label-add)
+    number=""; labels=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --label)  labels+=("$2"); shift 2 ;;
+      *) die "issues label-add: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues label-add: --number required"
+    [ ${#labels[@]} -gt 0 ] || die "issues label-add: at least one --label required"
+    ids=()
+    for n in "${labels[@]}"; do
+      id="$(label_id "$n")"
+      [ -n "$id" ] || die "issues label-add: label '$n' not found"
+      ids+=("$id")
+    done
+    ids_json="$(printf '%s\n' "${ids[@]}" | jq -s 'map(tonumber)')"
+    _api POST "/issues/${number}/labels" "$(jq -n --argjson l "$ids_json" '{labels:$l}')" >/dev/null
+    ;;
+
+  close)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues close: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues close: --number required"
+    _api PATCH "/issues/${number}" "$(jq -n '{state:"closed"}')" >/dev/null
+    ;;
+
+  *) die "unknown verb '${verb}' (issues: list get create update comment attach set-status clear-status label-add close)" ;;
+esac

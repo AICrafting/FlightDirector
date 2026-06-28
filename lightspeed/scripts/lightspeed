@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+#
+# lightspeed dispatcher — the single entrypoint skills call.
+#
+#   lightspeed <group> <verb> [--flag value …]
+#
+# Owns ALL config/secrets/axis logic, then execs the right backend adapter with
+# the resolved coordinates + token in the environment. Adapters stay pure: they
+# read LS_* and never parse config or know which axis they serve. See
+# ../references/adapter-contract.md and docs/adr/0001-*.
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+ADAPTERS_DIR="$SELF_DIR/adapters"
+
+die() { echo "lightspeed: $*" >&2; exit 1; }
+
+[ $# -ge 2 ] || die "usage: lightspeed <group> <verb> [args…]  (groups: issues labels pr ci)"
+group="$1"; verb="$2"; shift 2
+
+# Which config axis backs this group.
+case "$group" in
+  issues|labels) axis="issues" ;;
+  pr|ci)         axis="code" ;;
+  *) die "unknown group '$group' (expected: issues labels pr ci)" ;;
+esac
+
+command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
+
+# Config + secrets live at the *target* repo root (the repo being operated on),
+# not the plugin.
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cfg="$repo_root/.lightspeed.json"
+sec="$repo_root/.lightspeed.secrets.json"
+[ -f "$cfg" ] || die "no .lightspeed.json at repo root ($repo_root)"
+
+# Loud, every-run warning if the secrets file is tracked by git (it holds a token).
+if [ -f "$sec" ] && git -C "$repo_root" ls-files --error-unmatch .lightspeed.secrets.json >/dev/null 2>&1; then
+  echo "lightspeed: WARNING — .lightspeed.secrets.json is tracked by git; it must be gitignored (it contains a token)." >&2
+fi
+
+# Resolve a config field for the axis, inheriting code → issues when absent.
+cfg_get() { jq -r --arg a "$axis" --arg f "$1" '(.[$a][$f]) // (.code[$f]) // empty' "$cfg"; }
+
+backend="$(cfg_get backend)"
+[ -n "$backend" ] || die "no backend configured for axis '$axis' (set code.backend or ${axis}.backend in .lightspeed.json)"
+
+LS_API="$(cfg_get api)"
+LS_OWNER="$(cfg_get owner)"
+LS_REPO="$(cfg_get repo)"
+LS_TRUNK="$(jq -r '.code.trunkBranch // empty' "$cfg")"
+LS_LABELS_JSON="$(jq -c '.labels // {}' "$cfg")"
+
+# Token: env override first, then secrets file (axis, inheriting code → issues).
+LS_TOKEN="${LS_TOKEN:-${FORGEJO_TOKEN:-}}"
+if [ -z "$LS_TOKEN" ] && [ -f "$sec" ]; then
+  LS_TOKEN="$(jq -r --arg a "$axis" '(.[$a].token) // (.code.token) // empty' "$sec")"
+fi
+
+adapter="$ADAPTERS_DIR/$backend/$group"
+[ -x "$adapter" ] || die "no '$group' adapter for backend '$backend' (expected $adapter)"
+
+export LS_API LS_OWNER LS_REPO LS_TRUNK LS_TOKEN LS_LABELS_JSON LS_BACKEND="$backend"
+exec "$adapter" "$verb" "$@"
