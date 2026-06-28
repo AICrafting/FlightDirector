@@ -57,8 +57,8 @@ Backend, coordinates, and preferences, across two independent axes:
   `gate` (`pre-merge`|`post-merge-qa`, default `pre-merge`). Consumed by `working-an-issue`
   (uses `stages[0]`) and `promoting-a-branch` (one hop at a time).
 - Note: `trunkBranch`, `mergeStrategy`, and `gate` (single-value top-level fields) are
-  superseded by `stages`. `trunkBranch` is still read as a fallback for `stages[0]` for
-  backwards compatibility.
+  superseded by `stages`. For backwards compatibility a legacy `trunkBranch` is still read
+  **first** if present; otherwise `stages[0].name` is used.
 
 ### `.lightspeed.secrets.json` — gitignored
 
