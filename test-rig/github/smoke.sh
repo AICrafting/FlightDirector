@@ -28,8 +28,15 @@ echo "── issues create / list / get ──"
 N="$(lsp issues create --title "[rig] smoke $TS" --body "hello body" --label rig)"
 [[ "$N" =~ ^[0-9]+$ ]] && ok "create returns numeric id ($N)" || no "create returns numeric id" "got '$N'"
 
-OUT="$(lsp issues list)"
-grep -q "\[rig\] smoke $TS" <<<"$OUT" && ok "list shows the new issue" || no "list shows the new issue"
+# GitHub's issues LIST endpoint is eventually consistent — it lags create by a few
+# seconds (direct `get` is immediate). Poll until the new issue shows up, up to ~20s.
+OUT=""
+for _ in $(seq 1 20); do
+  OUT="$(lsp issues list)"
+  grep -q "\[rig\] smoke $TS" <<<"$OUT" && break
+  sleep 1
+done
+grep -q "\[rig\] smoke $TS" <<<"$OUT" && ok "list shows the new issue (eventually-consistent endpoint)" || no "list shows the new issue" "$OUT"
 cols="$(head -1 <<<"$OUT" | awk -F'\t' '{print NF}')"
 [ "$cols" = 3 ] && ok "list rows are 3-col TSV" || no "list rows are 3-col TSV" "got $cols cols"
 

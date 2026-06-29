@@ -111,4 +111,7 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
   attach` is **not supported** on GitHub (no REST API for issue attachments) and exits non-zero
   with that reason. `issues list` filters out pull requests (GitHub returns PRs from the issues
   endpoint). `pr merge` maps `--strategy` to GitHub's `merge_method`. `ci log` streams per-job
-  logs (`/actions/jobs/{id}/logs`) rather than the run-level zip.
+  logs (`/actions/jobs/{id}/logs`) rather than the run-level zip. Note GitHub's `issues list`
+  endpoint is **eventually consistent** — a just-created issue can take a few seconds to appear in
+  the list, though `issues get` reflects it immediately; don't rely on a list snapshot taken
+  milliseconds after a create.
