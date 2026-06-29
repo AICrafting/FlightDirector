@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Forgejo labels adapter — verbs: resolve.
+# GitHub labels adapter — verbs: list resolve create.
 # See ../../../references/adapter-contract.md.
 set -euo pipefail
 ADAPTER_NAME="github/labels"
