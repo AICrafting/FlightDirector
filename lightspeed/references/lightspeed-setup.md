@@ -11,9 +11,9 @@ API with `curl`. There is no MCP server, and no token handling in the skills the
 - `curl` and `jq` on `PATH`.
 - A per-repo API token (least privilege — see below). Nothing to install or run.
 
-## Two config files at the repo root
+## Two config files in the `.lightspeed/` folder
 
-### `.lightspeed.json` — committable
+### `.lightspeed/config.json` — committable
 
 Backend, coordinates, and preferences, across two independent axes:
 
@@ -68,7 +68,7 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
 "code": {
   // …existing keys (backend, owner, repo, api, stages)…
   "zones": [ { "name": "auth", "paths": ["src/auth/**"] } ],
-  "queueBatches": { "defaultModel": "sonnet", "agentRulesFile": ".lightspeed-agent-rules.md" }
+  "queueBatches": { "defaultModel": "sonnet", "agentRulesFile": ".lightspeed/agent-rules.md" }
 }
 ```
 
@@ -80,12 +80,12 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
   Seeded by `setting-up-a-repo` during first-run setup; falls back to `sonnet` if unset.
 - `code.queueBatches.agentRulesFile` — path (repo-relative) to a markdown file of repo-specific
   agent hard-rules / CI gotchas, injected verbatim into each worker prompt. Defaults to
-  `.lightspeed-agent-rules.md`; if that file is absent, workers run with the skill's built-in
+  `.lightspeed/agent-rules.md`; if that file is absent, workers run with the skill's built-in
   safety rules only (no project-specific rules).
 
 ### GitHub backend
 
-Point an axis at GitHub by setting its `backend` + `api` in `.lightspeed.json`:
+Point an axis at GitHub by setting its `backend` + `api` in `.lightspeed/config.json`:
 
 ```jsonc
 "code": {
@@ -97,11 +97,11 @@ Point an axis at GitHub by setting its `backend` + `api` in `.lightspeed.json`:
 }
 ```
 
-The token goes in the gitignored `.lightspeed.secrets.json` (`code.token`), a GitHub PAT with
+The token goes in the gitignored `.lightspeed/secrets.json` (`code.token`), a GitHub PAT with
 **repo** scope (+ **workflow** if you use `ci`). `setting-up-a-repo` does not yet offer GitHub
-as a backend choice — configure GitHub repos by hand-editing `.lightspeed.json` for now.
+as a backend choice — configure GitHub repos by hand-editing `.lightspeed/config.json` for now.
 
-### `.lightspeed.secrets.json` — gitignored
+### `.lightspeed/secrets.json` — gitignored
 
 Just the token(s), one per axis, with the same `code → issues` inheritance:
 
@@ -110,7 +110,7 @@ Just the token(s), one per axis, with the same `code → issues` inheritance:
 ```
 
 **This file must be gitignored** — it holds a credential. If lightspeed finds it tracked by
-git, it warns loudly on every run (it does not refuse). Add `.lightspeed.secrets.json` to your
+git, it warns loudly on every run (it does not refuse). Add `.lightspeed/secrets.json` to your
 `.gitignore`.
 
 Token precedence: `LS_TOKEN` / `FORGEJO_TOKEN` in the environment override everything; otherwise

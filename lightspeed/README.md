@@ -43,8 +43,8 @@ which resolves the right backend for the axis from config and execs that backend
 
 Run `setting-up-a-repo` once per repo — it autodetects owner/repo from the git remote, asks
 which stage pipeline to use (a preset like `develop → main` or `develop → qa → main`, or a
-custom one), captures a token into a gitignored `.lightspeed.secrets.json`, writes the per-repo
-`.lightspeed.json`, and seeds labels. The other
+custom one), captures a token into a gitignored `.lightspeed/secrets.json`, writes the per-repo
+`.lightspeed/config.json`, and seeds labels. The other
 skills then read that config, so they speak your repo's label names and follow your merge style.
 Full details: [`references/lightspeed-setup.md`](references/lightspeed-setup.md).
 

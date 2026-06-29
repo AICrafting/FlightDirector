@@ -14,7 +14,7 @@ All backend access goes through the **lightspeed dispatcher** — never raw API 
 "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" <group> <verb> [--flag value …]
 ```
 
-The dispatcher reads `.lightspeed.json` for the backend, coordinates, and label-name map, so
+The dispatcher reads `.lightspeed/config.json` for the backend, coordinates, and label-name map, so
 this skill never touches owner/repo or tokens. Verb set:
 [adapter-contract.md](../../references/adapter-contract.md); config:
 [lightspeed-setup.md](../../references/lightspeed-setup.md).
