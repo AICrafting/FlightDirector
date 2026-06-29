@@ -9,7 +9,7 @@ One rig per backend, each under its own folder, because the rigs are **not** uni
   no `compose.yaml`.
 
 What every rig has in common is the *output*: `up.sh` leaves a `.work/` directory — a throwaway
-git repo holding `.lightspeed.json` + `.lightspeed.secrets.json` pointed at the rig — which the
+git repo holding `.lightspeed/config.json` + `.lightspeed/secrets.json` pointed at the rig — which the
 adapters then run against. `.work/` is gitignored for every backend.
 
 ```

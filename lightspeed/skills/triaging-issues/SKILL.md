@@ -13,7 +13,7 @@ All backend access goes through the **lightspeed dispatcher** — never raw API 
 "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" <group> <verb> [--flag value …]
 ```
 
-The dispatcher reads `.lightspeed.json` at the repo root for the backend, coordinates, and the
+The dispatcher reads `.lightspeed/config.json` for the backend, coordinates, and the
 label-name map, so this skill never touches owner/repo or tokens. Verb set:
 [adapter-contract.md](../../references/adapter-contract.md).
 
@@ -35,7 +35,7 @@ Output is one issue per line, tab-separated:
 ```
 
 It's already projected to just these fields, so it stays light in context — keep `--limit`
-reasonable and raise it only if a full page came back. If there's no `.lightspeed.json`, the
+reasonable and raise it only if a full page came back. If there's no `.lightspeed/config.json`, the
 dispatcher errors clearly; that's the cue to run `setting-up-a-repo` first.
 
 ## Step 2: Apply the workable filter
@@ -43,7 +43,7 @@ dispatcher errors clearly; that's the cue to run `setting-up-a-repo` first.
 **Exclude** any issue whose label column carries a status label — carrying *any* of the
 configured `labels.status` roles means the issue is already somewhere in the workflow (in
 flight, awaiting test, in review, in QA, blocked, or deferred), so it isn't a fresh pick. Use
-**this repo's** names from `.lightspeed.json` `labels.status` if present (e.g. awaiting-test
+**this repo's** names from `.lightspeed/config.json` `labels.status` if present (e.g. awaiting-test
 may be `status/testing`); otherwise the defaults:
 
 - `status/in progress` — already in flight

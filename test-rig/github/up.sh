@@ -4,7 +4,7 @@
 #   - verify token + repo access
 #   - ensure seed status labels exist
 #   - ensure .github/workflows/ci.yml exists (for ci watch/log)
-#   - write .work/.lightspeed.json + .lightspeed.secrets.json (gitignored)
+#   - write .work/.lightspeed/config.json + .lightspeed/secrets.json (gitignored)
 #
 # Token: $LIGHTSPEED_GH_TOKEN, else a gitignored test-rig/github/.env sourced here.
 # Never writes the token to a tracked file. Idempotent; safe to re-run.
@@ -69,7 +69,7 @@ fi
 say "Writing workdir config…"
 # .work/ is its own throwaway git repo so the dispatcher resolves config from HERE
 # (git rev-parse --git-common-dir) instead of walking up to the plugin's own repo.
-rm -rf "$WORK"; mkdir -p "$WORK"; git -C "$WORK" init -q
+rm -rf "$WORK"; mkdir -p "$WORK/.lightspeed"; git -C "$WORK" init -q
 jq -n --arg api "$API" --arg o "$OWNER" --arg r "$REPO" '{
   code: { backend:"github", owner:$o, repo:$r, api:$api,
           stages:[{name:"main", merge:"pr"}] },
@@ -79,7 +79,7 @@ jq -n --arg api "$API" --arg o "$OWNER" --arg r "$REPO" '{
     "in-review":"status/in review",
     "in-qa":"status/in qa"
   } }
-}' > "$WORK/.lightspeed.json"
-jq -n --arg t "$TOKEN" '{ code: { token:$t } }' > "$WORK/.lightspeed.secrets.json"
+}' > "$WORK/.lightspeed/config.json"
+jq -n --arg t "$TOKEN" '{ code: { token:$t } }' > "$WORK/.lightspeed/secrets.json"
 
 say "Up. Workdir: $WORK"

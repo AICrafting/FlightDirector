@@ -73,7 +73,7 @@ That triggers **`setting-up-a-repo`**, which walks you through setup:
 
 1. **Coordinates** — it reads your git remote to propose the `owner/repo` and the API base, and
    asks you to confirm.
-2. **Token** — it asks for the per-repo token, adds `.lightspeed.secrets.json` **and**
+2. **Token** — it asks for the per-repo token, adds `.lightspeed/secrets.json` **and**
    `.worktrees/` to your `.gitignore`, and writes the token to the gitignored secrets file.
 3. **Pipeline preset** — it asks which stage pipeline you want:
    - **(a) Simple** — `develop → main`
@@ -83,9 +83,9 @@ That triggers **`setting-up-a-repo`**, which walks you through setup:
    *adopting your existing names* (if you already call a state `status/qa`, it keeps that),
    shows you a plan, and creates only what's missing.
 
-When it's done you'll have two files at the repo root: a committable **`.lightspeed.json`**
+When it's done you'll have two files in the `.lightspeed/` folder: a committable **`.lightspeed/config.json`**
 (coordinates, the `stages` pipeline, and your label names) and a gitignored
-**`.lightspeed.secrets.json`** (the token). Every other skill reads `.lightspeed.json`, so they
+**`.lightspeed/secrets.json`** (the token). Every other skill reads `.lightspeed/config.json`, so they
 all speak your repo's conventions.
 
 ---
@@ -174,19 +174,19 @@ stopping at the to-test gate; you then ship the branches serially via promoting-
 
 ## Where your config lives
 
-- **`.lightspeed.json`** (commit it) — backend + coordinates, the `stages` pipeline, and your
+- **`.lightspeed/config.json`** (commit it) — backend + coordinates, the `stages` pipeline, and your
   role→label-name map. See [lightspeed-setup.md](references/lightspeed-setup.md) for the schema.
-- **`.lightspeed.secrets.json`** (gitignored) — your API token(s). If lightspeed ever finds this
+- **`.lightspeed/secrets.json`** (gitignored) — your API token(s). If lightspeed ever finds this
   file tracked by git, it warns you on every run.
 
-Want a different pipeline later? Edit `code.stages` in `.lightspeed.json` — e.g. add a `qa`
+Want a different pipeline later? Edit `code.stages` in `.lightspeed/config.json` — e.g. add a `qa`
 stage between `develop` and `main`. The skills pick it up immediately.
 
 ---
 
 ## Tips
 
-- **Issues elsewhere than code?** `.lightspeed.json` has two axes — `code` and `issues` — so you
+- **Issues elsewhere than code?** `.lightspeed/config.json` has two axes — `code` and `issues` — so you
   can point issues at a different repo (or, in future, a different backend) while code stays put.
   By default `issues` inherits `code`.
 - **The merge gate is real.** If you want something merged, say so explicitly — "merge #N" /

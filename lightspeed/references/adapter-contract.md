@@ -33,7 +33,7 @@ Skills call the dispatcher, never an adapter directly, resolving the plugin path
 
 The dispatcher:
 
-1. Reads `.lightspeed.json` (config) and `.lightspeed.secrets.json` (token), from repo root.
+1. Reads `.lightspeed/config.json` (config) and `.lightspeed/secrets.json` (token), from repo root.
 2. Picks the **axis** for the group — `issues`/`labels` → `issues.*`, `pr`/`ci` → `code.*` —
    applying `code → issues` inheritance when the `issues` block is omitted.
 3. Exports the resolved coordinates + token into the adapter's environment: `LS_API`,
