@@ -106,3 +106,9 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
   the per-instance id problem stops at the adapter boundary.
 - `ci watch`/`ci log` are the existing shared scripts adapted to this signature, not new code.
 - `⇥` above denotes a literal TAB.
+- **GitHub backend specifics:** GitHub label endpoints use label **names**, not numeric ids — the
+  github adapter resolves and applies labels by name internally (skills are unchanged). `issues
+  attach` is **not supported** on GitHub (no REST API for issue attachments) and exits non-zero
+  with that reason. `issues list` filters out pull requests (GitHub returns PRs from the issues
+  endpoint). `pr merge` maps `--strategy` to GitHub's `merge_method`. `ci log` streams per-job
+  logs (`/actions/jobs/{id}/logs`) rather than the run-level zip.
