@@ -67,7 +67,9 @@ fi
 
 # Write the gitignored workdir config.
 say "Writing workdir config…"
-mkdir -p "$WORK"
+# .work/ is its own throwaway git repo so the dispatcher resolves config from HERE
+# (git rev-parse --git-common-dir) instead of walking up to the plugin's own repo.
+rm -rf "$WORK"; mkdir -p "$WORK"; git -C "$WORK" init -q
 jq -n --arg api "$API" --arg o "$OWNER" --arg r "$REPO" '{
   code: { backend:"github", owner:$o, repo:$r, api:$api,
           stages:[{name:"main", merge:"pr"}] },
