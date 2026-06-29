@@ -36,7 +36,7 @@ Output is one issue per line, tab-separated:
 
 It's already projected to just these fields, so it stays light in context — keep `--limit`
 reasonable and raise it only if a full page came back. If there's no `.lightspeed.json`, the
-dispatcher errors clearly; that's the cue to run `bootstrapping-labels` first.
+dispatcher errors clearly; that's the cue to run `setting-up-a-repo` first.
 
 ## Step 2: Apply the workable filter
 

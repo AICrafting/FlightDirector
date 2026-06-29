@@ -1,9 +1,9 @@
 ---
-name: bootstrapping-labels
-description: Use when setting up a repo for lightspeed for the first time, or when the user says "set up labels", "bootstrap labels", "add the default labels", "configure issue labels", or when filing reveals the repo has few or no labels. Writes the lightspeed config + secrets, then reconciles a default label taxonomy against existing labels and creates only what's missing, after a preview.
+name: setting-up-a-repo
+description: Use when setting up a repo for lightspeed for the first time — "set up this repo", "set up lightspeed", "configure lightspeed", "set up labels", "bootstrap labels", "add the default labels" — or when filing/triage reveals the repo has no lightspeed config or few labels. Writes the lightspeed config + secrets (backend coordinates, stage pipeline, worker model), then reconciles a default label taxonomy against existing labels and creates only what's missing, after a preview.
 ---
 
-# Bootstrapping Labels
+# Setting Up a Repo
 
 The first-run setup skill: it writes the `.lightspeed.json` + `.lightspeed.secrets.json` the
 dispatcher needs, then brings the repo up to the default label taxonomy — idempotently, adopting

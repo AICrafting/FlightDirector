@@ -138,7 +138,7 @@ convention):
   "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues set-status --number N --status qa
   ```
   (requires a `qa` status role configured in `.lightspeed.json` `labels.status` — see
-  `bootstrapping-labels`.)
+  `setting-up-a-repo`.)
   When a later promotion carries those issues to the final stage and QA passes, close them
   (`issues close --number N`).
 
