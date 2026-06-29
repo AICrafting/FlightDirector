@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+#
+# GitHub CI adapter — verbs: watch log.  Against the GitHub Actions API.
+# See ../../../references/adapter-contract.md.
+set -euo pipefail
+ADAPTER_NAME="github/ci"
+# shellcheck source-path=SCRIPTDIR source=_common.sh
+source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+
+verb="${1:-}"; shift || true
+
+case "$verb" in
+  # Stream one line per CI state change for a commit, exit on a terminal state.
+  # Background-friendly for the Monitor tool. Resilient: a transient API/jq blip
+  # is swallowed and the poll continues, rather than killing the watcher.
+  watch)
+    sha=""; status_file=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --sha)         sha="$2"; shift 2 ;;
+      --status-file) status_file="$2"; shift 2 ;;
+      *) die "ci watch: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$sha" ] || die "ci watch: --sha required"
+
+    _write() {
+      [ -n "$status_file" ] || return 0
+      mkdir -p "$(dirname "$status_file")"
+      printf '{"sha":"%s","status":"%s"}\n' "$sha" "$1" >"$status_file"
+    }
+
+    last_id=""; last_state=""
+    while true; do
+      body="$(curl -sS -L "${GH_HEADERS[@]}" \
+        "${REPO_API}/actions/runs?head_sha=${sha}&per_page=20" 2>/dev/null || true)"
+      line="$(printf '%s' "$body" | jq -r \
+        '[.workflow_runs[]?] | sort_by(.run_started_at) | last
+         | select(. != null) | "\(.id) \(.status)"' 2>/dev/null || true)"
+      if [ -n "$line" ]; then
+        id="${line%% *}"; state="${line##* }"
+        if [ "$id" != "$last_id" ] || [ "$state" != "$last_state" ]; then
+          echo "task-${id} status=${state}"
+          _write "$state"
+          last_id="$id"; last_state="$state"
+        fi
+        # GitHub run status is queued|in_progress|completed.
+        [ "$state" = "completed" ] && exit 0
+      fi
+      sleep 5
+    done
+    ;;
+
+  # Dump the failed jobs' logs for a commit (or the latest failed run on a branch).
+  # Per-job logs are plain text via redirect — avoids the run-level .zip.
+  log)
+    sha=""; failed_branch=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --sha)    sha="$2"; shift 2 ;;
+      --failed) failed_branch="$2"; shift 2 ;;
+      *) die "ci log: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$sha" ] || [ -n "$failed_branch" ] || die "ci log: --sha or --failed required"
+
+    if [ -n "$sha" ]; then
+      run_id="$(_api GET "/actions/runs?head_sha=${sha}&per_page=20" \
+        | jq -r '[.workflow_runs[]?] | sort_by(.run_started_at) | last | .id // empty')"
+    else
+      run_id="$(_api GET "/actions/runs?branch=${failed_branch}&status=failure&per_page=1" \
+        | jq -r '.workflow_runs[0].id // empty')"
+    fi
+    [ -n "$run_id" ] || die "ci log: no workflow run found"
+
+    job_ids="$(_api GET "/actions/runs/${run_id}/jobs?per_page=100" \
+      | jq -r '.jobs[]? | select(.conclusion=="failure") | .id')"
+    [ -n "$job_ids" ] || { echo "(no failed jobs for run ${run_id})"; exit 0; }
+
+    while IFS= read -r jid; do
+      [ -n "$jid" ] || continue
+      echo "── job ${jid} ──"
+      curl -sS -L "${GH_HEADERS[@]}" "${REPO_API}/actions/jobs/${jid}/logs" || true
+    done <<< "$job_ids"
+    ;;
+
+  *) die "unknown verb '${verb}' (ci: watch log)" ;;
+esac
