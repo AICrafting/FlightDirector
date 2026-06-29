@@ -1,6 +1,6 @@
 # Default label taxonomy
 
-The `bootstrapping-labels` skill reads this file and reconciles it against a repo's
+The `setting-up-a-repo` skill reads this file and reconciles it against a repo's
 existing labels, creating only the ones that are missing (or whose equivalent isn't
 already present). **This is the one place to edit the defaults** — change a color, add a
 label, drop one — without touching skill prose.

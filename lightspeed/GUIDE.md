@@ -40,11 +40,12 @@ into the session:
 - **Claude Code** (the plugin runs as Claude Code skills).
 - **`curl`** and **`jq`** on your `PATH`.
 - A **Forgejo** instance and a repo you can push to.
-- A **per-repo API token** with just the scopes the skills use: `write:repository`,
-  `write:issue`, and `write:misc`. Create one in Forgejo under
+- A **per-repo API token** with just the two scopes the skills use: `write:repository` and
+  `write:issue` (`write:issue` also covers labels). Create one in Forgejo under
   *Settings → Applications → Generate New Token* — scope it to what you need, not an all-orgs
-  admin token. (Why per-repo? A misfire then fails with a hard `403` instead of writing to the
-  wrong place.)
+  admin token. These two work with a token restricted to a single repository; don't add
+  `write:misc` (the skills don't use it, and Forgejo won't allow it on a single-repo token).
+  (Why per-repo? A misfire then fails with a hard `403` instead of writing to the wrong place.)
 
 ---
 
@@ -53,7 +54,7 @@ into the session:
 1. Add the marketplace that ships lightspeed, then install the plugin:
 
    ```
-   /plugin marketplace add <url-or-path-of-this-repo>
+   /plugin marketplace add <this-repo> (eg: https://hostname/owner/repo.git [.git is required]) 
    /plugin install lightspeed@cerebralgardens
    ```
 
@@ -68,11 +69,11 @@ From inside the repo, tell Claude:
 
 > **"set up lightspeed for this repo"**  (or *"bootstrap labels"*)
 
-That triggers **`bootstrapping-labels`**, which walks you through setup:
+That triggers **`setting-up-a-repo`**, which walks you through setup:
 
 1. **Coordinates** — it reads your git remote to propose the `owner/repo` and the API base, and
    asks you to confirm.
-2. **Token** — it asks for the per-repo token, adds `.lightspeed.secrets.json` **and**
+2. **Token** — it asks for the per-repo token, adds `.lightspeed/secrets.json` **and**
    `.worktrees/` to your `.gitignore`, and writes the token to the gitignored secrets file.
 3. **Pipeline preset** — it asks which stage pipeline you want:
    - **(a) Simple** — `develop → main`
@@ -82,9 +83,9 @@ That triggers **`bootstrapping-labels`**, which walks you through setup:
    *adopting your existing names* (if you already call a state `status/qa`, it keeps that),
    shows you a plan, and creates only what's missing.
 
-When it's done you'll have two files at the repo root: a committable **`.lightspeed.json`**
+When it's done you'll have two files in the `.lightspeed/` folder: a committable **`.lightspeed/config.json`**
 (coordinates, the `stages` pipeline, and your label names) and a gitignored
-**`.lightspeed.secrets.json`** (the token). Every other skill reads `.lightspeed.json`, so they
+**`.lightspeed/secrets.json`** (the token). Every other skill reads `.lightspeed/config.json`, so they
 all speak your repo's conventions.
 
 ---
@@ -97,7 +98,8 @@ all speak your repo's conventions.
 | "what should I work on?", "any quick wins?" | **triaging-issues** | A filtered pick-list of workable issues |
 | "let's work on #N", "this is ready to test", "merge #N" | **working-an-issue** | Worktree → status labels → human merge gate → finish |
 | "promote this", "promote develop to main" | **promoting-a-branch** | Advance the branch one stage (direct merge or PR + CI) |
-| "set up lightspeed", "bootstrap labels" | **bootstrapping-labels** | First-run setup (above) |
+| `/queue-batches NxM`, "work N issues in parallel", "batch these" | **queue-batches** | Dispatch N background agents × M issues each; isolated worktrees (zones), stop at to-test, then a serial promoting-a-branch hand-off |
+| "set up lightspeed", "bootstrap labels" | **setting-up-a-repo** | First-run setup (above) |
 
 You never type the underlying commands — you talk to Claude, and the skills drive the forge for
 you.
@@ -164,26 +166,30 @@ promoted environment rather than closing immediately.
 That's the full loop: **file → triage → work (in a worktree, behind a merge gate) → promote up
 the pipeline** — all without leaving the session.
 
+When you have several independent issues to tackle at once, `/queue-batches NxM` scales this loop
+horizontally: N background agents each work M issues sequentially in isolated worktrees (zones),
+stopping at the to-test gate; you then ship the branches serially via promoting-a-branch.
+
 ---
 
 ## Where your config lives
 
-- **`.lightspeed.json`** (commit it) — backend + coordinates, the `stages` pipeline, and your
+- **`.lightspeed/config.json`** (commit it) — backend + coordinates, the `stages` pipeline, and your
   role→label-name map. See [lightspeed-setup.md](references/lightspeed-setup.md) for the schema.
-- **`.lightspeed.secrets.json`** (gitignored) — your API token(s). If lightspeed ever finds this
+- **`.lightspeed/secrets.json`** (gitignored) — your API token(s). If lightspeed ever finds this
   file tracked by git, it warns you on every run.
 
-Want a different pipeline later? Edit `code.stages` in `.lightspeed.json` — e.g. add a `qa`
+Want a different pipeline later? Edit `code.stages` in `.lightspeed/config.json` — e.g. add a `qa`
 stage between `develop` and `main`. The skills pick it up immediately.
 
 ---
 
 ## Tips
 
-- **Issues elsewhere than code?** `.lightspeed.json` has two axes — `code` and `issues` — so you
+- **Issues elsewhere than code?** `.lightspeed/config.json` has two axes — `code` and `issues` — so you
   can point issues at a different repo (or, in future, a different backend) while code stays put.
   By default `issues` inherits `code`.
 - **The merge gate is real.** If you want something merged, say so explicitly — "merge #N" /
   "promote …". Claude will leave work at *ready-to-test* and stop otherwise.
-- **Re-running setup is safe.** `bootstrapping-labels` is idempotent — it only adds what's
+- **Re-running setup is safe.** `setting-up-a-repo` is idempotent — it only adds what's
   missing and never renames or deletes your existing labels.

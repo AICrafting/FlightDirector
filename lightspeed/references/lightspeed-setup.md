@@ -11,9 +11,9 @@ API with `curl`. There is no MCP server, and no token handling in the skills the
 - `curl` and `jq` on `PATH`.
 - A per-repo API token (least privilege — see below). Nothing to install or run.
 
-## Two config files at the repo root
+## Two config files in the `.lightspeed/` folder
 
-### `.lightspeed.json` — committable
+### `.lightspeed/config.json` — committable
 
 Backend, coordinates, and preferences, across two independent axes:
 
@@ -60,7 +60,48 @@ Backend, coordinates, and preferences, across two independent axes:
   superseded by `stages`. For backwards compatibility a legacy `trunkBranch` is still read
   **first** if present; otherwise `stages[0].name` is used.
 
-### `.lightspeed.secrets.json` — gitignored
+### queue-batches config (all optional)
+
+Consumed only by the `queue-batches` skill; absent keys fall back safely.
+
+```jsonc
+"code": {
+  // …existing keys (backend, owner, repo, api, stages)…
+  "zones": [ { "name": "auth", "paths": ["src/auth/**"] } ],
+  "queueBatches": { "defaultModel": "sonnet", "agentRulesFile": ".lightspeed/agent-rules.md" }
+}
+```
+
+- `code.zones` — `[{ "name": "...", "paths": ["glob", ...] }]`. Disjoint file zones used to
+  schedule parallel work so concurrently-running issues never touch the same paths. If omitted,
+  `queue-batches` infers pseudo-zones from issue bodies at triage time and warns that the
+  inferred zones are approximate.
+- `code.queueBatches.defaultModel` — worker-agent model when the user gives no per-run override.
+  Seeded by `setting-up-a-repo` during first-run setup; falls back to `sonnet` if unset.
+- `code.queueBatches.agentRulesFile` — path (repo-relative) to a markdown file of repo-specific
+  agent hard-rules / CI gotchas, injected verbatim into each worker prompt. Defaults to
+  `.lightspeed/agent-rules.md`; if that file is absent, workers run with the skill's built-in
+  safety rules only (no project-specific rules).
+
+### GitHub backend
+
+Point an axis at GitHub by setting its `backend` + `api` in `.lightspeed/config.json`:
+
+```jsonc
+"code": {
+  "backend": "github",
+  "owner": "your-org-or-user",
+  "repo": "your-repo",
+  "api": "https://api.github.com",          // note: no /api/v1 (that's Forgejo)
+  "stages": [ { "name": "main", "merge": "pr" } ]
+}
+```
+
+The token goes in the gitignored `.lightspeed/secrets.json` (`code.token`), a GitHub PAT with
+**repo** scope (+ **workflow** if you use `ci`). `setting-up-a-repo` does not yet offer GitHub
+as a backend choice — configure GitHub repos by hand-editing `.lightspeed/config.json` for now.
+
+### `.lightspeed/secrets.json` — gitignored
 
 Just the token(s), one per axis, with the same `code → issues` inheritance:
 
@@ -69,7 +110,7 @@ Just the token(s), one per axis, with the same `code → issues` inheritance:
 ```
 
 **This file must be gitignored** — it holds a credential. If lightspeed finds it tracked by
-git, it warns loudly on every run (it does not refuse). Add `.lightspeed.secrets.json` to your
+git, it warns loudly on every run (it does not refuse). Add `.lightspeed/secrets.json` to your
 `.gitignore`.
 
 Token precedence: `LS_TOKEN` / `FORGEJO_TOKEN` in the environment override everything; otherwise
@@ -79,15 +120,17 @@ the secrets file (the axis's token, inheriting `code`'s).
 
 The point of a per-repo token is blast radius: one scoped to a single repo can't touch another,
 so a misfire fails with `403` instead of writing to the wrong place. On Forgejo, create a token
-with only the scopes the skills need — `write:repository`, `write:issue`, and `write:misc` (for
-labels) — not an all-orgs admin token.
+with only the two scopes the skills need — `write:repository` (PRs, CI) and `write:issue` (issues
+**and labels**) — not an all-orgs admin token. These two are compatible with a token *restricted
+to a single repository*; do **not** add `write:misc` — the skills don't use it, and Forgejo won't
+let you combine `write:misc` with a single-repo restriction.
 
 ## How resolution works
 
 The dispatcher picks the **axis** from the group — `issues`/`labels` → `issues.*`,
 `pr`/`ci` → `code.*` — resolves that axis's backend, coordinates, and token (inheriting `code`),
 exports them as `LS_*`, and execs `adapters/<backend>/<group>`. Skills therefore never pass
-owner/repo/token; they just name the verb. `bootstrapping-labels` autodetects and writes the
+owner/repo/token; they just name the verb. `setting-up-a-repo` autodetects and writes the
 coordinates from the git remote on first run, so in the normal case you set nothing by hand.
 
 ## Context note

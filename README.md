@@ -4,7 +4,7 @@ A [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/p
 Add it once, then install any plugin below.
 
 ```
-/plugin marketplace add <this-repo>
+/plugin marketplace add <this-repo> (eg: https://hostname/owner/repo.git [.git is required]) 
 /plugin install lightspeed@cerebralgardens
 ```
 

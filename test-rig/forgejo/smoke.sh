@@ -8,12 +8,12 @@ set -uo pipefail
 RIG_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$RIG_DIR/.work"
 DISP="$RIG_DIR/../../lightspeed/scripts/lightspeed"
-[ -f "$WORK/.lightspeed.json" ] || { echo "no workdir config — run ./up.sh first" >&2; exit 1; }
+[ -f "$WORK/.lightspeed/config.json" ] || { echo "no workdir config — run ./up.sh first" >&2; exit 1; }
 
-API="$(jq -r '.code.api' "$WORK/.lightspeed.json")"
-OWNER="$(jq -r '.code.owner' "$WORK/.lightspeed.json")"
-REPO="$(jq -r '.code.repo' "$WORK/.lightspeed.json")"
-TOKEN="$(jq -r '.code.token' "$WORK/.lightspeed.secrets.json")"
+API="$(jq -r '.code.api' "$WORK/.lightspeed/config.json")"
+OWNER="$(jq -r '.code.owner' "$WORK/.lightspeed/config.json")"
+REPO="$(jq -r '.code.repo' "$WORK/.lightspeed/config.json")"
+TOKEN="$(jq -r '.code.token' "$WORK/.lightspeed/secrets.json")"
 REPO_API="$API/repos/$OWNER/$REPO"
 
 lsp() { ( cd "$WORK" && "$DISP" "$@" ); }

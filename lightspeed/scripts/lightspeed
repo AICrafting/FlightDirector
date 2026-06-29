@@ -30,35 +30,35 @@ command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
 
 # Resolve the MAIN repo root — parent of the common git dir — so this works the
 # same from the main checkout and from a linked worktree (whose gitignored
-# .lightspeed.secrets.json does not exist locally). Falls back to cwd outside a repo.
+# .lightspeed/secrets.json does not exist locally). Falls back to cwd outside a repo.
 if cdir="$(git rev-parse --git-common-dir 2>/dev/null)"; then
   cdir="$(cd "$cdir" && pwd)" || die "cannot resolve git common dir: $cdir"   # absolutize (valid relative to cwd)
   repo_root="$(dirname "$cdir")"
 else
   repo_root="$(pwd)"
 fi
-cfg="$repo_root/.lightspeed.json"
-sec="$repo_root/.lightspeed.secrets.json"
+cfg="$repo_root/.lightspeed/config.json"
+sec="$repo_root/.lightspeed/secrets.json"
 
 # `lightspeed config <jq-filter>` — read the resolved config from anywhere (incl. a worktree).
 if [ "$group" = "config" ]; then
-  [ -f "$cfg" ] || die "no .lightspeed.json at repo root ($repo_root)"
+  [ -f "$cfg" ] || die "no .lightspeed/config.json at repo root ($repo_root)"
   jq -r "$verb" "$cfg"
   exit 0
 fi
 
-[ -f "$cfg" ] || die "no .lightspeed.json at repo root ($repo_root)"
+[ -f "$cfg" ] || die "no .lightspeed/config.json at repo root ($repo_root)"
 
 # Loud, every-run warning if the secrets file is tracked by git (it holds a token).
-if [ -f "$sec" ] && git -C "$repo_root" ls-files --error-unmatch .lightspeed.secrets.json >/dev/null 2>&1; then
-  echo "lightspeed: WARNING — .lightspeed.secrets.json is tracked by git; it must be gitignored (it contains a token)." >&2
+if [ -f "$sec" ] && git -C "$repo_root" ls-files --error-unmatch .lightspeed/secrets.json >/dev/null 2>&1; then
+  echo "lightspeed: WARNING — .lightspeed/secrets.json is tracked by git; it must be gitignored (it contains a token)." >&2
 fi
 
 # Resolve a config field for the axis, inheriting code → issues when absent.
 cfg_get() { jq -r --arg a "$axis" --arg f "$1" '(.[$a][$f]) // (.code[$f]) // empty' "$cfg"; }
 
 backend="$(cfg_get backend)"
-[ -n "$backend" ] || die "no backend configured for axis '$axis' (set code.backend or ${axis}.backend in .lightspeed.json)"
+[ -n "$backend" ] || die "no backend configured for axis '$axis' (set code.backend or ${axis}.backend in .lightspeed/config.json)"
 
 LS_API="$(cfg_get api)"
 LS_OWNER="$(cfg_get owner)"

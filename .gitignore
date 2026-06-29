@@ -7,7 +7,7 @@
 
 # Secrets and sensitive data
 secret*
-.lightspeed.secrets.json
+.lightspeed/secrets.json
 
 # - Keys
 *.pem

@@ -14,7 +14,7 @@ All backend access goes through the **lightspeed dispatcher** — never raw API 
 "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" <group> <verb> [--flag value …]
 ```
 
-The dispatcher reads `.lightspeed.json` for the backend, coordinates, and label-name map, so
+The dispatcher reads `.lightspeed/config.json` for the backend, coordinates, and label-name map, so
 this skill never touches owner/repo or tokens. Verb set:
 [adapter-contract.md](../../references/adapter-contract.md); config:
 [lightspeed-setup.md](../../references/lightspeed-setup.md).
@@ -29,7 +29,7 @@ this skill never touches owner/repo or tokens. Verb set:
   with plausible-sounding detail that wasn't discussed.
 - **Labels must already exist.** `issues create --label NAME` resolves the name and **errors if
   the label doesn't exist** — create it (`labels create`) or point the user at
-  `bootstrapping-labels` first. No silent no-op.
+  `setting-up-a-repo` first. No silent no-op.
 
 ## Step 1: Scan conversation context
 
@@ -106,7 +106,7 @@ Output is `name⇥color⇥description`. Good distinctions: `bug` / `feature` / `
 "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" labels create --name "new-label" --color "#0088ff"
 ```
 
-If the repo has few or no labels at all, point the user at `bootstrapping-labels` to seed the
+If the repo has few or no labels at all, point the user at `setting-up-a-repo` to seed the
 default taxonomy in one pass rather than creating labels one at a time here.
 
 ## Step 6: Create the issue

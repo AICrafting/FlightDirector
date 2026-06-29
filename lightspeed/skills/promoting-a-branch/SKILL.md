@@ -8,7 +8,7 @@ description: Use when advancing the current branch to the next stage — "promot
 Advance the current branch **one stage** up the pipeline. A promotion is the same operation at
 every hop — feature → `stages[0]`, `stages[i]` → `stages[i+1]` — parameterized by which hop.
 
-All backend access is through the dispatcher; pipeline lives in `.lightspeed.json` `code.stages`:
+All backend access is through the dispatcher; pipeline lives in `.lightspeed/config.json` `code.stages`:
 
     "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config '.code.stages'
 
@@ -137,8 +137,8 @@ convention):
   ```
   "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues set-status --number N --status qa
   ```
-  (requires a `qa` status role configured in `.lightspeed.json` `labels.status` — see
-  `bootstrapping-labels`.)
+  (requires a `qa` status role configured in `.lightspeed/config.json` `labels.status` — see
+  `setting-up-a-repo`.)
   When a later promotion carries those issues to the final stage and QA passes, close them
   (`issues close --number N`).
 

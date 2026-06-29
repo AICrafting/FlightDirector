@@ -1,11 +1,11 @@
 ---
-name: bootstrapping-labels
-description: Use when setting up a repo for lightspeed for the first time, or when the user says "set up labels", "bootstrap labels", "add the default labels", "configure issue labels", or when filing reveals the repo has few or no labels. Writes the lightspeed config + secrets, then reconciles a default label taxonomy against existing labels and creates only what's missing, after a preview.
+name: setting-up-a-repo
+description: Use when setting up a repo for lightspeed for the first time — "set up this repo", "set up lightspeed", "configure lightspeed", "set up labels", "bootstrap labels", "add the default labels" — or when filing/triage reveals the repo has no lightspeed config or few labels. Writes the lightspeed config + secrets (backend coordinates, stage pipeline, worker model), then reconciles a default label taxonomy against existing labels and creates only what's missing, after a preview.
 ---
 
-# Bootstrapping Labels
+# Setting Up a Repo
 
-The first-run setup skill: it writes the `.lightspeed.json` + `.lightspeed.secrets.json` the
+The first-run setup skill: it writes the `.lightspeed/config.json` + `.lightspeed/secrets.json` the
 dispatcher needs, then brings the repo up to the default label taxonomy — idempotently, adopting
 existing equivalents and creating only the approved missing labels.
 
@@ -34,7 +34,7 @@ must be proposed from the actual project, not seeded from a table.
 - **Never create `area/*` labels without project input.** They're project-dependent — propose,
   then wait for the user to confirm/edit.
 - **One confirmation gate before creating anything.** Show the full plan first.
-- **Never commit `.lightspeed.secrets.json`.** It holds the token — add it to `.gitignore`
+- **Never commit `.lightspeed/secrets.json`.** It holds the token — add it to `.gitignore`
   before writing it.
 
 ## Step 1: Coordinates + instance
@@ -47,13 +47,16 @@ otherwise `issues` inherits `code` and you only need one set.
 ## Step 2: Token → secrets file
 
 The dispatcher needs a per-repo API token. Ask the user to create a **least-privilege** token on
-the host (`write:repository`, `write:issue`, `write:misc` — not an all-orgs admin token; see
-[lightspeed-setup.md](../../references/lightspeed-setup.md)). Then:
+the host — just `write:repository` and `write:issue` (the latter also covers labels), not an
+all-orgs admin token. These two work with a token restricted to a single repository; do **not**
+add `write:misc` (unused, and Forgejo rejects it on a single-repo token). See
+[lightspeed-setup.md](../../references/lightspeed-setup.md). Then:
 
-1. Add `.lightspeed.secrets.json` **and** `.worktrees/` to `.gitignore` **first** (create
+1. Create the config folder: `mkdir -p .lightspeed`.
+2. Add `.lightspeed/secrets.json` **and** `.worktrees/` to `.gitignore` **first** (create
    `.gitignore` if needed). `.worktrees/` is where `working-an-issue` creates per-issue git
    worktrees — they must be ignored so they don't appear as untracked content in the repo.
-2. Write `.lightspeed.secrets.json` at the repo root:
+3. Write `.lightspeed/secrets.json`:
    ```json
    { "code": { "token": "<the token>" } }
    ```
@@ -83,7 +86,7 @@ open (`Ready #N`) after merging to `qa` so users can verify before the final pro
 ```
 
 **(c) Advanced / custom** — capture a custom ordered list of stages (name + per-hop `merge` and
-optional `gate`), or tell the user they can hand-edit `code.stages` in `.lightspeed.json`
+optional `gate`), or tell the user they can hand-edit `code.stages` in `.lightspeed/config.json`
 afterward per [lightspeed-setup.md](../../references/lightspeed-setup.md).
 
 **Defaults explained briefly:**
@@ -91,11 +94,11 @@ afterward per [lightspeed-setup.md](../../references/lightspeed-setup.md).
 - `merge: "direct"` integrates by merging locally; `merge: "pr"` opens a pull request for the hop.
 - `gate: "pre-merge"` runs checks before merging; `gate: "post-merge-qa"` keeps the issue open
   (`Ready #N`) after the hop so the user can verify the change in that environment before closing.
-- The user can always edit `.lightspeed.json` later to adjust stages.
+- The user can always edit `.lightspeed/config.json` later to adjust stages.
 
 ## Step 4: Write the initial config
 
-Write `.lightspeed.json` at the repo root with coordinates + the chosen stage pipeline (the
+Write `.lightspeed/config.json` in the `.lightspeed/` folder (created in Step 2) with coordinates + the chosen stage pipeline (the
 `labels` map gets finalized in Step 8; start it from the defaults). Example for preset (b):
 
 ```json
@@ -105,7 +108,8 @@ Write `.lightspeed.json` at the repo root with coordinates + the chosen stage pi
       { "name": "develop", "merge": "direct", "gate": "pre-merge" },
       { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa" },
       { "name": "main",    "merge": "pr" }
-    ] },
+    ],
+    "queueBatches": { "defaultModel": "sonnet" } },
   "labels": {
     "status": { "in-progress": "status/in progress", "to-test": "status/to test",
                 "blocked": "status/blocked", "deferred": "status/deferred",
@@ -115,6 +119,13 @@ Write `.lightspeed.json` at the repo root with coordinates + the chosen stage pi
   }
 }
 ```
+
+`code.queueBatches.defaultModel` sets the default model the `queue-batches` skill gives its
+worker agents (overridable per run). `sonnet` is a sensible default for mechanical implementation
+work; change it here to retarget all future parallel runs (e.g. to a newer model) without editing
+the skill. You can also add an optional `code.zones` array later — see
+[lightspeed-setup.md](../../references/lightspeed-setup.md) — to make `queue-batches` schedule
+deterministically instead of inferring zones.
 
 Use the `stages` array from the chosen preset (a), (b), or the user's custom pipeline. All six
 status roles (`in-progress`, `to-test`, `blocked`, `deferred`, `review`, `qa`) are seeded so the
@@ -175,7 +186,7 @@ On approval, create each missing label with its name/color/description from the 
 "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" labels create --name "bug" --color "#d73a4a" --description "Something is broken"
 ```
 
-Then **finalize `.lightspeed.json`**: update the `labels` map so every role records the actual
+Then **finalize `.lightspeed/config.json`**: update the `labels` map so every role records the actual
 name this repo uses (the adopted names from Steps 6–7). This is what makes the other skills use
 *this repo's* label names. Report what was created, adopted, and declined. Re-running later is
 safe — everything now present becomes EXISTS/ADOPT.
@@ -184,8 +195,8 @@ safe — everything now present becomes EXISTS/ADOPT.
 
 - Creating `feature` when the repo already uses `enhancement` (duplicate taxonomy). Adopt
   `enhancement` as the role's name and record it in the config.
-- Creating labels but forgetting to finalize the `labels` map in `.lightspeed.json` — then the
+- Creating labels but forgetting to finalize the `labels` map in `.lightspeed/config.json` — then the
   other skills use plugin defaults and ignore the names you adopted.
-- Writing `.lightspeed.secrets.json` without gitignoring it first — that leaks the token.
+- Writing `.lightspeed/secrets.json` without gitignoring it first — that leaks the token.
 - Seeding `area/*` from the table without checking the project.
 - Recoloring or renaming an existing label to match the default. Only add what's missing.

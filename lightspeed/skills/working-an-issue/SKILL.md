@@ -15,7 +15,7 @@ All issue actions go through the **lightspeed dispatcher**; branch/merge are git
 "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" <group> <verb> [--flag value …]
 ```
 
-The dispatcher resolves coordinates, token, and label names from `.lightspeed.json` — you pass
+The dispatcher resolves coordinates, token, and label names from `.lightspeed/config.json` — you pass
 **status roles** (`in-progress`, `to-test`, …) and it maps them to this repo's actual label
 names. Read `stages[0]` (the first integration branch) via:
 
