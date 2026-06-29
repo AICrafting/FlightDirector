@@ -40,11 +40,12 @@ into the session:
 - **Claude Code** (the plugin runs as Claude Code skills).
 - **`curl`** and **`jq`** on your `PATH`.
 - A **Forgejo** instance and a repo you can push to.
-- A **per-repo API token** with just the scopes the skills use: `write:repository`,
-  `write:issue`, and `write:misc`. Create one in Forgejo under
+- A **per-repo API token** with just the two scopes the skills use: `write:repository` and
+  `write:issue` (`write:issue` also covers labels). Create one in Forgejo under
   *Settings → Applications → Generate New Token* — scope it to what you need, not an all-orgs
-  admin token. (Why per-repo? A misfire then fails with a hard `403` instead of writing to the
-  wrong place.)
+  admin token. These two work with a token restricted to a single repository; don't add
+  `write:misc` (the skills don't use it, and Forgejo won't allow it on a single-repo token).
+  (Why per-repo? A misfire then fails with a hard `403` instead of writing to the wrong place.)
 
 ---
 
