@@ -47,8 +47,10 @@ otherwise `issues` inherits `code` and you only need one set.
 ## Step 2: Token → secrets file
 
 The dispatcher needs a per-repo API token. Ask the user to create a **least-privilege** token on
-the host (`write:repository`, `write:issue`, `write:misc` — not an all-orgs admin token; see
-[lightspeed-setup.md](../../references/lightspeed-setup.md)). Then:
+the host — just `write:repository` and `write:issue` (the latter also covers labels), not an
+all-orgs admin token. These two work with a token restricted to a single repository; do **not**
+add `write:misc` (unused, and Forgejo rejects it on a single-repo token). See
+[lightspeed-setup.md](../../references/lightspeed-setup.md). Then:
 
 1. Add `.lightspeed.secrets.json` **and** `.worktrees/` to `.gitignore` **first** (create
    `.gitignore` if needed). `.worktrees/` is where `working-an-issue` creates per-issue git

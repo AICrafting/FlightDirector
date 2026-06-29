@@ -120,8 +120,10 @@ the secrets file (the axis's token, inheriting `code`'s).
 
 The point of a per-repo token is blast radius: one scoped to a single repo can't touch another,
 so a misfire fails with `403` instead of writing to the wrong place. On Forgejo, create a token
-with only the scopes the skills need — `write:repository`, `write:issue`, and `write:misc` (for
-labels) — not an all-orgs admin token.
+with only the two scopes the skills need — `write:repository` (PRs, CI) and `write:issue` (issues
+**and labels**) — not an all-orgs admin token. These two are compatible with a token *restricted
+to a single repository*; do **not** add `write:misc` — the skills don't use it, and Forgejo won't
+let you combine `write:misc` with a single-repo restriction.
 
 ## How resolution works
 
