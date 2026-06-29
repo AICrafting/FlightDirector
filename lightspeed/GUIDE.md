@@ -53,7 +53,7 @@ into the session:
 1. Add the marketplace that ships lightspeed, then install the plugin:
 
    ```
-   /plugin marketplace add <url-or-path-of-this-repo>
+   /plugin marketplace add <this-repo> (eg: https://hostname/owner/repo.git [.git is required]) 
    /plugin install lightspeed@cerebralgardens
    ```
 
