@@ -1,3 +1,4 @@
+---
 # Seeded by test-rig/github/up.sh into the target repo at .github/workflows/ci.yml.
 # Trivial workflow so `lightspeed ci watch/log` have a real Actions run to observe.
 # Runs on push to rig/** branches only (keeps it out of the way of real work).
