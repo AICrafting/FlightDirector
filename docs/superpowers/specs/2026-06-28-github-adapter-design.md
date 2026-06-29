@@ -109,6 +109,13 @@ Forgejo adapter; only the add/remove mechanics change (names, not ids).
 Independent `curl` + `jq` (no `gh` dependency), mirroring the Forgejo rig's `up`/`smoke`/`down`
 triptych, adapted for a **persistent hosted** target.
 
+**Target branch state:** `LightspeedTestTarget` currently has only `main`. The rig treats `main`
+as the trunk (`code.stages[0]` / `trunkBranch`) and **creates any branches it needs off `main`**
+at runtime; `down.sh` deletes them. The rig never assumes a branch other than `main` exists and
+**never writes to `main`** — the `pr` smoke opens/merges a PR between two `rig/<ts>` branches (a
+`rig/<ts>-base` and a `rig/<ts>-head`, both cut from `main`), so the merge target is a rig branch,
+not `main`.
+
 ### `up.sh`
 1. Resolve token: `$LIGHTSPEED_GH_TOKEN`, else source a gitignored `test-rig/github/.env`
    (`LIGHTSPEED_GH_TOKEN=…`); `die` with guidance if absent.
@@ -129,9 +136,10 @@ Runs the dispatcher verbs from `.work/`, asserting behavior (pass/fail counter l
 - `issues`: create (`[rig]` title, `rig` label) → list/get → set-status single-status invariant →
   comment → label-add/clear-status → close.
 - `labels`: resolve (existing → id, unknown → empty), create.
-- `pr`: create a `rig/<ts>` branch with one commit (contents API), `pr open` → `pr merge`.
-- `ci`: push the `rig/<ts>` branch to trigger the seeded workflow, `ci watch --sha <sha>` to a
-  terminal state; assert it streams `task-<id> status=…` and exits.
+- `pr`: cut `rig/<ts>-base` and `rig/<ts>-head` from `main`, add one commit to the head (contents
+  API), `pr open --base rig/<ts>-base --head rig/<ts>-head` → `pr merge` (leaves `main` untouched).
+- `ci`: pushing the `rig/<ts>-head` commit triggers the seeded workflow (it runs on `rig/**`);
+  `ci watch --sha <sha>` to a terminal state; assert it streams `task-<id> status=…` and exits.
 
 ### `down.sh`
 Surgical, marker-only:
