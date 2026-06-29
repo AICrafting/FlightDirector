@@ -83,6 +83,24 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
   `.lightspeed-agent-rules.md`; if that file is absent, workers run with the skill's built-in
   safety rules only (no project-specific rules).
 
+### GitHub backend
+
+Point an axis at GitHub by setting its `backend` + `api` in `.lightspeed.json`:
+
+```jsonc
+"code": {
+  "backend": "github",
+  "owner": "your-org-or-user",
+  "repo": "your-repo",
+  "api": "https://api.github.com",          // note: no /api/v1 (that's Forgejo)
+  "stages": [ { "name": "main", "merge": "pr" } ]
+}
+```
+
+The token goes in the gitignored `.lightspeed.secrets.json` (`code.token`), a GitHub PAT with
+**repo** scope (+ **workflow** if you use `ci`). `bootstrapping-labels` does not yet offer GitHub
+as a backend choice — configure GitHub repos by hand-editing `.lightspeed.json` for now.
+
 ### `.lightspeed.secrets.json` — gitignored
 
 Just the token(s), one per axis, with the same `code → issues` inheritance:
