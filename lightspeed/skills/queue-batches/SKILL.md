@@ -96,7 +96,7 @@ DISP="$CLAUDE_PLUGIN_ROOT/scripts/lightspeed"
 ROOT="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 BASE="$("$DISP" config '.code.stages[0].name')"
 MODEL="$("$DISP" config '.code.queueBatches.defaultModel // "sonnet"')"   # unless user overrode
-RULES_FILE="$("$DISP" config '.code.queueBatches.agentRulesFile // ".lightspeed-agent-rules.md"')"
+RULES_FILE="$("$DISP" config '.code.queueBatches.agentRulesFile // ".lightspeed/agent-rules.md"')"
 REPO_RULES="$( [ -s "$ROOT/$RULES_FILE" ] && cat "$ROOT/$RULES_FILE" || echo 'None configured.' )"
 mkdir -p "$SCRATCH/queue-status"
 ```
