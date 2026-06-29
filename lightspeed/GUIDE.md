@@ -68,7 +68,7 @@ From inside the repo, tell Claude:
 
 > **"set up lightspeed for this repo"**  (or *"bootstrap labels"*)
 
-That triggers **`bootstrapping-labels`**, which walks you through setup:
+That triggers **`setting-up-a-repo`**, which walks you through setup:
 
 1. **Coordinates** — it reads your git remote to propose the `owner/repo` and the API base, and
    asks you to confirm.
@@ -98,7 +98,7 @@ all speak your repo's conventions.
 | "let's work on #N", "this is ready to test", "merge #N" | **working-an-issue** | Worktree → status labels → human merge gate → finish |
 | "promote this", "promote develop to main" | **promoting-a-branch** | Advance the branch one stage (direct merge or PR + CI) |
 | `/queue-batches NxM`, "work N issues in parallel", "batch these" | **queue-batches** | Dispatch N background agents × M issues each; isolated worktrees (zones), stop at to-test, then a serial promoting-a-branch hand-off |
-| "set up lightspeed", "bootstrap labels" | **bootstrapping-labels** | First-run setup (above) |
+| "set up lightspeed", "bootstrap labels" | **setting-up-a-repo** | First-run setup (above) |
 
 You never type the underlying commands — you talk to Claude, and the skills drive the forge for
 you.
@@ -190,5 +190,5 @@ stage between `develop` and `main`. The skills pick it up immediately.
   By default `issues` inherits `code`.
 - **The merge gate is real.** If you want something merged, say so explicitly — "merge #N" /
   "promote …". Claude will leave work at *ready-to-test* and stop otherwise.
-- **Re-running setup is safe.** `bootstrapping-labels` is idempotent — it only adds what's
+- **Re-running setup is safe.** `setting-up-a-repo` is idempotent — it only adds what's
   missing and never renames or deletes your existing labels.

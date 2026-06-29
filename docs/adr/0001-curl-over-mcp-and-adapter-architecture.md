@@ -174,7 +174,7 @@ required toolchain) we just eliminated, for backends that don't need it.
 
 - Set the plugin name to `lightspeed` in `plugin.json`.
 - Rewrite the four existing skills (`filing-issues`, `triaging-issues`,
-  `bootstrapping-labels`, `working-an-issue`) onto the contract verbs; implement the Forgejo
+  `setting-up-a-repo`, `working-an-issue`) onto the contract verbs; implement the Forgejo
   adapter in shell.
 - Move config to `.lightspeed.json` + `.lightspeed.secrets.json`, with `code`/`issues` axes
   and `code → issues` inheritance.

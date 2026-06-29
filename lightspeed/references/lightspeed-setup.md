@@ -77,7 +77,7 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
   `queue-batches` infers pseudo-zones from issue bodies at triage time and warns that the
   inferred zones are approximate.
 - `code.queueBatches.defaultModel` — worker-agent model when the user gives no per-run override.
-  Seeded by `bootstrapping-labels` during first-run setup; falls back to `sonnet` if unset.
+  Seeded by `setting-up-a-repo` during first-run setup; falls back to `sonnet` if unset.
 - `code.queueBatches.agentRulesFile` — path (repo-relative) to a markdown file of repo-specific
   agent hard-rules / CI gotchas, injected verbatim into each worker prompt. Defaults to
   `.lightspeed-agent-rules.md`; if that file is absent, workers run with the skill's built-in
@@ -98,7 +98,7 @@ Point an axis at GitHub by setting its `backend` + `api` in `.lightspeed.json`:
 ```
 
 The token goes in the gitignored `.lightspeed.secrets.json` (`code.token`), a GitHub PAT with
-**repo** scope (+ **workflow** if you use `ci`). `bootstrapping-labels` does not yet offer GitHub
+**repo** scope (+ **workflow** if you use `ci`). `setting-up-a-repo` does not yet offer GitHub
 as a backend choice — configure GitHub repos by hand-editing `.lightspeed.json` for now.
 
 ### `.lightspeed.secrets.json` — gitignored
@@ -128,7 +128,7 @@ labels) — not an all-orgs admin token.
 The dispatcher picks the **axis** from the group — `issues`/`labels` → `issues.*`,
 `pr`/`ci` → `code.*` — resolves that axis's backend, coordinates, and token (inheriting `code`),
 exports them as `LS_*`, and execs `adapters/<backend>/<group>`. Skills therefore never pass
-owner/repo/token; they just name the verb. `bootstrapping-labels` autodetects and writes the
+owner/repo/token; they just name the verb. `setting-up-a-repo` autodetects and writes the
 coordinates from the git remote on first run, so in the normal case you set nothing by hand.
 
 ## Context note
