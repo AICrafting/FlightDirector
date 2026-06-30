@@ -81,6 +81,11 @@ lsp issues close --number "$N"
 state="$(curl -fsS -H "Authorization: token $TOKEN" "$REPO_API/issues/$N" | jq -r '.state')"
 [ "$state" = "closed" ] && ok "issue closed" || no "issue closed" "state=$state"
 
+echo "── reopen ──"
+lsp issues reopen --number "$N"
+state="$(curl -fsS -H "Authorization: token $TOKEN" "$REPO_API/issues/$N" | jq -r '.state')"
+[ "$state" = "open" ] && ok "issue reopened" || no "issue reopened" "state=$state"
+
 echo
 if [ "$fail" -eq 0 ]; then
   printf '\033[32m✓ ALL %d CHECKS PASSED\033[0m\n' "$pass"

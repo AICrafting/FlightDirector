@@ -15,7 +15,7 @@ lightspeed/scripts/
   adapters/
     forgejo/
       _common.sh             # shared: _api(), label_id(), auth, error handling (sourced)
-      issues                 # subcommands: list get create comment set-status close
+      issues                 # subcommands: list get create comment set-status close reopen
       pr                     # subcommands: open merge        (pull request; "MR" on GitLab)
       ci                     # subcommands: watch log
       labels                 # subcommands: resolve
@@ -74,6 +74,7 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 | `clear-status`| `--number N`                         | (nothing) — removes every managed `status/*` label from the issue |
 | `label-add` | `--number N` `--label NAME` (repeatable) | (nothing) — adds existing labels by name (errors if a name doesn't exist) |
 | `close`     | `--number N`                           | (nothing) |
+| `reopen`    | `--number N`                           | (nothing) — inverse of `close`; sets the issue's state back to open |
 
 ### `labels`
 
