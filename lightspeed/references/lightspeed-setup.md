@@ -28,8 +28,8 @@ Backend, coordinates, and preferences, across two independent axes:
     "backend": "forgejo", "owner": "acme", "repo": "widget",
     "api": "https://git.example.com/api/v1",
     "stages": [
-      { "name": "develop", "merge": "direct", "gate": "pre-merge" },
-      { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa" },
+      { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },
+      { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa", "issueStatus": "qa" },
       { "name": "main",    "merge": "pr" }
     ]
   },
@@ -56,6 +56,15 @@ Backend, coordinates, and preferences, across two independent axes:
   feature branches fork from it. Each hop carries its own `merge` (`direct`|`pr`) and optional
   `gate` (`pre-merge`|`post-merge-qa`, default `pre-merge`). Consumed by `working-an-issue`
   (uses `stages[0]`) and `promoting-a-branch` (one hop at a time).
+- **`issueStatus`** (per stage, optional) — a **status role name** (a key in `labels.status`).
+  On *entering* this stage, `promoting-a-branch` runs the atomic `issues set-status --status
+  <role>` (adds the new status, drops the others in one call — the board can never show two
+  states). Omit to leave the issue's status untouched on entry to this stage.
+- **`closesIssues`** (per stage, optional, boolean) — **defaults to "true iff this is the
+  terminal (last) stage."** Set explicitly to override: `false` on the terminal stage keeps
+  issues open after the final stage; `true` on a non-terminal stage closes issues early at that
+  stage (e.g. close at `develop`, treat `main` as a pure release cut). The `gate` field is
+  orthogonal — it governs merge policy, not issue lifecycle.
 - Note: `trunkBranch`, `mergeStrategy`, and `gate` (single-value top-level fields) are
   superseded by `stages`. For backwards compatibility a legacy `trunkBranch` is still read
   **first** if present; otherwise `stages[0].name` is used.
