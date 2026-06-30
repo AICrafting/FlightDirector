@@ -1,7 +1,7 @@
 {
   "name": "lightspeed",
   "description": "Opinionated issue + code workflow for a repo from within a session — first-run setup, filing, triaging, and working issues through their lifecycle — over the backend's REST API (Forgejo or GitHub), no MCP server required.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": {
     "name": "Cerebral Gardens"
   },
