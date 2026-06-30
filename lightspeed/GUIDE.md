@@ -168,6 +168,16 @@ on the linked issues and closes them only when they reach a stage that closes �
 visible (e.g. `status/to test`, then `status/qa`) as it climbs the pipeline, and closes when it
 lands in the final stage.
 
+**Choosing how a PR merges.** On a `pr` hop you can pick the merge strategy — tell Claude
+"promote to main, squash" (or pass `--strategy`):
+
+- `merge` *(default)* — a merge commit; keeps the branch's individual commits on the target.
+- `squash` — collapses the whole branch into a single commit on the target.
+- `rebase` — replays the branch's commits onto the target with no merge commit.
+
+If you don't say, it's `merge`. (This applies to `pr` hops only — a `direct` hop like
+feature → `develop` always merges with `--no-ff` and has no strategy option.)
+
 That's the full loop: **file → triage → work (in a worktree, behind a merge gate) → promote up
 the pipeline** — all without leaving the session.
 
