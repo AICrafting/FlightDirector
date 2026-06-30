@@ -72,6 +72,9 @@ These drove every design decision. Re-verify with `--help` if a CC version chang
    - It defaults to scope `user`; a `--scope local` install needs
      `plugin update … --scope local` or you get
      `Plugin "…" is not installed at scope user`.
+   - **`plugin uninstall` has the same default** — it too assumes `--scope user`,
+     so uninstalling a local-scope install needs `plugin uninstall … --scope local`
+     or it errors with the same "not installed at scope user" message.
    - **Bumping the manifest version did NOT reliably force a re-snapshot either**
      (tested). The only thing that reliably works is deleting the cache dir.
 
@@ -140,9 +143,9 @@ the edits (see fact #5/#6). The **reliable** refresh is to delete the
 version-keyed cache dir and reinstall:
 
 ```bash
-VER=0.3.0   # = the version in the dev manifest
+VER=0.4.0   # = the version in the dev manifest (keep in sync when it bumps)
 rm -rf ~/.claude/plugins/cache/cerebralgardens-dev/lightspeed/$VER
-claude plugin uninstall lightspeed@cerebralgardens-dev
+claude plugin uninstall lightspeed@cerebralgardens-dev --scope local
 claude plugin install   lightspeed@cerebralgardens-dev --scope local
 # then:
 /reload-plugins      # or restart the session
