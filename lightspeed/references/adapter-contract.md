@@ -65,6 +65,7 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 |-------------|----------------------------------------|--------|
 | `list`      | `--state open\|closed\|all` `--limit N` `--label NAME` (repeatable) | one row per issue: `number⇥title⇥comma,labels` |
 | `get`       | `--number N`                           | `number⇥title` then a blank line then the raw body (the one verb that emits a body) |
+| `comments`  | `--number N`                           | one block per comment, oldest-first: `author⇥created_at` header line, the raw comment body, then a blank separator line. Empty output (exit 0) = no comments |
 | `create`    | `--title T` `--body B` (or `--body-file PATH`) `--label NAME` (repeatable) | the new issue `number`; labels resolved name→id, applied at creation |
 | `update`    | `--number N` `--title T` and/or `--body B` (or `--body-file PATH`) | (nothing) — patches only the fields passed |
 | `comment`   | `--number N` `--body B` (or `--body-file PATH`) | (nothing; exit 0) |

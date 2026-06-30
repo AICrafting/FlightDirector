@@ -46,6 +46,13 @@ merge config fields or hand-merge here. Config + verbs:
 
 ### 1. Start work
 
+- **Read the issue *and its comments* first.** The body alone can be stale — clarifications,
+  scope corrections, and decisions often live in the comments. Fetch both before you plan:
+  ```
+  "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues get      --number N
+  "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues comments --number N
+  ```
+  If a comment contradicts the body, the later comment wins — work to that, and say so.
 - Determine the issue number `N` and derive a short slug from its title (lowercase, hyphens, no
   special characters) — e.g. issue #42 "Add login page" → slug `add-login-page`.
 - Pick `feature` vs `bug` from the issue's type label or content.
