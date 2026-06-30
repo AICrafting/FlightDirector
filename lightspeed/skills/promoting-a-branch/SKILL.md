@@ -50,7 +50,7 @@ git log <target>..HEAD --oneline
 ```
 
 Record the `#N` that are actually *resolved* by this branch (judgment — a mention isn't a
-resolution). These drive the PR's `Ready #N` lines and the test-plan block.
+resolution). These drive the PR's `$KEYWORD #N` lines (see Step 4) and the test-plan block.
 
 ## Step 3: Test plans (pr hops) — HALT if missing
 
