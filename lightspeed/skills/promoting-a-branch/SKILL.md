@@ -145,8 +145,8 @@ convention):
 
 After the merge into `<target>` succeeds, the **target stage** decides what happens to each
 resolved `#N` — the *same* rule at every hop, `direct` or `pr`. Reuse `CLOSES` / `ISSUE_STATUS`
-from Step 1 of the hop (for a `direct` hop that skipped that resolution, compute them now with the
-same block). For each resolved `#N`:
+from the resolution block in Step 4 (for a `direct` hop, which skips that `pr`-only block, compute
+them now with the same snippet). For each resolved `#N`:
 
 - `ISSUE_STATUS` non-empty → set the stage's status atomically:
   ```
