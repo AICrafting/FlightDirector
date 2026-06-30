@@ -170,6 +170,11 @@ obvious services) and **propose** an area set that fits — e.g. `web/` + `api/`
 suggests `area/app`, `area/server`, `area/db`. Let the user confirm, edit, or skip. Adopt
 existing area equivalents the same way (`frontend` → `area/app`).
 
+Whatever area names are chosen — including custom ones not in the table — create them all with
+the single `area/*` **group colour** (`#3b82f6` per [default-labels.md](../../references/default-labels.md)).
+One colour per namespaced prefix is the convention (`model/*` likewise shares its colour);
+`status/*` is the only namespaced set that varies colour per label.
+
 ## Step 8: Plan → confirm → create → finalize
 
 Show one grouped plan and ask once:
