@@ -106,6 +106,12 @@ Output is `name⇥color⇥description`. Good distinctions: `bug` / `feature` / `
 "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" labels create --name "new-label" --color "#0088ff"
 ```
 
+**Colour by prefix.** If the new label carries a **known namespaced prefix** (`area/*`,
+`model/*`, `tool/*`), reuse that group's existing colour from the `labels list` output rather
+than inventing one — the prefix is a colour family ([default-labels.md](../../references/default-labels.md)).
+A `status/*` label instead takes its own distinct semantic colour. Prefix-less labels get a new
+colour of their own.
+
 If the repo has few or no labels at all, point the user at `setting-up-a-repo` to seed the
 default taxonomy in one pass rather than creating labels one at a time here.
 
