@@ -99,6 +99,9 @@ MODEL="$("$DISP" config '.code.queueBatches.defaultModel // "sonnet"')"   # unle
 RULES_FILE="$("$DISP" config '.code.queueBatches.agentRulesFile // ".lightspeed/agent-rules.md"')"
 REPO_RULES="$( [ -s "$ROOT/$RULES_FILE" ] && cat "$ROOT/$RULES_FILE" || echo 'None configured.' )"
 mkdir -p "$SCRATCH/queue-status"
+# A run id for this batch; also names the manifest that records issue→zone
+# grouping so batch promotion can honor "promote each zone" later.
+RUN_ID="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 ```
 
 If `REPO_RULES` is `None configured.`, note it in the plan output so the user knows workers run
@@ -123,6 +126,16 @@ Per zone:
   `<zone> · <labels>` — plus one per-zone ship task `Ship <zone> (serial promote + cleanup)`.
 - Launch `tail -f "$LOG"` with `run_in_background: true` and attach `Monitor` so each new log line
   becomes a notification.
+
+Once every zone's issue set is fixed, record the run manifest (one call, all zones) so batch
+promotion can reconstruct the grouping — this survives even when zones were *inferred* (no
+`code.zones`), which nothing else captures:
+
+```bash
+"$CLAUDE_PLUGIN_ROOT/scripts/batch-manifest" write --run-id "$RUN_ID" \
+  --zone <zone-a> --issues "<zone-a issue numbers>" \
+  --zone <zone-b> --issues "<zone-b issue numbers>"   # …one --zone/--issues pair per zone
+```
 
 ## 4. Monitor + render
 
