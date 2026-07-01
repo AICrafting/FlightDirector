@@ -66,6 +66,33 @@ check "groups lists docs (40,41)" \
 check "groups lists rig (50)" \
 	"$(printf '%s\n' "$groups_out" | grep -qP '^rig\t50$' && echo 1 || echo 0)"
 
+# --- heal: keep only live issues; drop empty zones; delete empty manifests ---
+# Live set keeps only docs's 40,41. RUN1 loses lightspeed but keeps docs;
+# RUN2 loses both lightspeed and rig → deleted.
+"$BM" heal --live "40 41"
+check "heal deletes a manifest with no zones left (RUN2)" \
+	"$([ ! -f "$DIR/RUN2.json" ] && echo 1 || echo 0)"
+check "heal keeps RUN1 (docs survives)" \
+	"$([ -f "$DIR/RUN1.json" ] && echo 1 || echo 0)"
+check "heal drops emptied zone lightspeed from RUN1" \
+	"$([ "$(jq -c '.zones.lightspeed // "gone"' "$DIR/RUN1.json")" = '"gone"' ] && echo 1 || echo 0)"
+check "heal keeps docs in RUN1" \
+	"$([ "$(jq -c '.zones.docs' "$DIR/RUN1.json")" = "[40,41]" ] && echo 1 || echo 0)"
+
+# Healing against an empty live set removes everything.
+"$BM" heal --live ""
+check "heal with empty live set clears all manifests" \
+	"$([ -z "$(ls -A "$DIR" 2>/dev/null)" ] && echo 1 || echo 0)"
+
+# --- heal tolerates a malformed manifest (missing .zones) without aborting ---
+"$BM" write --run-id RUN3 --zone core --issues "60 61"
+printf '%s\n' '{"runId":"BAD"}' > "$DIR/BAD.json"
+"$BM" heal --live "60 61"   # must NOT crash on BAD.json
+check "heal survives a manifest with no .zones (others still healed)" \
+	"$([ "$(jq -c '.zones.core' "$DIR/RUN3.json")" = "[60,61]" ] && echo 1 || echo 0)"
+check "heal deletes the malformed zero-zone manifest" \
+	"$([ ! -f "$DIR/BAD.json" ] && echo 1 || echo 0)"
+
 printf '\033[1m────────────────────────────\033[0m\n'
 printf 'Passed: %d  Failed: %d\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
