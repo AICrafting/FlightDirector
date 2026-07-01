@@ -35,6 +35,19 @@ write)
 	mkdir -p "$DIR"
 	jq -n --arg r "$run_id" --argjson z "$zones" '{runId:$r, zones:$z}' > "$DIR/$run_id.json"
 	;;
+groups)
+	[ -d "$DIR" ] || exit 0
+	set -- "$DIR"/*.json
+	[ -e "$1" ] || exit 0
+	jq -rs '
+		(map(.zones // {})
+		 | reduce .[] as $z ({};
+		     reduce ($z | keys_unsorted[]) as $k (.;
+		       .[$k] = ((.[$k] // []) + $z[$k] | unique))))
+		| to_entries[]
+		| "\(.key)\t\(.value | map(tostring) | join(","))"
+	' "$@"
+	;;
 *)
 	die "unknown command: '$cmd' (expected: write|groups|heal)"
 	;;

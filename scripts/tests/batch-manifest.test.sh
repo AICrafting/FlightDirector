@@ -56,6 +56,16 @@ else
 	check "errors on unknown command" 1
 fi
 
+# --- groups: merges same-named zones across manifests, unions + sorts ---
+"$BM" write --run-id RUN2 --zone lightspeed --issues "12 7" --zone rig --issues "50"
+groups_out="$("$BM" groups | sort)"
+check "groups lists lightspeed union sorted (7,12,18,93)" \
+	"$(printf '%s\n' "$groups_out" | grep -qP '^lightspeed\t7,12,18,93$' && echo 1 || echo 0)"
+check "groups lists docs (40,41)" \
+	"$(printf '%s\n' "$groups_out" | grep -qP '^docs\t40,41$' && echo 1 || echo 0)"
+check "groups lists rig (50)" \
+	"$(printf '%s\n' "$groups_out" | grep -qP '^rig\t50$' && echo 1 || echo 0)"
+
 printf '\033[1m────────────────────────────\033[0m\n'
 printf 'Passed: %d  Failed: %d\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
