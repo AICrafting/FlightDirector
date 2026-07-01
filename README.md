@@ -31,6 +31,8 @@ independent `version`, so plugins release on their own cadence — the marketpla
 indexes them. To add a new plugin: create its directory with a `.claude-plugin/plugin.json`,
 then add an entry to `.claude-plugin/marketplace.json`.
 
+Working on the tools in this repo? See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Credits
 
 - **Aaron Wood** — *The original ideast* 🤣
