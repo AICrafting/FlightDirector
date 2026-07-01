@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Forgejo issues adapter — verbs: list get create comment set-status close.
+# Forgejo issues adapter — verbs: list get comments create comment set-status close.
 # See ../../../references/adapter-contract.md.
 set -euo pipefail
 ADAPTER_NAME="forgejo/issues"
@@ -35,6 +35,19 @@ case "$verb" in
     [ -n "$number" ] || die "issues get: --number required"
     _api GET "/issues/${number}" \
       | jq -r '([(.number|tostring), .title] | @tsv), "", (.body // "")'
+    ;;
+
+  comments)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues comments: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues comments: --number required"
+    # One block per comment, oldest-first: `author⇥created_at` header, the raw
+    # body, then a blank separator. Empty output (exit 0) means no comments.
+    _api GET "/issues/${number}/comments" \
+      | jq -r '.[] | ([(.user.login // "?"), .created_at] | @tsv), (.body // ""), ""'
     ;;
 
   create)
@@ -215,5 +228,15 @@ case "$verb" in
     _api PATCH "/issues/${number}" "$(jq -n '{state:"closed"}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get create update comment attach set-status clear-status label-add close)" ;;
+  reopen)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues reopen: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues reopen: --number required"
+    _api PATCH "/issues/${number}" "$(jq -n '{state:"open"}')" >/dev/null
+    ;;
+
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add close reopen)" ;;
 esac

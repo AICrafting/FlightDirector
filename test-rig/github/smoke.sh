@@ -57,8 +57,11 @@ LBLS="$(curl -fsS "${H[@]}" "$REPO_API/issues/$N" | jq -r '[.labels[].name] | ma
 [ "$LBLS" = "status/to test" ] && ok "only the latest status label remains ($LBLS)" \
   || no "only the latest status label remains" "got '$LBLS'"
 
-echo "── comment / close ──"
+echo "── comment / comments / close ──"
 lsp issues comment --number "$N" --body "rig comment" && ok "comment exits 0" || no "comment exits 0"
+CMTS="$(lsp issues comments --number "$N")"
+grep -q "rig comment" <<<"$CMTS" && ok "comments returns the posted body" || no "comments returns the posted body" "$CMTS"
+head -1 <<<"$CMTS" | grep -q $'\t' && ok "comments header is author⇥timestamp TSV" || no "comments header is TSV" "$(head -1 <<<"$CMTS")"
 lsp issues close --number "$N" && ok "close exits 0" || no "close exits 0"
 
 echo "── pr open / merge (rig branches off main; main untouched) ──"

@@ -146,10 +146,12 @@ It moves the issue to **`status/to test`** and tells you which branch to check. 
 
 > **You:** "looks good, merge #42"
 
-This is the **gate** — Claude only proceeds now that you've said so. It hands the merge to
-**promoting-a-branch** (feature → `develop`), then finishes the issue: clears the status label,
-leaves a "Done" record (summary + which model did the work), adds the `model/…` label, closes
-**#42**, and removes the worktree.
+This is the **gate** — Claude only proceeds now that you've said so. It leaves a **work-ledger**
+record on the issue (a summary + token cost + which model did the work — one entry per chunk of
+work, so later follow-ups and QA each add their own), adds the `model/…` label, hands the merge to
+**promoting-a-branch** (feature → `develop`), and removes the worktree. It does **not** close
+**#42** here: an issue's status label and whether it closes are driven by the **stage** it lands
+in (see step 4).
 
 ### 4. Promote toward release
 
@@ -160,8 +162,21 @@ Later, with several issues integrated on `develop`, you ship them upward:
 **promoting-a-branch** advances one hop. If that hop is a PR stage, it drafts a **test plan for
 each resolved issue** (and stops if it can't write one — usually a sign the feature isn't
 reachable), opens the pull request, and **watches CI**, telling you when it's green and ready to
-merge. With a `post-merge-qa` gate, the linked issues move to `status/qa` for verification in the
-promoted environment rather than closing immediately.
+merge. As the branch advances, **promoting-a-branch** sets each stage's configured `issueStatus`
+on the linked issues and closes them only when they reach a stage that closes — the terminal stage
+(`main`) by default, adjustable per stage with `closesIssues`. So a linked issue stays open and
+visible (e.g. `status/to test`, then `status/qa`) as it climbs the pipeline, and closes when it
+lands in the final stage.
+
+**Choosing how a PR merges.** On a `pr` hop you can pick the merge strategy — tell Claude
+"promote to main, squash" (or pass `--strategy`):
+
+- `merge` *(default)* — a merge commit; keeps the branch's individual commits on the target.
+- `squash` — collapses the whole branch into a single commit on the target.
+- `rebase` — replays the branch's commits onto the target with no merge commit.
+
+If you don't say, it's `merge`. (This applies to `pr` hops only — a `direct` hop like
+feature → `develop` always merges with `--no-ff` and has no strategy option.)
 
 That's the full loop: **file → triage → work (in a worktree, behind a merge gate) → promote up
 the pipeline** — all without leaving the session.

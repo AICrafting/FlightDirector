@@ -20,8 +20,9 @@ See [lightspeed-setup.md](../../references/lightspeed-setup.md) and
 - **One hop per invocation.** Promote to the *next* stage only. Multi-stage jumps happen as
   separate, deliberate promotions.
 - **Never promote to a trunk stage without the hop's gate satisfied.** A `pre-merge` hop needs
-  the user's go-ahead; a `post-merge-qa` hop uses `Ready #N` (not `Closes`) so issues are
-  verified after merge.
+  the user's go-ahead; a `post-merge-qa` hop merges then verifies. The gate governs *merging*;
+  issue close/relabel is governed separately by the target stage's `closesIssues`/`issueStatus`
+  (Step 5). A `pr` hop uses `Closes #N` only when the target stage closes issues, else `Ready #N`.
 - **Halt if you can't write a test plan** for a resolved issue on a `pr` hop — an unwritable
   plan usually means the feature isn't reachable. Fix that before opening the PR.
 
@@ -49,7 +50,7 @@ git log <target>..HEAD --oneline
 ```
 
 Record the `#N` that are actually *resolved* by this branch (judgment — a mention isn't a
-resolution). These drive the PR's `Ready #N` lines and the test-plan block.
+resolution). These drive the PR's `$KEYWORD #N` lines (see Step 4) and the test-plan block.
 
 ## Step 3: Test plans (pr hops) — HALT if missing
 
@@ -104,7 +105,19 @@ git worktree remove "$SCRATCH/promote-<target>-$$"
 > abort with "fatal: '<target>' is already checked out at …".
 
 **`pr` hop:** open a PR into the target stage and watch CI. Assemble the body in a scratchpad
-file (Summary + the `## Test plans` block + `Ready #N` lines), then:
+file (Summary + the `## Test plans` block + `$KEYWORD #N` lines — `Closes` when the target stage closes issues, else `Ready`), then:
+
+Resolve whether the **target stage** closes issues (drives the PR keyword *and* Step 5). `<i>` is
+the target stage's index:
+
+```
+LAST_IDX=$(( $("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config '.code.stages | length') - 1 ))
+CLOSES="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config ".code.stages[<i>].closesIssues // null")"
+if [ "$CLOSES" = "null" ]; then [ "<i>" -eq "$LAST_IDX" ] && CLOSES=true || CLOSES=false; fi
+ISSUE_STATUS="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config ".code.stages[<i>].issueStatus // empty")"
+# PR issue keyword: Closes only if the target stage closes issues, else Ready (keeps issue open).
+KEYWORD=Ready; [ "$CLOSES" = true ] && KEYWORD=Closes
+```
 
 ```
 PR="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" pr open --head "$BRANCH" --base <target> \
@@ -128,24 +141,32 @@ convention):
 "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" pr merge --number "$PR_NUM" --strategy squash
 ```
 
-## Step 5: Nudge linked issues per the gate
+## Step 5: Drive linked-issue lifecycle from the target stage
 
-- **`pre-merge`** — the issues were verified before merge; `working-an-issue` handles their
-  finishing record/close. Nothing to do here beyond the merge.
-- **`post-merge-qa`** — the PR used `Ready #N` (issues stay open). On merge, move each to the
-  `qa` status so it's verified in the promoted stage:
+After the merge into `<target>` succeeds, the **target stage** decides what happens to each
+resolved `#N` — the *same* rule at every hop, `direct` or `pr`. Reuse `CLOSES` / `ISSUE_STATUS`
+from the resolution block in Step 4 (for a `direct` hop, which skips that `pr`-only block, compute
+them now with the same snippet). For each resolved `#N`:
+
+- `ISSUE_STATUS` non-empty → set the stage's status atomically:
   ```
-  "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues set-status --number N --status qa
+  "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues set-status --number N --status "$ISSUE_STATUS"
   ```
-  (requires a `qa` status role configured in `.lightspeed/config.json` `labels.status` — see
-  `setting-up-a-repo`.)
-  When a later promotion carries those issues to the final stage and QA passes, close them
-  (`issues close --number N`).
+- `CLOSES` is `true` → close it; otherwise leave it **open** so a later promotion handles it:
+  ```
+  "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues close --number N
+  ```
+
+This is the whole lifecycle: an issue's status and open/closed state follow its stage position.
+The terminal stage (or any stage with `closesIssues: true`) closes; every earlier stage just
+relabels and keeps it open. `working-an-issue` no longer closes at the first hop — it leaves a
+work-ledger comment and delegates the status/close to this step.
 
 ## Common mistakes
 
 - Promoting more than one hop at a time. One stage per invocation.
 - Opening a `pr` hop without test plans for the resolved issues (the halt exists for a reason).
-- Using `Closes #N` on a `post-merge-qa` hop — that auto-closes before verification. Use
-  `Ready #N`.
+- Using `Closes #N` when promoting into a stage that does **not** close issues (a non-terminal
+  stage, or one with `closesIssues: false`) — that auto-closes before later verification. Use
+  `Ready #N`; `Closes #N` is only for a stage whose effective `closesIssues` is true.
 - Hand-merging in `working-an-issue` instead of letting this skill own the hop.

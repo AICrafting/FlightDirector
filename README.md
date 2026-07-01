@@ -30,3 +30,8 @@ Each plugin lives in its own top-level directory and carries its own `plugin.jso
 independent `version`, so plugins release on their own cadence — the marketplace just
 indexes them. To add a new plugin: create its directory with a `.claude-plugin/plugin.json`,
 then add an entry to `.claude-plugin/marketplace.json`.
+
+## Credits
+
+- **Aaron Wood** — *The original ideast* 🤣
+- **[Dave Wood](https://davewood.com/)** — *AI wrangler*

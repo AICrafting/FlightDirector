@@ -75,12 +75,13 @@ Feature branches fork from `develop`, integrate there directly, then promote to 
 ```
 
 **(b) Multi-stage — `develop → qa → main`**
-Same as (a) but an intermediate `qa` branch sits between integration and production. Issues stay
-open (`Ready #N`) after merging to `qa` so users can verify before the final promotion to `main`:
+Same as (a) but an intermediate `qa` branch sits between integration and production. Each stage
+carries an `issueStatus` so the board mirrors the issue's position; issues stay open until the
+terminal stage (`main`), where they close:
 ```json
 "stages": [
-  { "name": "develop", "merge": "direct", "gate": "pre-merge" },
-  { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa" },
+  { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },
+  { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa", "issueStatus": "qa" },
   { "name": "main",    "merge": "pr" }
 ]
 ```
@@ -92,8 +93,12 @@ afterward per [lightspeed-setup.md](../../references/lightspeed-setup.md).
 **Defaults explained briefly:**
 - Feature branches fork from `stages[0]` (the first integration branch).
 - `merge: "direct"` integrates by merging locally; `merge: "pr"` opens a pull request for the hop.
-- `gate: "pre-merge"` runs checks before merging; `gate: "post-merge-qa"` keeps the issue open
-  (`Ready #N`) after the hop so the user can verify the change in that environment before closing.
+- `gate: "pre-merge"` runs checks before merging; `gate: "post-merge-qa"` merges then verifies in
+  that environment. The gate governs *merging only*.
+- `issueStatus` (per stage, optional) sets the issue's status label on entering that stage;
+  `closesIssues` (per stage, optional) overrides the default close point, which is the terminal
+  stage. Together they drive issue lifecycle independently of `gate`. See
+  [lightspeed-setup.md](../../references/lightspeed-setup.md).
 - The user can always edit `.lightspeed/config.json` later to adjust stages.
 
 ## Step 4: Write the initial config
@@ -105,8 +110,8 @@ Write `.lightspeed/config.json` in the `.lightspeed/` folder (created in Step 2)
 {
   "code": { "backend": "forgejo", "owner": "…", "repo": "…", "api": "https://…/api/v1",
     "stages": [
-      { "name": "develop", "merge": "direct", "gate": "pre-merge" },
-      { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa" },
+      { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },
+      { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa", "issueStatus": "qa" },
       { "name": "main",    "merge": "pr" }
     ],
     "queueBatches": { "defaultModel": "sonnet" } },
@@ -164,6 +169,11 @@ Don't take `area/*` from the table blindly. Inspect the repo (top-level structur
 obvious services) and **propose** an area set that fits — e.g. `web/` + `api/` + `migrations/`
 suggests `area/app`, `area/server`, `area/db`. Let the user confirm, edit, or skip. Adopt
 existing area equivalents the same way (`frontend` → `area/app`).
+
+Whatever area names are chosen — including custom ones not in the table — create them all with
+the single `area/*` **group colour** (`#3b82f6` per [default-labels.md](../../references/default-labels.md)).
+One colour per namespaced prefix is the convention (`model/*` likewise shares its colour);
+`status/*` is the only namespaced set that varies colour per label.
 
 ## Step 8: Plan → confirm → create → finalize
 
