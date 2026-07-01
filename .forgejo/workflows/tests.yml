@@ -1,0 +1,26 @@
+---
+name: tests
+on:
+  workflow_dispatch:
+
+  push:
+    branches: [develop]
+  pull_request: {}
+
+jobs:
+  script-tests:
+    name: script tests
+    runs-on: docker
+    container:
+      image: alpine:latest
+    steps:
+      - name: Setup tools
+        run: |
+          apk add --update npm bash gawk git coreutils
+
+      - name: Checkout
+        uses: https://code.forgejo.org/actions/checkout@v6
+
+      - name: Run script tests
+        run: |
+          bash scripts/runTests.sh
