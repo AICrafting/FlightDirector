@@ -76,3 +76,9 @@ the skills use your name, not the plugin's.
 | deferred | `status/deferred` | `#6b7280` | Intentionally not now | `status/later`, `deferred`, `icebox` |
 | review | `status/review` | `#8957e5` | In an open PR awaiting review | `review`, `in-review`, `under-review` |
 | qa | `status/qa` | `#0e7490` | Merged, awaiting real-world verification | `qa`, `awaiting-qa` |
+| done | `status/done` | `#216e39` | Shipped / released — the terminal close state | `done`, `shipped`, `released`, `complete` |
+
+**Terminal `issueStatus`.** A terminal stage may set `issueStatus: "done"` so that closing an
+issue also relabels it to `status/done` (the atomic `set-status` drops the prior `status/qa` on
+the way to closing). Without it, a closed issue keeps its last in-flight status label, which reads
+as still-in-progress — set the `done` role on the terminal stage to avoid that.

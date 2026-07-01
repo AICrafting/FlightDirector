@@ -30,7 +30,7 @@ Backend, coordinates, and preferences, across two independent axes:
     "stages": [
       { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },
       { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa", "issueStatus": "qa" },
-      { "name": "main",    "merge": "pr" }
+      { "name": "main",    "merge": "pr",     "issueStatus": "done" }
     ]
   },
   "issues": { "backend": "forgejo", "owner": "acme", "repo": "planning" }, // omit to inherit code
@@ -59,7 +59,9 @@ Backend, coordinates, and preferences, across two independent axes:
 - **`issueStatus`** (per stage, optional) — a **status role name** (a key in `labels.status`).
   On *entering* this stage, `promoting-a-branch` runs the atomic `issues set-status --status
   <role>` (adds the new status, drops the others in one call — the board can never show two
-  states). Omit to leave the issue's status untouched on entry to this stage.
+  states). Omit to leave the issue's status untouched on entry to this stage. Setting it on the
+  **terminal** stage (e.g. `issueStatus: "done"`) relabels the issue as it closes, so a shipped
+  issue shows `status/done` rather than keeping its last in-flight label (e.g. `status/qa`).
 - **`closesIssues`** (per stage, optional, boolean) — **defaults to "true iff this is the
   terminal (last) stage."** Set explicitly to override: `false` on the terminal stage keeps
   issues open after the final stage; `true` on a non-terminal stage closes issues early at that
