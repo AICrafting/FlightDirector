@@ -185,12 +185,12 @@ Wait for the user's answer, then `SendMessage` to the blocked agent's id with bo
 
 When all agents return: summarize each zone (commits with SHA + title, test deltas, judgment
 calls, deferrals). Surface any skipped/deferred issue with a follow-up suggestion. Then hand back
-for **serial** shipping — the orchestrator never auto-promotes:
+for shipping — the orchestrator never auto-promotes:
 
-> Ship one branch at a time with `promoting-a-branch`: promote → wait for the merge → promote the
-> next. The merge after each ship is what keeps the following branch conflict-free (especially for
-> same-zone branches, which fork independently from `stages[0]`). After each branch merges, remove
-> its worktree: `git worktree remove .worktrees/<N>-<slug>`.
+> Ship the batch with `promoting-branches`: say "promote each zone" (one PR per zone on a pr hop, or
+> all branches merged on a direct hop), "promote the first zone", or "promote issues <…>". It honors
+> `stages[0]`'s merge strategy and cleans up the run manifest as issues promote. For a single branch,
+> or to hand-pick, use `promoting-a-branch` one at a time.
 
 ## Common mistakes
 
