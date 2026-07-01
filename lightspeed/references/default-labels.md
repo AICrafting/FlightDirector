@@ -11,6 +11,12 @@ Conventions (decided for this plugin):
 - `model/*` is a fixed set the plugin owns (Claude-specific).
 - `area/*` is **project-dependent** — the skill proposes a starter set and confirms with
   the user before creating any; it never assumes these.
+- **One colour per categorical prefix group.** Every `model/*` label shares one colour and
+  every `area/*` label shares another, so the prefix reads as a colour family at a glance in
+  the issue list. The same rule extends to any future namespaced prefix (e.g. `tool/*`).
+- **`status/*` is the deliberate exception**: each state keeps its own distinct, semantic
+  colour (blocked reads red, qa reads teal, …) because the colour *is* the signal there.
+- **Prefix-less type/category labels each keep their own distinct colour.**
 
 ## Type / category labels (flat)
 
@@ -18,35 +24,38 @@ Conventions (decided for this plugin):
 |---|---|---|---|
 | `bug` | `#d73a4a` | Something is broken | `type/bug`, `kind/bug`, `defect` |
 | `feature` | `#0e8a16` | New capability | `type/feature`, `enhancement`, `kind/feature` |
-| `tech-debt` | `#fbca04` | Internal code quality, no user impact | `techdebt`, `debt`, `refactor` |
-| `security` | `#b60205` | Security concern | `type/security`, `vuln` |
-| `performance` | `#1d76db` | Speed or resource usage | `perf` |
+| `tech-debt` | `#9a6700` | Internal code quality, no user impact | `techdebt`, `debt`, `refactor` |
+| `security` | `#7c2d12` | Security concern | `type/security`, `vuln` |
+| `performance` | `#0aa1b0` | Speed or resource usage | `perf` |
 | `ux` | `#d4c5f9` | User-facing presentation or feel | `ui`, `design` |
 | `polish` | `#c2e0c6` | Minor visual refinement | — |
-| `regression` | `#e99695` | Something that used to work | — |
+| `regression` | `#e11d48` | Something that used to work | — |
 | `quick-win` | `#bfdadc` | Small effort, clear win | `quickwin`, `good-first-issue` |
-| `high-value` | `#5319e7` | High impact, worth prioritizing | `priority/high` |
+| `high-value` | `#6f42c1` | High impact, worth prioritizing | `priority/high` |
 | `critical` | `#b60205` | Blocks users or the app | `priority/critical`, `blocker` |
 
 ## Model labels (fixed — plugin-owned)
 
+One colour for the whole group — Claude's coral, `#d97757`.
+
 | Label | Color | Description | Treat as already-present if the repo has… |
 |---|---|---|---|
-| `model/opus` | `#6f42c1` | Issue was worked on using Opus | `opus` |
-| `model/sonnet` | `#1d76db` | Issue was worked on using Sonnet | `sonnet` |
-| `model/haiku` | `#0e8a16` | Issue was worked on using Haiku | `haiku` |
-| `model/fable` | `#e99695` | Issue was worked on using Fable | `fable` |
+| `model/opus` | `#d97757` | Issue was worked on using Opus | `opus` |
+| `model/sonnet` | `#d97757` | Issue was worked on using Sonnet | `sonnet` |
+| `model/haiku` | `#d97757` | Issue was worked on using Haiku | `haiku` |
+| `model/fable` | `#d97757` | Issue was worked on using Fable | `fable` |
 
 ## Area labels (project-dependent — confirm before creating)
 
 Starter suggestions only. The skill should inspect the repo and **ask the user** which
-areas fit before creating any. Do not seed these blindly.
+areas fit before creating any. Do not seed these blindly. Whatever set is chosen, **every
+`area/*` label takes the one group colour** — Tailwind blue, `#3b82f6`.
 
 | Label | Color | Description | Treat as already-present if the repo has… |
 |---|---|---|---|
-| `area/app` | `#fbca04` | Client / frontend app | `frontend`, `client` |
-| `area/server` | `#d93f0b` | Backend / API server | `backend`, `api` |
-| `area/db` | `#0052cc` | Database / schema / migrations | `database`, `schema` |
+| `area/app` | `#3b82f6` | Client / frontend app | `frontend`, `client` |
+| `area/server` | `#3b82f6` | Backend / API server | `backend`, `api` |
+| `area/db` | `#3b82f6` | Database / schema / migrations | `database`, `schema` |
 
 ## Status labels (optional — used by `triaging-issues`)
 
@@ -61,9 +70,9 @@ the skills use your name, not the plugin's.
 
 | Role | Default label | Color | Description | Adopt the repo's label if it has… |
 |---|---|---|---|---|
-| in-progress | `status/in progress` | `#0e8a16` | In flight | `status/doing`, `in-progress`, `wip` |
-| awaiting-test | `status/to test` | `#fbca04` | Built, awaiting the user's verification | `status/testing`, `to-test`, `ready-for-test` |
-| blocked | `status/blocked` | `#d73a4a` | Can't be started | `blocked` |
-| deferred | `status/deferred` | `#c5def5` | Intentionally not now | `status/later`, `deferred`, `icebox` |
-| review | `status/review` | `#5319e7` | In an open PR awaiting review | `review`, `in-review`, `under-review` |
-| qa | `status/qa` | `#006b75` | Merged, awaiting real-world verification | `qa`, `awaiting-qa` |
+| in-progress | `status/in progress` | `#1f9d55` | In flight | `status/doing`, `in-progress`, `wip` |
+| awaiting-test | `status/to test` | `#e3a008` | Built, awaiting the user's verification | `status/testing`, `to-test`, `ready-for-test` |
+| blocked | `status/blocked` | `#d11149` | Can't be started | `blocked` |
+| deferred | `status/deferred` | `#6b7280` | Intentionally not now | `status/later`, `deferred`, `icebox` |
+| review | `status/review` | `#8957e5` | In an open PR awaiting review | `review`, `in-review`, `under-review` |
+| qa | `status/qa` | `#0e7490` | Merged, awaiting real-world verification | `qa`, `awaiting-qa` |
