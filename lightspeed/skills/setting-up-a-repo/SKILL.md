@@ -70,7 +70,7 @@ Feature branches fork from `develop`, integrate there directly, then promote to 
 ```json
 "stages": [
   { "name": "develop", "merge": "direct", "gate": "pre-merge" },
-  { "name": "main",    "merge": "pr" }
+  { "name": "main",    "merge": "pr",     "issueStatus": "done" }
 ]
 ```
 
@@ -82,7 +82,7 @@ terminal stage (`main`), where they close:
 "stages": [
   { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },
   { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa", "issueStatus": "qa" },
-  { "name": "main",    "merge": "pr" }
+  { "name": "main",    "merge": "pr",     "issueStatus": "done" }
 ]
 ```
 
@@ -112,13 +112,13 @@ Write `.lightspeed/config.json` in the `.lightspeed/` folder (created in Step 2)
     "stages": [
       { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },
       { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa", "issueStatus": "qa" },
-      { "name": "main",    "merge": "pr" }
+      { "name": "main",    "merge": "pr",     "issueStatus": "done" }
     ],
     "queueBatches": { "defaultModel": "sonnet" } },
   "labels": {
     "status": { "in-progress": "status/in progress", "to-test": "status/to test",
                 "blocked": "status/blocked", "deferred": "status/deferred",
-                "review": "status/review", "qa": "status/qa" },
+                "review": "status/review", "qa": "status/qa", "done": "status/done" },
     "model": { "opus": "model/opus", "sonnet": "model/sonnet",
                "haiku": "model/haiku", "fable": "model/fable" }
   }
@@ -133,7 +133,7 @@ the skill. You can also add an optional `code.zones` array later — see
 deterministically instead of inferring zones.
 
 Use the `stages` array from the chosen preset (a), (b), or the user's custom pipeline. All six
-status roles (`in-progress`, `to-test`, `blocked`, `deferred`, `review`, `qa`) are seeded so the
+status roles (`in-progress`, `to-test`, `blocked`, `deferred`, `review`, `qa`, `done`) are seeded so the
 reconcile step in Steps 6–8 ensures the corresponding labels exist. If a config already exists,
 show the diff and confirm before overwriting — don't clobber hand-edits. From here the dispatcher
 works.
