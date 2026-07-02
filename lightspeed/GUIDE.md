@@ -98,7 +98,8 @@ all speak your repo's conventions.
 | "what should I work on?", "any quick wins?" | **triaging-issues** | A filtered pick-list of workable issues |
 | "let's work on #N", "this is ready to test", "merge #N" | **working-an-issue** | Worktree → status labels → human merge gate → finish |
 | "promote this", "promote develop to main" | **promoting-a-branch** | Advance the branch one stage (direct merge or PR + CI) |
-| `/queue-batches NxM`, "work N issues in parallel", "batch these" | **queue-batches** | Dispatch N background agents × M issues each; isolated worktrees (zones), stop at to-test, then a serial promoting-a-branch hand-off |
+| "promote each zone", "promote issues 18, 93, 12", "batch promote" | **promoting-branches** | Promote a selected group of first-hop feature branches into `stages[0]` at once (direct → N merges; pr → one PR per group) |
+| `/queue-batches NxM`, "work N issues in parallel", "batch these" | **queue-batches** | Dispatch N background agents × M issues each; isolated worktrees (zones), stop at to-test, then a batch hand-off to promoting-branches |
 | "set up lightspeed", "bootstrap labels" | **setting-up-a-repo** | First-run setup (above) |
 
 You never type the underlying commands — you talk to Claude, and the skills drive the forge for
@@ -183,7 +184,8 @@ the pipeline** — all without leaving the session.
 
 When you have several independent issues to tackle at once, `/queue-batches NxM` scales this loop
 horizontally: N background agents each work M issues sequentially in isolated worktrees (zones),
-stopping at the to-test gate; you then ship the branches serially via promoting-a-branch.
+stopping at the to-test gate; you then ship the batch with **promoting-branches** (or hand-pick
+branches one at a time with promoting-a-branch).
 
 ---
 

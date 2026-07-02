@@ -20,6 +20,9 @@ prompt_log.jsonl
 # Git worktrees
 .worktrees/
 
+# lightspeed queue-batches run manifests (transient local state)
+.lightspeed/batches/
+
 # Environment files
 .env
 .env.*
