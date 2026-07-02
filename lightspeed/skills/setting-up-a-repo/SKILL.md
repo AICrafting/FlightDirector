@@ -53,9 +53,11 @@ add `write:misc` (unused, and Forgejo rejects it on a single-repo token). See
 [lightspeed-setup.md](../../references/lightspeed-setup.md). Then:
 
 1. Create the config folder: `mkdir -p .lightspeed`.
-2. Add `.lightspeed/secrets.json` **and** `.worktrees/` to `.gitignore` **first** (create
-   `.gitignore` if needed). `.worktrees/` is where `working-an-issue` creates per-issue git
-   worktrees — they must be ignored so they don't appear as untracked content in the repo.
+2. Add `.lightspeed/secrets.json`, `.worktrees/`, **and** `.lightspeed/batches/` to `.gitignore`
+   **first** (create `.gitignore` if needed). `.worktrees/` is where `working-an-issue` creates
+   per-issue git worktrees, and `.lightspeed/batches/` is where `queue-batches` writes per-run
+   batch manifests — both are per-run local state (not secrets) that must be ignored so they
+   don't appear as untracked content in the repo.
 3. Write `.lightspeed/secrets.json`:
    ```json
    { "code": { "token": "<the token>" } }
