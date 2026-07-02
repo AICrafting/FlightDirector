@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+#
+# GitLab merge-request adapter — verbs: open merge. (The contract's "pr" == MR here.)
+# See ../../../references/adapter-contract.md.
+set -euo pipefail
+ADAPTER_NAME="gitlab/pr"
+# shellcheck source-path=SCRIPTDIR source=_common.sh
+source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+
+verb="${1:-}"; shift || true
+
+case "$verb" in
+  open)
+    head=""; base=""; title=""; body=""; body_file=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --head)      head="$2"; shift 2 ;;
+      --base)      base="$2"; shift 2 ;;
+      --title)     title="$2"; shift 2 ;;
+      --body)      body="$2"; shift 2 ;;
+      --body-file) body_file="$2"; shift 2 ;;
+      *) die "pr open: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$base" ] || base="${LS_TRUNK:-}"
+    [ -n "$head" ]  || die "pr open: --head required"
+    [ -n "$base" ]  || die "pr open: --base required (and no code.trunkBranch configured)"
+    [ -n "$title" ] || die "pr open: --title required"
+    # GitLab: source_branch → target_branch, description holds the body.
+    if [ -n "$body_file" ]; then
+      [ -f "$body_file" ] || die "pr open: --body-file '$body_file' not found"
+      payload="$(jq -n --arg h "$head" --arg b "$base" --arg t "$title" --rawfile body "$body_file" \
+        '{source_branch:$h, target_branch:$b, title:$t, description:$body}')"
+    else
+      payload="$(jq -n --arg h "$head" --arg b "$base" --arg t "$title" --arg body "$body" \
+        '{source_branch:$h, target_branch:$b, title:$t, description:$body}')"
+    fi
+    _api POST "/merge_requests" "$payload" | jq -r '[(.iid|tostring), .web_url] | @tsv'
+    ;;
+
+  merge)
+    number=""; strategy="merge"
+    while [ $# -gt 0 ]; do case "$1" in
+      --number)   number="$2"; shift 2 ;;
+      --strategy) strategy="$2"; shift 2 ;;
+      *) die "pr merge: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "pr merge: --number required"
+    # GitLab's merge endpoint takes a `squash` boolean; the merge/rebase distinction
+    # otherwise follows the project's merge method (a rebase/fast-forward merge needs
+    # the project configured for it). See adapter-contract.md → GitLab specifics.
+    case "$strategy" in
+      squash)        payload='{"squash":true}' ;;
+      merge|rebase)  payload='{"squash":false}' ;;
+      *) die "pr merge: --strategy must be merge|squash|rebase" ;;
+    esac
+    _api PUT "/merge_requests/${number}/merge" "$payload" >/dev/null
+    ;;
+
+  *) die "unknown verb '${verb}' (pr: open merge)" ;;
+esac

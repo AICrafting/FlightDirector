@@ -117,3 +117,49 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
   endpoint is **eventually consistent** — a just-created issue can take a few seconds to appear in
   the list, though `issues get` reflects it immediately; don't rely on a list snapshot taken
   milliseconds after a create.
+- **GitLab backend specifics:** GitLab addresses a project by its URL-encoded path — the
+  adapter builds `projects/<owner%2Frepo>` from `owner`/`repo` (subgroups' slashes encode too).
+  Issues are addressed by their per-project **`iid`** (what the contract calls `--number`), and
+  the body lives in `description`, not `body`. Labels are applied **by name** (like GitHub) via
+  `add_labels`/`remove_labels`; `set-status` does the single-status swap in one `PUT`. Auth is a
+  `PRIVATE-TOKEN` header (personal/project access token). `issues comments` drops GitLab **system
+  notes** (label/state-change activity) so only real comments come back. `issues attach` uploads
+  to the project-scoped `/uploads` endpoint and prints the asset path to embed in a body/comment.
+  `pr` is a **merge request**; `pr merge` maps `--strategy squash` to the merge endpoint's
+  `squash=true`, while `merge`/`rebase` merge with `squash=false` — a true rebase/fast-forward
+  merge otherwise follows the project's configured *merge method* (GitLab's merge endpoint has no
+  per-request `merge_method`). `ci` is **pipelines**: `ci watch` aggregates all pipelines for the
+  SHA (`?sha=`), `--pr` resolves the MR head SHA (`.sha`); pending = created/waiting/preparing/
+  pending/running/scheduled, a clean pass = success/skipped/manual, anything else (failed/canceled)
+  counts as failure. `ci log` pulls the failed pipeline's failed-job traces (`/jobs/:id/trace`).
+  MR **mergeability is computed asynchronously**, so an immediate `pr merge` right after `pr open`
+  can transiently 405 until GitLab finishes its merge check — retry briefly (the rig smoke does).
+- **Jira backend specifics:** Jira is an **issues-axis-only** backend (an issue tracker, not a git
+  host) — it implements **only `issues` + `labels`**; `pr`/`ci` keep resolving to the `code`
+  backend. Pair it with a git `code` backend. It targets Jira **Cloud REST v3** with HTTP **Basic**
+  `email:api_token` auth (a classic Atlassian API token, not OAuth). The dispatcher threads two
+  generic passthroughs for it — `LS_PROJECT` (the project key, config `issues.project`) and
+  `LS_EMAIL` (config `issues.email`, or `LS_EMAIL` in the env). Decisions:
+  - **Identifier = key.** The `--number` value is a Jira **key** (`KAN-123`), treated as an opaque
+    id; skills print `#<key>` unchanged. `issues create` returns the key.
+  - **`set-status` → Jira labels.** Maps a role → a `status/*` **label** (atomic add-target /
+    remove-other-status-labels), matching the single-status model — it does **not** drive workflow
+    transitions. Jira labels are **single tokens**: status label names in config must be
+    **space-free** (e.g. `status/in-progress`, not `status/in progress`).
+  - **`close`/`reopen` → workflow transitions.** Labels can't close a Jira issue, so `close` finds
+    the transition into a status whose category is **`done`** and posts it; `reopen` transitions
+    back to a **`new`** (To-Do) or, failing that, **`indeterminate`** (In-Progress) category. This
+    is the one place transitions are unavoidable.
+  - **Bodies/comments are ADF.** Jira stores rich text as Atlassian Document Format (ADF) JSON. A
+    **minimal** shim converts markdown→ADF for writes (`create`/`update`/`comment`) and ADF→plain
+    text for reads (`get`/`comments`): paragraphs, fenced code blocks, and bullet/ordered lists.
+    Inline marks (bold, links) are carried as plain text, not styled.
+  - **Labels are thin.** Jira labels are bare strings with no colour/description and no id distinct
+    from the name. `labels list` emits `name⇥⇥` (empty colour + description); `labels resolve`
+    returns the **name as its own id** (`name⇥name`); `labels create` is a **no-op** that succeeds
+    idempotently (labels spring into existence on first use). `issues attach` is **not supported**.
+  - **`list` via JQL.** Uses the enhanced-JQL search endpoint `POST /rest/api/3/search/jql` (the
+    legacy `POST /rest/api/3/search` was decommissioned by Atlassian). `--state` maps to
+    `statusCategory` (open = `!= Done`, closed = `= Done`, all = unfiltered); `--label` adds a
+    `labels IN (…)` clause. Jira's JQL index is **eventually consistent** — a just-created/updated
+    issue can lag `list` by seconds, though `issues get` reflects it immediately.

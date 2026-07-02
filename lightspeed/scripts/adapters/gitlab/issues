@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+#
+# GitLab issues adapter — verbs: list get comments create update comment attach
+# set-status clear-status label-add close reopen. See ../../../references/adapter-contract.md.
+# GitLab addresses issues by their per-project `iid` (what the contract calls --number),
+# labels by name, and stores the body in `description`.
+set -euo pipefail
+ADAPTER_NAME="gitlab/issues"
+# shellcheck source-path=SCRIPTDIR source=_common.sh
+source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+
+verb="${1:-}"; shift || true
+
+# Comma-join the configured status/* label names into $status_csv (helper for
+# set-status/clear-status). Reads LS_LABELS_JSON.
+_status_names_csv() {
+  local labels_json="${LS_LABELS_JSON:-}"; [ -n "$labels_json" ] || labels_json='{}'
+  printf '%s' "$labels_json" | jq -r '[.status // {} | .[]] | join(",")'
+}
+
+case "$verb" in
+  list)
+    state="open"; limit="50"; labels=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --state) state="$2"; shift 2 ;;
+      --limit) limit="$2"; shift 2 ;;
+      --label) labels+=("$2"); shift 2 ;;
+      *) die "issues list: unknown arg '$1'" ;;
+    esac; done
+    # GitLab issue state is opened|closed; `all` means omit the filter.
+    case "$state" in
+      open)   q="state=opened" ;;
+      closed) q="state=closed" ;;
+      all)    q="" ;;
+      *) die "issues list: --state must be open|closed|all" ;;
+    esac
+    q="${q:+$q&}per_page=${limit}"
+    if [ ${#labels[@]} -gt 0 ]; then
+      old="$IFS"; IFS=,; q="${q}&labels=${labels[*]}"; IFS="$old"
+    fi
+    _api GET "/issues?${q}" \
+      | jq -r '.[] | [(.iid|tostring), .title, ((.labels // []) | join(","))] | @tsv'
+    ;;
+
+  get)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues get: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues get: --number required"
+    _api GET "/issues/${number}" \
+      | jq -r '([(.iid|tostring), .title] | @tsv), "", (.description // "")'
+    ;;
+
+  comments)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues comments: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues comments: --number required"
+    # One block per comment, oldest-first: `author⇥created_at` header, the raw
+    # body, then a blank separator. System notes (label/state changes) are dropped.
+    # GitLab returns notes newest-first, so reverse for oldest-first.
+    _api GET "/issues/${number}/notes?sort=asc&order_by=created_at&per_page=100" \
+      | jq -r '[.[] | select(.system | not)] | .[]
+               | ([(.author.username // "?"), .created_at] | @tsv), (.body // ""), ""'
+    ;;
+
+  create)
+    title=""; body=""; body_file=""; labels=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --title)     title="$2"; shift 2 ;;
+      --body)      body="$2"; shift 2 ;;
+      --body-file) body_file="$2"; shift 2 ;;
+      --label)     labels+=("$2"); shift 2 ;;
+      *) die "issues create: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$title" ] || die "issues create: --title required"
+    if [ -n "$body_file" ]; then
+      [ -f "$body_file" ] || die "issues create: --body-file '$body_file' not found"
+      payload="$(jq -n --arg t "$title" --rawfile b "$body_file" '{title:$t, description:$b}')"
+    else
+      payload="$(jq -n --arg t "$title" --arg b "$body" '{title:$t, description:$b}')"
+    fi
+    if [ ${#labels[@]} -gt 0 ]; then
+      for n in "${labels[@]}"; do
+        [ -n "$(label_id "$n")" ] \
+          || die "issues create: label '$n' not found — create it first (labels create / bootstrapping-labels)"
+      done
+      old="$IFS"; IFS=,; csv="${labels[*]}"; IFS="$old"
+      payload="$(printf '%s' "$payload" | jq --arg l "$csv" '. + {labels:$l}')"
+    fi
+    _api POST "/issues" "$payload" | jq -r '.iid'
+    ;;
+
+  update)
+    number=""; title=""; body=""; body_file=""; have_title=0; have_body=0
+    while [ $# -gt 0 ]; do case "$1" in
+      --number)    number="$2"; shift 2 ;;
+      --title)     title="$2"; have_title=1; shift 2 ;;
+      --body)      body="$2"; have_body=1; shift 2 ;;
+      --body-file) body_file="$2"; have_body=1; shift 2 ;;
+      *) die "issues update: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues update: --number required"
+    patch='{}'
+    [ "$have_title" = 1 ] && patch="$(printf '%s' "$patch" | jq --arg t "$title" '. + {title:$t}')"
+    if [ "$have_body" = 1 ]; then
+      if [ -n "$body_file" ]; then
+        [ -f "$body_file" ] || die "issues update: --body-file '$body_file' not found"
+        patch="$(printf '%s' "$patch" | jq --rawfile b "$body_file" '. + {description:$b}')"
+      else
+        patch="$(printf '%s' "$patch" | jq --arg b "$body" '. + {description:$b}')"
+      fi
+    fi
+    [ "$patch" = '{}' ] && die "issues update: nothing to change (pass --title and/or --body)"
+    _api PUT "/issues/${number}" "$patch" >/dev/null
+    ;;
+
+  attach)
+    number=""; file=""; name=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --file)   file="$2"; shift 2 ;;
+      --name)   name="$2"; shift 2 ;;
+      *) die "issues attach: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues attach: --number required"
+    [ -f "$file" ]   || die "issues attach: --file '$file' not found"
+    [ -n "$name" ]   || name="$(basename "$file")"
+    # GitLab uploads are project-scoped, not issue-scoped; POST /uploads returns a
+    # markdown ref + url. Embed the url in a comment/body to attach it to the issue.
+    tmp="$(mktemp)"
+    code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
+      "${GL_HEADERS[@]}" \
+      -F "file=@${file};filename=${name}" \
+      "${PROJECT_API}/uploads")" || { rm -f "$tmp"; die "attach: curl failed"; }
+    if [ "$code" -ge 400 ]; then
+      msg="$(jq -r '(.message // .error // empty) | if type=="string" then . else tojson end' "$tmp" 2>/dev/null || true)"
+      rm -f "$tmp"; die "attach → HTTP $code${msg:+: $msg}"
+    fi
+    jq -r '.full_path // .url' "$tmp"; rm -f "$tmp"
+    ;;
+
+  comment)
+    number=""; body=""; body_file=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number)    number="$2"; shift 2 ;;
+      --body)      body="$2"; shift 2 ;;
+      --body-file) body_file="$2"; shift 2 ;;
+      *) die "issues comment: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues comment: --number required"
+    if [ -n "$body_file" ]; then
+      [ -f "$body_file" ] || die "issues comment: --body-file '$body_file' not found"
+      payload="$(jq -n --rawfile b "$body_file" '{body:$b}')"
+    else
+      payload="$(jq -n --arg b "$body" '{body:$b}')"
+    fi
+    _api POST "/issues/${number}/notes" "$payload" >/dev/null
+    ;;
+
+  set-status)
+    number=""; role=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --status) role="$2"; shift 2 ;;
+      *) die "issues set-status: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues set-status: --number required"
+    [ -n "$role" ]   || die "issues set-status: --status required"
+
+    labels_json="${LS_LABELS_JSON:-}"; [ -n "$labels_json" ] || labels_json='{}'
+    target_name="$(printf '%s' "$labels_json" | jq -r --arg r "$role" '.status[$r] // empty')"
+    [ -n "$target_name" ] || die "set-status: role '$role' not found in labels.status config"
+    [ -n "$(label_id "$target_name")" ] || die "set-status: label '$target_name' does not exist on the repo"
+
+    # Single-status invariant: remove every OTHER managed status label, add target.
+    # GitLab applies add_labels/remove_labels in one PUT (removing a label the
+    # issue lacks is a harmless no-op).
+    remove_csv="$(printf '%s' "$labels_json" | jq -r --arg t "$target_name" \
+      '[.status // {} | .[] | select(. != $t)] | join(",")')"
+    _api PUT "/issues/${number}" \
+      "$(jq -n --arg a "$target_name" --arg r "$remove_csv" \
+         '{add_labels:$a} + (if $r == "" then {} else {remove_labels:$r} end)')" >/dev/null
+    ;;
+
+  clear-status)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues clear-status: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues clear-status: --number required"
+    remove_csv="$(_status_names_csv)"
+    [ -n "$remove_csv" ] || exit 0
+    _api PUT "/issues/${number}" "$(jq -n --arg r "$remove_csv" '{remove_labels:$r}')" >/dev/null
+    ;;
+
+  label-add)
+    number=""; labels=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --label)  labels+=("$2"); shift 2 ;;
+      *) die "issues label-add: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues label-add: --number required"
+    [ ${#labels[@]} -gt 0 ] || die "issues label-add: at least one --label required"
+    for n in "${labels[@]}"; do
+      [ -n "$(label_id "$n")" ] || die "issues label-add: label '$n' not found"
+    done
+    old="$IFS"; IFS=,; csv="${labels[*]}"; IFS="$old"
+    _api PUT "/issues/${number}" "$(jq -n --arg a "$csv" '{add_labels:$a}')" >/dev/null
+    ;;
+
+  close)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues close: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues close: --number required"
+    _api PUT "/issues/${number}" "$(jq -n '{state_event:"close"}')" >/dev/null
+    ;;
+
+  reopen)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues reopen: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues reopen: --number required"
+    _api PUT "/issues/${number}" "$(jq -n '{state_event:"reopen"}')" >/dev/null
+    ;;
+
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add close reopen)" ;;
+esac

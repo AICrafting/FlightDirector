@@ -13,7 +13,37 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- **Supported-backends reference** ([`references/backends.md`](references/backends.md)) covering all
+  four backends — forgejo, github, gitlab, jira — each with a worked `.lightspeed/config.json`
+  fragment, the provider's token-creation URL, and the **minimum** scopes/permissions the adapter
+  actually needs (Forgejo `write:repository`+`write:issue`; GitHub fine-grained Contents/Issues/Pull
+  requests + Actions-read for CI; GitLab `api`; Jira via the account's project role, since classic
+  API tokens are unscoped). Linked from the guide.
+- **`setting-up-a-repo` now detects existing backends and offers a confirm-and-go setup.** Before
+  the manual prompts, the skill infers the `code` backend from the git remote host
+  (github.com→github, GitLab→gitlab, Forgejo/Gitea→forgejo), reuses an existing
+  `.lightspeed/config.json`, and reads Jira project keys (`ABC-123`) in commits/branches as a
+  signal to pair a `jira` issues-axis backend — presenting the detected config for one-shot
+  confirmation, and falling back to the existing manual flow when detection is inconclusive.
+- **GitLab backend adapter** (`backend: "gitlab"`) at full parity with forgejo/github —
+  `issues`, `labels`, `pr` (merge requests), and `ci` (pipelines). Point an axis at GitLab with
+  `backend`/`owner`/`repo`/`api` (`https://gitlab.com/api/v4`) and a `PRIVATE-TOKEN`-scoped token
+  in secrets. `pr merge --strategy squash` maps to GitLab's squash merge; `ci watch` aggregates
+  all pipelines for a SHA and `ci log` pulls the failed job traces. See the adapter contract's
+  "GitLab backend specifics" and the setup reference's "GitLab backend" section for the details
+  (project-path addressing, issue `iid`s, scoped-status labels, async MR mergeability).
+- **Jira backend adapter (issues-axis-only).** You can now point the `issues`
+  axis at Jira Cloud (`issues.backend = "jira"`) while a git `code` backend keeps
+  handling `pr`/`ci`. Implements `issues` + `labels` against Jira Cloud REST v3
+  with HTTP Basic `email:api_token` auth. Config takes `issues.project` (the
+  project key) and `issues.email`; the token goes in `issues.token`. Notable
+  behaviours: the `--number` is a Jira **key** (`KAN-123`); `set-status` maps to
+  `status/*` **labels** (which on Jira must be space-free single tokens);
+  `close`/`reopen` drive real workflow **transitions** (Done ⇄ To-Do); issue
+  bodies and comments round-trip through a minimal markdown⇄ADF shim; Jira labels
+  are thin (no colour/description, name is its own id). See the setup reference
+  and `adapter-contract.md` → *Jira backend specifics*.
 
 ## [0.6.0] - 2026-07-02
 

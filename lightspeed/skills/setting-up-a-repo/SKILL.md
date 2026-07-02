@@ -37,20 +37,79 @@ must be proposed from the actual project, not seeded from a table.
 - **Never commit `.lightspeed/secrets.json`.** It holds the token — add it to `.gitignore`
   before writing it.
 
+## Step 0: Detect existing backends — offer, then confirm
+
+Before asking anything from scratch, **look at what the repo already tells you** and lead with a
+confirm-and-go offer. Detection is a shortcut, not a gate: everything below has a manual fallback
+(Steps 1–4), so when a signal is missing or ambiguous, say so and drop through to the prompts —
+never guess a backend into the config.
+
+**First, reuse an existing lightspeed config.** If `.lightspeed/config.json` already exists, read
+it and treat it as the source of truth: show its coordinates + stage pipeline back to the user and
+ask whether to reuse it as-is (skip to the label reconcile, Step 5) or revise it. Don't re-ask for
+values it already has.
+
+**Detect the CODE backend from the git remote host.** Read the remote URL —
+`git config --get remote.origin.url` (or `git remote -v`) — and map the host to a backend:
+
+| Remote host | Backend | API base |
+|---|---|---|
+| `github.com` | `github` | `https://api.github.com` |
+| `gitlab.com` **or** a self-managed GitLab host | `gitlab` | `https://<host>/api/v4` |
+| a Forgejo/Gitea host (self-hosted) | `forgejo` | `https://<host>/api/v1` |
+
+The host isn't always decisive on its own — a self-managed GitLab and a Forgejo/Gitea instance
+both live on a custom domain. Corroborate before asserting: a `gitlab-ci.yml`/`.gitlab-ci.yml` or a
+`git@gitlab.…`-style remote points to GitLab; a `.forgejo/`/`.gitea/` workflow dir or Gitea-style
+API paths point to Forgejo. When the host is a bare custom domain with no corroborating signal,
+**offer your best guess but ask the user to confirm the backend** rather than committing to one.
+Parse `owner/repo` from the same URL for the coordinates Step 1 wants.
+
+**Detect ISSUE-backend signals.** By default the `issues` axis inherits `code` (same host tracks
+the issues). Look for signs it doesn't:
+- **Jira** — project keys shaped like `ABC-123` in recent commit subjects or branch names
+  (`git log --oneline -50`, `git branch -a`) strongly suggest a Jira issues-axis backend paired
+  with the git `code` backend. Offer a split setup: `code` = the detected git host, `issues` =
+  `jira` (issues-axis-only, per Step 4 / the config schema).
+- Otherwise assume `issues` inherits `code` and only confirm.
+
+**Then offer, and let the user confirm-and-go.** Summarize what you found and propose the config in
+one shot, e.g.:
+
+```
+Detected from this repo:
+  code    → github   (remote is github.com/acme/widgets)
+  issues  → jira      (commits reference KAN-123, PROJ-456)
+
+Set it up this way? [y] — or tell me what to change.
+```
+
+On `y`, carry these detected values straight into Steps 1–4 (skip the questions they already
+answer). If detection was **inconclusive** (no remote, unrecognized host, conflicting signals) or
+the user wants something different, fall back to the manual flow below and ask normally.
+
+**Supported backends to offer:** `github`, `gitlab`, `forgejo` for the `code` axis; plus `jira`
+as an **issues-axis-only** backend (paired with a git code backend). All four are implemented.
+
 ## Step 1: Coordinates + instance
 
-Autodetect from the git remote that points at the host: `git remote get-url origin` → parse
-`owner/repo` and the host. The API base is `https://<host>/api/v1`. **Confirm all three with the
-user** (owner, repo, api). For a split setup (issues tracked in a different repo/backend), ask;
-otherwise `issues` inherits `code` and you only need one set.
+If Step 0 detected and the user confirmed the coordinates, carry them forward — this step is the
+**fallback** when detection was inconclusive or declined. Autodetect from the git remote that
+points at the host: `git remote get-url origin` → parse `owner/repo` and the host. The API base
+follows the backend (see the Step 0 table): `https://<host>/api/v1` for Forgejo, `/api/v4` for
+GitLab, `https://api.github.com` for GitHub. **Confirm all three with the user** (owner, repo,
+api). For a split setup (issues tracked in a different repo/backend — e.g. the Jira pairing from
+Step 0), ask; otherwise `issues` inherits `code` and you only need one set.
 
 ## Step 2: Token → secrets file
 
 The dispatcher needs a per-repo API token. Ask the user to create a **least-privilege** token on
 the host — just `write:repository` and `write:issue` (the latter also covers labels), not an
 all-orgs admin token. These two work with a token restricted to a single repository; do **not**
-add `write:misc` (unused, and Forgejo rejects it on a single-repo token). See
-[lightspeed-setup.md](../../references/lightspeed-setup.md). Then:
+add `write:misc` (unused, and Forgejo rejects it on a single-repo token). The exact scopes and the
+token-creation steps differ per backend (GitHub, GitLab, Forgejo, Jira) — see
+[backends.md](../../references/backends.md) for the per-backend token walkthrough, and
+[lightspeed-setup.md](../../references/lightspeed-setup.md) for the config schema. Then:
 
 1. Create the config folder: `mkdir -p .lightspeed`.
 2. Add `.lightspeed/secrets.json`, `.worktrees/`, **and** `.lightspeed/batches/` to `.gitignore`
