@@ -30,6 +30,16 @@ The fix is **two marketplaces with different names**, split by source:
 
 These drove every design decision. Re-verify with `--help` if a CC version changes.
 
+> **Paths below are relative to `$CLAUDE_CONFIG_DIR`, not a hardcoded `~/.claude`.** Claude Code's
+> config home is **profile-specific**: it defaults to `~/.claude`, but the `claude` CLI honours the
+> `CLAUDE_CONFIG_DIR` env var, so a machine running multiple profiles (e.g. a personal
+> `~/.claude-dave` and a work `~/.claude-work`) keeps a separate registry/cache under each. Under a
+> non-default profile, `~/.claude/plugins/…` is empty/misleading — the real files live under
+> `$CLAUDE_CONFIG_DIR/plugins/…`. Everywhere this doc writes `$CLAUDE_CONFIG_DIR`, substitute your
+> active profile dir. In scripts, default it safely with `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` (use
+> `$HOME`, not `~` — a tilde doesn't expand inside a quoted parameter default). Commands that shell
+> out to `claude` inherit `CLAUDE_CONFIG_DIR` and hit the right profile automatically.
+
 1. **`marketplace add` takes a single `<source>` argument.** The marketplace
    **name comes from the manifest's `name` field**, NOT the CLI. There is **no
    `--name` flag**.
@@ -48,7 +58,7 @@ These drove every design decision. Re-verify with `--help` if a CC version chang
    version.
 
 3. **Marketplace registration is user-global; *enablement* is per-project.**
-   Registry lives in `~/.claude/plugins/known_marketplaces.json`. Which plugins
+   Registry lives in `$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json`. Which plugins
    a project enables lives in that project's `.claude/settings.local.json`
    (`enabledPlugins`). Two marketplaces with the **same manifest name collide** —
    `--scope` only picks which settings file declares it, the name still clashes.
@@ -60,7 +70,7 @@ These drove every design decision. Re-verify with `--help` if a CC version chang
    `lightspeed` pointing at the live tree, with `"source": "./lightspeed"`.
 
 5. **`plugin install` snapshots a COPY into a version-keyed cache** at
-   `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (real files,
+   `$CLAUDE_CONFIG_DIR/plugins/cache/<marketplace>/<plugin>/<version>/` (real files,
    different inodes from the live tree). The running plugin reads that cache, **not**
    the symlink. So even with the dev symlink, **live edits are NOT automatically
    picked up** — see refresh recipe below.
@@ -143,8 +153,9 @@ the edits (see fact #5/#6). The **reliable** refresh is to delete the
 version-keyed cache dir and reinstall:
 
 ```bash
-VER=0.4.0   # = the version in the dev manifest (keep in sync when it bumps)
-rm -rf ~/.claude/plugins/cache/cerebralgardens-dev/lightspeed/$VER
+CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"   # your profile dir; defaults to ~/.claude when unset
+VER=0.6.0                                   # = the version in the dev manifest (keep in sync when it bumps)
+rm -rf "$CFG/plugins/cache/cerebralgardens-dev/lightspeed/$VER"
 claude plugin uninstall lightspeed@cerebralgardens-dev --scope local
 claude plugin install   lightspeed@cerebralgardens-dev --scope local
 # then:
