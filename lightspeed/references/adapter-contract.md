@@ -95,7 +95,7 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 
 | Verb    | Args                                              | stdout |
 |---------|---------------------------------------------------|--------|
-| `watch` | `--sha SHA` `[--status-file PATH]`                | one line per state change: `task-<id> status=<state>`; exits on terminal state. Background-friendly for the `Monitor` tool. |
+| `watch` | `--pr N` \| `--sha SHA` `[--status-file PATH] [--timeout SECS]` | one line per state change: `ci runs=<n> pending=<p> failed=<f> status=<pending\|success\|failure>`; **aggregates all runs** for the SHA — stays watching while any is pending, verdict is `failure` if any run failed. Exits 0 once none pending. `--pr` resolves the PR's head SHA (the SHA the run reports — prefer it; a local `--sha` may be unpushed). `--timeout` (env `LS_CI_WATCH_TIMEOUT` / config `code.ciWatchTimeout`; default 900; 0 disables) exits non-zero rather than polling forever. Background-friendly for the `Monitor` tool. |
 | `log`   | `--sha SHA` (or `--failed BRANCH`)                | raw failed-job log to stdout (host-access dependent; see ADR consequences) |
 
 ## Notes

@@ -197,7 +197,10 @@ branches one at a time with promoting-a-branch).
   file tracked by git, it warns you on every run.
 
 Want a different pipeline later? Edit `code.stages` in `.lightspeed/config.json` — e.g. add a `qa`
-stage between `develop` and `main`. The skills pick it up immediately.
+stage between `develop` and `main`. The skills pick it up immediately. For worked setups at 1, 2, 3,
+and 4 hops — with contrasting `direct`/`pr`, merge-strategy, and issue-status configs, plus how
+batch-promote differs by first-hop strategy — see
+[example-flows.md](references/example-flows.md).
 
 ---
 
