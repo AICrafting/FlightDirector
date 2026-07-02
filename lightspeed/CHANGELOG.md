@@ -14,6 +14,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 ## [Unreleased]
 
 ### Added
+- **`setting-up-a-repo` now detects existing backends and offers a confirm-and-go setup.** Before
+  the manual prompts, the skill infers the `code` backend from the git remote host
+  (github.com→github, GitLab→gitlab, Forgejo/Gitea→forgejo), reuses an existing
+  `.lightspeed/config.json`, and reads Jira project keys (`ABC-123`) in commits/branches as a
+  signal to pair a `jira` issues-axis backend — presenting the detected config for one-shot
+  confirmation, and falling back to the existing manual flow when detection is inconclusive.
 - **GitLab backend adapter** (`backend: "gitlab"`) at full parity with forgejo/github —
   `issues`, `labels`, `pr` (merge requests), and `ci` (pipelines). Point an axis at GitLab with
   `backend`/`owner`/`repo`/`api` (`https://gitlab.com/api/v4`) and a `PRIVATE-TOKEN`-scoped token
