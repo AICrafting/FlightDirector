@@ -95,7 +95,7 @@ git -C "$SCRATCH/int-<zone>" push -u origin "$INT"
 # Assemble the PR body: Summary + a per-issue test plan (halt the group if a resolved issue has no
 # writable plan) + one $KEYWORD #N line per included issue (Closes if stages[0] closesIssues, else Ready).
 PR="$("$DISP" pr open --head "$INT" --base "$BASE" --title "Batch: <zone> (#<n>, #<n>, …)" --body-file "$SCRATCH/pr-<zone>.md")"
-# watch CI ("$DISP" ci watch …); on failure record the group FAILED and move on; on success merge on the gate:
+# watch CI ("$DISP" ci watch --pr "<pr#>" …); on failure record the group FAILED and move on; on success merge on the gate:
 "$DISP" pr merge --number "<pr#>" --strategy "$("$DISP" config '.code.stages[0].strategy // "merge"')"
 git -C "$MAIN" worktree remove "$SCRATCH/int-<zone>"
 ```

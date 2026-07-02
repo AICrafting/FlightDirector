@@ -13,7 +13,37 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+- **`ci watch` no longer hangs on an unpushed commit.** Promotions now watch CI
+  by `--pr <n>` (the adapter resolves the PR's head SHA — the exact commit the
+  run reports) instead of the local `git rev-parse HEAD`. Previously, if your
+  local branch tip was ahead of what was pushed, the watcher polled forever for
+  a SHA that had no CI run. As a backstop, `ci watch` now takes a `--timeout`
+  and exits non-zero with a clear message rather than polling indefinitely.
+  `promoting-a-branch` also now stops before opening a PR if local `$BRANCH` is
+  ahead of `origin/$BRANCH`, so a promotion can't silently ship a PR that omits
+  your latest commit.
+
+### Changed
+- **`ci watch` now aggregates *all* CI runs for a commit**, not just one. If a
+  PR triggers several workflows, it stays watching until none are pending and
+  reports `failure` if any run failed (previously it latched onto a single run
+  and could announce success while another was still running or had failed). The
+  output line is now `ci runs=<n> pending=<p> failed=<f> status=<…>`.
+- **`setting-up-a-repo`** now also gitignores `.lightspeed/batches/` (the per-run
+  batch manifests `queue-batches` writes) alongside `.lightspeed/secrets.json`
+  and `.worktrees/`, so batch state isn't accidentally committed.
+- **`setting-up-a-repo`** notes the optional Forgejo label-exclusivity guard
+  (set `status/*` exclusive, `model/*` non-exclusive) — lightspeed doesn't need
+  it (`set-status` already enforces one status), so it's left to preference.
+
+### Added
+- **`code.ciWatchTimeout`** config field sets the `ci watch` hang-guard timeout
+  in seconds (default `900`; `0` disables). Precedence: `--timeout` flag →
+  `LS_CI_WATCH_TIMEOUT` env → `code.ciWatchTimeout` → default.
+- **`references/example-flows.md`** — worked promotion pipelines at 1/2/3/4 hops
+  with contrasting `direct`/`pr`, merge-strategy, and issue-status setups, plus
+  how batch-promote differs by first-hop strategy. Linked from `GUIDE.md`.
 
 ## [0.5.0] - 2026-07-02
 

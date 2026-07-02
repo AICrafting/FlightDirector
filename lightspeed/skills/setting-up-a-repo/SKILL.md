@@ -53,9 +53,11 @@ add `write:misc` (unused, and Forgejo rejects it on a single-repo token). See
 [lightspeed-setup.md](../../references/lightspeed-setup.md). Then:
 
 1. Create the config folder: `mkdir -p .lightspeed`.
-2. Add `.lightspeed/secrets.json` **and** `.worktrees/` to `.gitignore` **first** (create
-   `.gitignore` if needed). `.worktrees/` is where `working-an-issue` creates per-issue git
-   worktrees — they must be ignored so they don't appear as untracked content in the repo.
+2. Add `.lightspeed/secrets.json`, `.worktrees/`, **and** `.lightspeed/batches/` to `.gitignore`
+   **first** (create `.gitignore` if needed). `.worktrees/` is where `working-an-issue` creates
+   per-issue git worktrees, and `.lightspeed/batches/` is where `queue-batches` writes per-run
+   batch manifests — both are per-run local state (not secrets) that must be ignored so they
+   don't appear as untracked content in the repo.
 3. Write `.lightspeed/secrets.json`:
    ```json
    { "code": { "token": "<the token>" } }
@@ -200,6 +202,15 @@ Then **finalize `.lightspeed/config.json`**: update the `labels` map so every ro
 name this repo uses (the adopted names from Steps 6–7). This is what makes the other skills use
 *this repo's* label names. Report what was created, adopted, and declined. Re-running later is
 safe — everything now present becomes EXISTS/ADOPT.
+
+> **Forgejo — optional label exclusivity.** Forgejo (and Gitea) can mark a scoped label group
+> *exclusive*, so its UI allows only one label from that group on an issue at a time. lightspeed
+> doesn't rely on this — `set-status` already drops the prior `status/*` label before adding the
+> new one, on every backend — so it's purely a guard against a human hand-adding two labels in the
+> Forgejo UI. If you want that guard, set the `status/*` group **exclusive** and leave `model/*`
+> **non-exclusive** (an issue can legitimately be touched by more than one model) in Forgejo's
+> label settings, per your preference. Not applicable to GitHub (no such feature); GitLab expresses
+> exclusivity differently (via `scope::value` naming, tier-gated).
 
 ## Common mistakes
 
