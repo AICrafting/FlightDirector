@@ -112,6 +112,29 @@ The token goes in the gitignored `.lightspeed/secrets.json` (`code.token`), a Gi
 **repo** scope (+ **workflow** if you use `ci`). `setting-up-a-repo` does not yet offer GitHub
 as a backend choice — configure GitHub repos by hand-editing `.lightspeed/config.json` for now.
 
+### Jira backend (issues-axis only)
+
+Jira is an issue tracker, not a git host, so it backs **only the `issues` axis** — pair it with a
+git `code` backend (`pr`/`ci` keep resolving to `code`):
+
+```jsonc
+{
+  "code":   { "backend": "github", "owner": "acme", "repo": "widget",
+              "api": "https://api.github.com", "stages": [ { "name": "main", "merge": "pr" } ] },
+  "issues": { "backend": "jira",
+              "api": "https://your-site.atlassian.net",  // the site base, no /rest/api/3
+              "project": "KAN",                            // the Jira project key
+              "email": "you@example.com" }                 // for email:token Basic auth
+}
+```
+
+Auth is HTTP **Basic** `email:api_token` (a classic Atlassian API token — not OAuth). The token
+goes in `.lightspeed/secrets.json` under `issues.token`; the account email is `issues.email` in
+config (or `LS_EMAIL` in the env). The dispatcher exports `LS_PROJECT` + `LS_EMAIL` alongside the
+usual `LS_*`. See `adapter-contract.md` → **Jira backend specifics** for the identifier (key-as-id),
+status-as-labels, close-as-transition, ADF, and thin-labels behaviours. `setting-up-a-repo` does
+not yet offer Jira — configure it by hand-editing `.lightspeed/config.json` for now.
+
 ### `.lightspeed/secrets.json` — gitignored
 
 Just the token(s), one per axis, with the same `code → issues` inheritance:

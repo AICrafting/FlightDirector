@@ -13,7 +13,18 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- **Jira backend adapter (issues-axis-only).** You can now point the `issues`
+  axis at Jira Cloud (`issues.backend = "jira"`) while a git `code` backend keeps
+  handling `pr`/`ci`. Implements `issues` + `labels` against Jira Cloud REST v3
+  with HTTP Basic `email:api_token` auth. Config takes `issues.project` (the
+  project key) and `issues.email`; the token goes in `issues.token`. Notable
+  behaviours: the `--number` is a Jira **key** (`KAN-123`); `set-status` maps to
+  `status/*` **labels** (which on Jira must be space-free single tokens);
+  `close`/`reopen` drive real workflow **transitions** (Done ⇄ To-Do); issue
+  bodies and comments round-trip through a minimal markdown⇄ADF shim; Jira labels
+  are thin (no colour/description, name is its own id). See the setup reference
+  and `adapter-contract.md` → *Jira backend specifics*.
 
 ## [0.6.0] - 2026-07-02
 
