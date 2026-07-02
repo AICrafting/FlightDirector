@@ -119,16 +119,32 @@ ISSUE_STATUS="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config ".code.stages[<i
 KEYWORD=Ready; [ "$CLOSES" = true ] && KEYWORD=Closes
 ```
 
+The PR is built from the **pushed** branch tip, not your local working copy. Before opening it,
+verify local `$BRANCH` isn't ahead of the remote — otherwise the PR (and the CI you'd watch)
+silently omits your latest commit:
+
+```
+git fetch -q origin "$BRANCH"
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$BRANCH")" ]; then
+   # STOP — local is ahead of / diverged from origin/$BRANCH. Push (or reconcile)
+   # before promoting, then re-run. Do not open the PR against a stale remote tip.
+   echo "local $BRANCH differs from origin/$BRANCH — push first" >&2
+fi
+```
+
 ```
 PR="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" pr open --head "$BRANCH" --base <target> \
         --title "…" --body-file "$SCRATCH/pr-body.md")"   # → number⇥url
 PR_NUM="$(printf '%s' "$PR" | cut -f1)"
 ```
 
-Then watch CI in the background and surface state via Monitor:
+Then watch CI in the background and surface state via Monitor. Watch by **`--pr`**, not by a local
+SHA: the adapter resolves the PR's head commit — the exact SHA the run reports — so a local tip
+that was never pushed can't send the watcher chasing a run that doesn't exist. It exits non-zero on
+a `--timeout` (default 900s) rather than polling forever:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" ci watch --sha "$(git rev-parse HEAD)" \
+"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" ci watch --pr "$PR_NUM" \
    --status-file "$SCRATCH/ls-ci-$BRANCH.json"
 ```
 

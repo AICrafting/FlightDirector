@@ -14,13 +14,23 @@ case "$verb" in
   # Background-friendly for the Monitor tool. Resilient: a transient API/jq blip
   # is swallowed and the poll continues, rather than killing the watcher.
   watch)
-    sha=""; status_file=""
+    sha=""; pr=""; status_file=""; timeout="${LS_CI_WATCH_TIMEOUT:-900}"
     while [ $# -gt 0 ]; do case "$1" in
       --sha)         sha="$2"; shift 2 ;;
+      --pr)          pr="$2"; shift 2 ;;
       --status-file) status_file="$2"; shift 2 ;;
+      --timeout)     timeout="$2"; shift 2 ;;
       *) die "ci watch: unknown arg '$1'" ;;
     esac; done
-    [ -n "$sha" ] || die "ci watch: --sha required"
+    # --pr is authoritative: the PR head commit IS the SHA the run reports as
+    # head_sha. Prefer it over a caller-supplied --sha, which may be a *local*
+    # tip that was never pushed — CI only ever runs on pushed commits, so
+    # watching an unpushed SHA finds no run and polls forever (that was the bug).
+    if [ -n "$pr" ]; then
+      sha="$(_api GET "/pulls/${pr}" | jq -r '.head.sha // empty')"
+      [ -n "$sha" ] || die "ci watch: could not resolve head sha for PR #${pr}"
+    fi
+    [ -n "$sha" ] || die "ci watch: --sha or --pr required"
 
     _write() {
       [ -n "$status_file" ] || return 0
@@ -28,24 +38,42 @@ case "$verb" in
       printf '{"sha":"%s","status":"%s"}\n' "$sha" "$1" >"$status_file"
     }
 
-    last_id=""; last_state=""
+    poll="${LS_CI_POLL_SECONDS:-5}"
+    start="$(date +%s)"; seen=0; last_sig=""
     while true; do
       body="$(curl -sS -L "${GH_HEADERS[@]}" \
         "${REPO_API}/actions/runs?head_sha=${sha}&per_page=20" 2>/dev/null || true)"
-      line="$(printf '%s' "$body" | jq -r \
-        '[.workflow_runs[]?] | sort_by(.run_started_at) | last
-         | select(. != null) | "\(.id) \(.status)"' 2>/dev/null || true)"
-      if [ -n "$line" ]; then
-        id="${line%% *}"; state="${line##* }"
-        if [ "$id" != "$last_id" ] || [ "$state" != "$last_state" ]; then
-          echo "task-${id} status=${state}"
-          _write "$state"
-          last_id="$id"; last_state="$state"
+      # Aggregate over ALL runs for this SHA (a PR can trigger several workflows):
+      # keep watching while any is not yet `completed`; once all are completed the
+      # verdict is failure if any conclusion isn't success/skipped/neutral.
+      metrics="$(printf '%s' "$body" | jq -r '
+        [.workflow_runs[]?] as $r
+        | ($r|length) as $total
+        | ([$r[] | select(.status != "completed")] | length) as $pending
+        | ([$r[] | select(.status == "completed")
+                 | select((.conclusion as $c | ["success","skipped","neutral"] | index($c)) | not)] | length) as $failed
+        | "\($total) \($pending) \($failed)"' 2>/dev/null || true)"
+      read -r total pending failed <<<"$metrics" || true
+      total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"
+      if [ "$total" -gt 0 ]; then
+        seen=1
+        if [ "$pending" -gt 0 ]; then agg=pending; elif [ "$failed" -gt 0 ]; then agg=failure; else agg=success; fi
+        sig="${total}/${pending}/${failed}"
+        if [ "$sig" != "$last_sig" ]; then
+          echo "ci runs=${total} pending=${pending} failed=${failed} status=${agg}"
+          last_sig="$sig"; _write "$agg"
         fi
-        # GitHub run status is queued|in_progress|completed.
-        [ "$state" = "completed" ] && exit 0
+        [ "$pending" -eq 0 ] && exit 0
       fi
-      sleep 5
+      # Hang guard: never poll forever. --timeout 0 disables the cap.
+      if [ "$timeout" -gt 0 ] && [ "$(( $(date +%s) - start ))" -ge "$timeout" ]; then
+        if [ "$seen" = 1 ]; then
+          die "ci watch: timed out after ${timeout}s waiting for run ${sha:0:12} to complete"
+        else
+          die "ci watch: timed out after ${timeout}s — no CI run found for ${sha:0:12} (is the branch pushed and does a workflow trigger for it?)"
+        fi
+      fi
+      sleep "$poll"
     done
     ;;
 
