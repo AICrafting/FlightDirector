@@ -41,6 +41,9 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - **`code.ciWatchTimeout`** config field sets the `ci watch` hang-guard timeout
   in seconds (default `900`; `0` disables). Precedence: `--timeout` flag →
   `LS_CI_WATCH_TIMEOUT` env → `code.ciWatchTimeout` → default.
+- **`references/example-flows.md`** — worked promotion pipelines at 1/2/3/4 hops
+  with contrasting `direct`/`pr`, merge-strategy, and issue-status setups, plus
+  how batch-promote differs by first-hop strategy. Linked from `GUIDE.md`.
 
 ## [0.5.0] - 2026-07-02
 
