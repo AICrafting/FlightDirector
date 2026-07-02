@@ -30,6 +30,9 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   reports `failure` if any run failed (previously it latched onto a single run
   and could announce success while another was still running or had failed). The
   output line is now `ci runs=<n> pending=<p> failed=<f> status=<…>`.
+- **`setting-up-a-repo`** now also gitignores `.lightspeed/batches/` (the per-run
+  batch manifests `queue-batches` writes) alongside `.lightspeed/secrets.json`
+  and `.worktrees/`, so batch state isn't accidentally committed.
 
 ### Added
 - **`code.ciWatchTimeout`** config field sets the `ci watch` hang-guard timeout
