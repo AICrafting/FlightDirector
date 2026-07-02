@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.6.0] - 2026-07-02
+
 ### Fixed
 - **`ci watch` no longer hangs on an unpushed commit.** Promotions now watch CI
   by `--pr <n>` (the adapter resolves the PR's head SHA — the exact commit the
