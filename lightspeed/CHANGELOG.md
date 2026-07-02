@@ -33,6 +33,9 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - **`setting-up-a-repo`** now also gitignores `.lightspeed/batches/` (the per-run
   batch manifests `queue-batches` writes) alongside `.lightspeed/secrets.json`
   and `.worktrees/`, so batch state isn't accidentally committed.
+- **`setting-up-a-repo`** notes the optional Forgejo label-exclusivity guard
+  (set `status/*` exclusive, `model/*` non-exclusive) — lightspeed doesn't need
+  it (`set-status` already enforces one status), so it's left to preference.
 
 ### Added
 - **`code.ciWatchTimeout`** config field sets the `ci watch` hang-guard timeout
