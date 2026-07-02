@@ -117,3 +117,20 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
   endpoint is **eventually consistent** — a just-created issue can take a few seconds to appear in
   the list, though `issues get` reflects it immediately; don't rely on a list snapshot taken
   milliseconds after a create.
+- **GitLab backend specifics:** GitLab addresses a project by its URL-encoded path — the
+  adapter builds `projects/<owner%2Frepo>` from `owner`/`repo` (subgroups' slashes encode too).
+  Issues are addressed by their per-project **`iid`** (what the contract calls `--number`), and
+  the body lives in `description`, not `body`. Labels are applied **by name** (like GitHub) via
+  `add_labels`/`remove_labels`; `set-status` does the single-status swap in one `PUT`. Auth is a
+  `PRIVATE-TOKEN` header (personal/project access token). `issues comments` drops GitLab **system
+  notes** (label/state-change activity) so only real comments come back. `issues attach` uploads
+  to the project-scoped `/uploads` endpoint and prints the asset path to embed in a body/comment.
+  `pr` is a **merge request**; `pr merge` maps `--strategy squash` to the merge endpoint's
+  `squash=true`, while `merge`/`rebase` merge with `squash=false` — a true rebase/fast-forward
+  merge otherwise follows the project's configured *merge method* (GitLab's merge endpoint has no
+  per-request `merge_method`). `ci` is **pipelines**: `ci watch` aggregates all pipelines for the
+  SHA (`?sha=`), `--pr` resolves the MR head SHA (`.sha`); pending = created/waiting/preparing/
+  pending/running/scheduled, a clean pass = success/skipped/manual, anything else (failed/canceled)
+  counts as failure. `ci log` pulls the failed pipeline's failed-job traces (`/jobs/:id/trace`).
+  MR **mergeability is computed asynchronously**, so an immediate `pr merge` right after `pr open`
+  can transiently 405 until GitLab finishes its merge check — retry briefly (the rig smoke does).
