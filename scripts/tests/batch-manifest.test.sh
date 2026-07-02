@@ -60,11 +60,11 @@ fi
 "$BM" write --run-id RUN2 --zone lightspeed --issues "12 7" --zone rig --issues "50"
 groups_out="$("$BM" groups | sort)"
 check "groups lists lightspeed union sorted (7,12,18,93)" \
-	"$(printf '%s\n' "$groups_out" | grep -qP '^lightspeed\t7,12,18,93$' && echo 1 || echo 0)"
+	"$(printf '%s\n' "$groups_out" | grep -qxF "$(printf 'lightspeed\t7,12,18,93')" && echo 1 || echo 0)"
 check "groups lists docs (40,41)" \
-	"$(printf '%s\n' "$groups_out" | grep -qP '^docs\t40,41$' && echo 1 || echo 0)"
+	"$(printf '%s\n' "$groups_out" | grep -qxF "$(printf 'docs\t40,41')" && echo 1 || echo 0)"
 check "groups lists rig (50)" \
-	"$(printf '%s\n' "$groups_out" | grep -qP '^rig\t50$' && echo 1 || echo 0)"
+	"$(printf '%s\n' "$groups_out" | grep -qxF "$(printf 'rig\t50')" && echo 1 || echo 0)"
 
 # --- heal: keep only live issues; drop empty zones; delete empty manifests ---
 # Live set keeps only docs's 40,41. RUN1 loses lightspeed but keeps docs;
