@@ -13,7 +13,18 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- **`promoting-branches` skill** — batch-promote several first-hop feature
+  branches at once ("promote each zone", "promote the first zone", "promote
+  issues 18, 93, 12", "promote all to-test"), honoring the first hop's merge
+  strategy (direct → N merges; pr → one PR per group). Complements
+  `queue-batches`, which now hands the batch off to it instead of prompting for
+  serial `promoting-a-branch` runs.
+
+### Changed
+- **`queue-batches`** writes a per-run issue→zone manifest at dispatch (under a
+  gitignored `.lightspeed/batches/`) so `promoting-branches` can honor "promote
+  each zone", and its completion hand-off now points at `promoting-branches`.
 
 ## [0.4.0] - 2026-06-30
 
