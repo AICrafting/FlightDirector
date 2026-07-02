@@ -203,6 +203,15 @@ name this repo uses (the adopted names from Steps 6–7). This is what makes the
 *this repo's* label names. Report what was created, adopted, and declined. Re-running later is
 safe — everything now present becomes EXISTS/ADOPT.
 
+> **Forgejo — optional label exclusivity.** Forgejo (and Gitea) can mark a scoped label group
+> *exclusive*, so its UI allows only one label from that group on an issue at a time. lightspeed
+> doesn't rely on this — `set-status` already drops the prior `status/*` label before adding the
+> new one, on every backend — so it's purely a guard against a human hand-adding two labels in the
+> Forgejo UI. If you want that guard, set the `status/*` group **exclusive** and leave `model/*`
+> **non-exclusive** (an issue can legitimately be touched by more than one model) in Forgejo's
+> label settings, per your preference. Not applicable to GitHub (no such feature); GitLab expresses
+> exclusivity differently (via `scope::value` naming, tier-gated).
+
 ## Common mistakes
 
 - Creating `feature` when the repo already uses `enhancement` (duplicate taxonomy). Adopt
