@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.5.0] - 2026-07-02
+
 ### Added
 - **`promoting-branches` skill** — batch-promote several first-hop feature
   branches at once ("promote each zone", "promote the first zone", "promote
