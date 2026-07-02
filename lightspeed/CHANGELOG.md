@@ -14,6 +14,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 ## [Unreleased]
 
 ### Added
+- **Supported-backends reference** ([`references/backends.md`](references/backends.md)) covering all
+  four backends — forgejo, github, gitlab, jira — each with a worked `.lightspeed/config.json`
+  fragment, the provider's token-creation URL, and the **minimum** scopes/permissions the adapter
+  actually needs (Forgejo `write:repository`+`write:issue`; GitHub fine-grained Contents/Issues/Pull
+  requests + Actions-read for CI; GitLab `api`; Jira via the account's project role, since classic
+  API tokens are unscoped). Linked from the guide.
 - **GitLab backend adapter** (`backend: "gitlab"`) at full parity with forgejo/github —
   `issues`, `labels`, `pr` (merge requests), and `ci` (pipelines). Point an axis at GitLab with
   `backend`/`owner`/`repo`/`api` (`https://gitlab.com/api/v4`) and a `PRIVATE-TOKEN`-scoped token
