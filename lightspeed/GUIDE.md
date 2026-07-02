@@ -5,8 +5,9 @@ Code session, without tabbing over to your forge's web UI. This guide covers **w
 it, **how to install** it, and **how to use** it, with a full worked example.
 
 > New to the plugin? Start here. For the at-a-glance skill list and the config schema, see the
-> [README](README.md), [lightspeed-setup.md](references/lightspeed-setup.md), and
-> [adapter-contract.md](references/adapter-contract.md).
+> [README](README.md), [lightspeed-setup.md](references/lightspeed-setup.md),
+> [adapter-contract.md](references/adapter-contract.md), and — for per-backend config,
+> token-creation URLs, and minimum scopes — [backends.md](references/backends.md).
 
 ---
 
