@@ -112,6 +112,27 @@ The token goes in the gitignored `.lightspeed/secrets.json` (`code.token`), a Gi
 **repo** scope (+ **workflow** if you use `ci`). `setting-up-a-repo` does not yet offer GitHub
 as a backend choice — configure GitHub repos by hand-editing `.lightspeed/config.json` for now.
 
+### GitLab backend
+
+Point an axis at GitLab by setting its `backend` + `api`. `owner`/`repo` together form the
+project path GitLab addresses by (subgroups belong in `owner`, e.g. `"group/sub"`):
+
+```jsonc
+"code": {
+  "backend": "gitlab",
+  "owner": "your-group",                    // subgroups allowed: "group/subgroup"
+  "repo": "your-project",
+  "api": "https://gitlab.com/api/v4",       // self-managed: https://gitlab.example.com/api/v4
+  "stages": [ { "name": "main", "merge": "pr" } ]
+}
+```
+
+The token goes in the gitignored `.lightspeed/secrets.json` (`code.token`), a GitLab personal or
+project access token with the **api** scope. `pr` is a merge request and `ci` is pipelines (see
+the [adapter contract](adapter-contract.md) → GitLab specifics for the `--strategy` and pipeline
+nuances). Like GitHub, `setting-up-a-repo` does not yet offer GitLab as a backend choice —
+configure GitLab repos by hand-editing `.lightspeed/config.json` for now.
+
 ### `.lightspeed/secrets.json` — gitignored
 
 Just the token(s), one per axis, with the same `code → issues` inheritance:

@@ -13,7 +13,14 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- **GitLab backend adapter** (`backend: "gitlab"`) at full parity with forgejo/github —
+  `issues`, `labels`, `pr` (merge requests), and `ci` (pipelines). Point an axis at GitLab with
+  `backend`/`owner`/`repo`/`api` (`https://gitlab.com/api/v4`) and a `PRIVATE-TOKEN`-scoped token
+  in secrets. `pr merge --strategy squash` maps to GitLab's squash merge; `ci watch` aggregates
+  all pipelines for a SHA and `ci log` pulls the failed job traces. See the adapter contract's
+  "GitLab backend specifics" and the setup reference's "GitLab backend" section for the details
+  (project-path addressing, issue `iid`s, scoped-status labels, async MR mergeability).
 
 ## [0.6.0] - 2026-07-02
 
