@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+#
+# GitLab CI adapter — verbs: watch log.  Against the GitLab pipelines/jobs API.
+# See ../../../references/adapter-contract.md.
+set -euo pipefail
+ADAPTER_NAME="gitlab/ci"
+# shellcheck source-path=SCRIPTDIR source=_common.sh
+source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+
+verb="${1:-}"; shift || true
+
+# GitLab pipeline statuses that mean "still going" vs. a clean pass. Anything
+# terminal that isn't a clean pass (failed, canceled) counts as a failure.
+_PENDING='["created","waiting_for_resource","preparing","pending","running","scheduled"]'
+_PASSED='["success","skipped","manual"]'
+
+case "$verb" in
+  # Stream one line per CI state change for a commit, exit on a terminal state.
+  # Background-friendly for the Monitor tool. Resilient: a transient API/jq blip
+  # is swallowed and the poll continues, rather than killing the watcher.
+  watch)
+    sha=""; pr=""; status_file=""; timeout="${LS_CI_WATCH_TIMEOUT:-900}"
+    while [ $# -gt 0 ]; do case "$1" in
+      --sha)         sha="$2"; shift 2 ;;
+      --pr)          pr="$2"; shift 2 ;;
+      --status-file) status_file="$2"; shift 2 ;;
+      --timeout)     timeout="$2"; shift 2 ;;
+      *) die "ci watch: unknown arg '$1'" ;;
+    esac; done
+    # --pr is authoritative: the MR head commit IS the SHA pipelines report. Prefer
+    # it over a caller-supplied --sha, which may be a *local* tip that was never
+    # pushed — pipelines only ever run on pushed commits, so watching an unpushed
+    # SHA finds no pipeline and polls forever.
+    if [ -n "$pr" ]; then
+      sha="$(_api GET "/merge_requests/${pr}" | jq -r '.sha // .diff_refs.head_sha // empty')"
+      [ -n "$sha" ] || die "ci watch: could not resolve head sha for MR !${pr}"
+    fi
+    [ -n "$sha" ] || die "ci watch: --sha or --pr required"
+
+    _write() {
+      [ -n "$status_file" ] || return 0
+      mkdir -p "$(dirname "$status_file")"
+      printf '{"sha":"%s","status":"%s"}\n' "$sha" "$1" >"$status_file"
+    }
+
+    poll="${LS_CI_POLL_SECONDS:-10}"
+    start="$(date +%s)"; seen=0; last_sig=""
+    while true; do
+      body="$(curl -sS "${GL_HEADERS[@]}" \
+        "${PROJECT_API}/pipelines?sha=${sha}&per_page=20" 2>/dev/null || true)"
+      # Aggregate over ALL pipelines for this SHA: keep watching while any is
+      # pending; once none are pending the verdict is failure if any failed.
+      metrics="$(printf '%s' "$body" | jq -r \
+        --argjson pend "$_PENDING" --argjson pass "$_PASSED" '
+        [.[]?] as $r
+        | ($r|length) as $total
+        | ([$r[] | select(.status as $s | $pend | index($s))] | length) as $pending
+        | ([$r[] | select(.status as $s | ($pend | index($s)) | not)
+                 | select(.status as $s | ($pass | index($s)) | not)] | length) as $failed
+        | "\($total) \($pending) \($failed)"' 2>/dev/null || true)"
+      read -r total pending failed <<<"$metrics" || true
+      total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"
+      if [ "$total" -gt 0 ]; then
+        seen=1
+        if [ "$pending" -gt 0 ]; then agg=pending; elif [ "$failed" -gt 0 ]; then agg=failure; else agg=success; fi
+        sig="${total}/${pending}/${failed}"
+        if [ "$sig" != "$last_sig" ]; then
+          echo "ci runs=${total} pending=${pending} failed=${failed} status=${agg}"
+          last_sig="$sig"; _write "$agg"
+        fi
+        [ "$pending" -eq 0 ] && exit 0
+      fi
+      # Hang guard: never poll forever. --timeout 0 disables the cap.
+      if [ "$timeout" -gt 0 ] && [ "$(( $(date +%s) - start ))" -ge "$timeout" ]; then
+        if [ "$seen" = 1 ]; then
+          die "ci watch: timed out after ${timeout}s waiting for run ${sha:0:12} to complete"
+        else
+          die "ci watch: timed out after ${timeout}s — no CI run found for ${sha:0:12} (is the branch pushed and does a pipeline trigger for it?)"
+        fi
+      fi
+      sleep "$poll"
+    done
+    ;;
+
+  # Dump the failed jobs' traces for a commit (or the latest failed pipeline on a branch).
+  log)
+    sha=""; failed_branch=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --sha)    sha="$2"; shift 2 ;;
+      --failed) failed_branch="$2"; shift 2 ;;
+      *) die "ci log: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$sha" ] || [ -n "$failed_branch" ] || die "ci log: --sha or --failed required"
+
+    if [ -n "$sha" ]; then
+      pipeline_id="$(_api GET "/pipelines?sha=${sha}&order_by=id&sort=desc&per_page=20" \
+        | jq -r 'first(.[]? | select(.status != "success" and .status != "skipped") | .id) // (.[0].id // empty)')"
+    else
+      pipeline_id="$(_api GET "/pipelines?ref=${failed_branch}&status=failed&order_by=id&sort=desc&per_page=1" \
+        | jq -r '.[0].id // empty')"
+    fi
+    [ -n "$pipeline_id" ] || die "ci log: no pipeline found"
+
+    job_ids="$(_api GET "/pipelines/${pipeline_id}/jobs?scope=failed&per_page=100" \
+      | jq -r '.[]? | .id')"
+    [ -n "$job_ids" ] || { echo "(no failed jobs for pipeline ${pipeline_id})"; exit 0; }
+
+    while IFS= read -r jid; do
+      [ -n "$jid" ] || continue
+      echo "── job ${jid} ──"
+      curl -sS "${GL_HEADERS[@]}" "${PROJECT_API}/jobs/${jid}/trace" || true
+    done <<< "$job_ids"
+    ;;
+
+  *) die "unknown verb '${verb}' (ci: watch log)" ;;
+esac

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unit tests for the `ci watch` adapter verb (forgejo + github), covering the
+# Unit tests for the `ci watch` adapter verb (forgejo + github + gitlab), covering the
 # SHA-source fix and the no-run hang guard. The network is stubbed with a fake
 # `curl` on PATH (see $FAKE_DIR/curl) so no live backend or Docker is needed.
 #
@@ -31,7 +31,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$url" in
-  */pulls/*) body="$(cat "$FAKE_RESP/pr.json")" ;;
+  */pulls/*|*/merge_requests/*) body="$(cat "$FAKE_RESP/pr.json")" ;;
+  *pipelines*)
+    # GitLab: bare array, filtered server-side by ?sha=…; emulate the filter.
+    body="$(cat "$FAKE_RESP/runs.json")"
+    case "$url" in *sha=*)
+      q="${url##*sha=}"; q="${q%%&*}"
+      body="$(printf '%s' "$body" | jq -c --arg s "$q" 'map(select(.sha==$s))')"
+    esac ;;
   *actions/*)
     body="$(cat "$FAKE_RESP/runs.json")"
     # GitHub filters runs server-side via ?head_sha=…; emulate that so an
@@ -64,9 +71,10 @@ run_watch() {
 REMOTE_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"   # what CI actually ran on
 LOCAL_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"     # unpushed local tip
 
-printf '{"head":{"sha":"%s"}}\n' "$REMOTE_SHA" >"$RESP/pr.json"
+# GitHub/Forgejo read .head.sha; GitLab MRs expose .sha — provide both.
+printf '{"head":{"sha":"%s"},"sha":"%s"}\n' "$REMOTE_SHA" "$REMOTE_SHA" >"$RESP/pr.json"
 
-# run_obj <backend> <kind> <id> <sha> — a single workflow-run JSON object.
+# run_obj <backend> <kind> <id> <sha> — a single run/pipeline JSON object.
 # kind: ok (finished success) | fail (finished failure) | run (still running).
 run_obj() {
 	case "$1:$2" in
@@ -76,12 +84,23 @@ run_obj() {
 		github:ok)    printf '{"id":%s,"head_sha":"%s","status":"completed","conclusion":"success"}'    "$3" "$4" ;;
 		github:fail)  printf '{"id":%s,"head_sha":"%s","status":"completed","conclusion":"failure"}'    "$3" "$4" ;;
 		github:run)   printf '{"id":%s,"head_sha":"%s","status":"in_progress","conclusion":null}'       "$3" "$4" ;;
+		gitlab:ok)    printf '{"id":%s,"sha":"%s","status":"success"}'   "$3" "$4" ;;
+		gitlab:fail)  printf '{"id":%s,"sha":"%s","status":"failed"}'    "$3" "$4" ;;
+		gitlab:run)   printf '{"id":%s,"sha":"%s","status":"running"}'   "$3" "$4" ;;
 	esac
 }
-# set_runs <backend> <obj> [<obj> …] — write runs.json from run_obj outputs.
-set_runs() { shift; printf '{"workflow_runs":[%s]}\n' "$(IFS=,; echo "$*")" >"$RESP/runs.json"; }  # $1=backend (unused; runs.json shape is shared)
+# set_runs <backend> <obj> [<obj> …] — write runs.json in the backend's native shape:
+# GitLab returns a bare pipelines array; GitHub/Forgejo wrap runs in {workflow_runs:[…]}.
+set_runs() {
+	local backend="$1"; shift
+	local joined; joined="$(IFS=,; echo "$*")"
+	case "$backend" in
+		gitlab) printf '[%s]\n' "$joined" >"$RESP/runs.json" ;;
+		*)      printf '{"workflow_runs":[%s]}\n' "$joined" >"$RESP/runs.json" ;;
+	esac
+}
 
-for backend in forgejo github; do
+for backend in forgejo github gitlab; do
 	printf '\033[1m── %s ──\033[0m\n' "$backend"
 
 	# A finished, successful run exists ONLY for the pushed (remote) SHA.
