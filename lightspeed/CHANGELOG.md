@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.7.0] - 2026-07-03
+
 ### Added
 - **Supported-backends reference** ([`references/backends.md`](references/backends.md)) covering all
   four backends — forgejo, github, gitlab, jira — each with a worked `.lightspeed/config.json`
