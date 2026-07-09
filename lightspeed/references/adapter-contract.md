@@ -24,11 +24,13 @@ lightspeed/scripts/
 
 ## Invocation
 
-Skills call the dispatcher, never an adapter directly, resolving the plugin path via
-`$CLAUDE_PLUGIN_ROOT`:
+Skills call the dispatcher, never an adapter directly. The plugin ships `bin/lightspeed`
+(and `bin/batch-manifest`); Claude Code adds the plugin's `bin/` directory to the Bash
+tool's `PATH`, so skills invoke it as a bare command — no plugin-root environment
+variable needed:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" <group> <verb> [--flag value …]
+lightspeed <group> <verb> [--flag value …]
 ```
 
 The dispatcher:
