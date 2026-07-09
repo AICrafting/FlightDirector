@@ -17,7 +17,7 @@ data; this skill is the logic. Config schema:
 Once config + secrets exist (Steps 1–3), all label actions go through the dispatcher:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" labels <list|create> …
+lightspeed labels <list|create> …
 ```
 
 ## Why a skill and not a script
@@ -205,7 +205,7 @@ works.
   and each label's listed equivalents.
 - Fetch what the repo already has:
   ```
-  "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" labels list
+  lightspeed labels list
   ```
   Output is `name⇥color⇥description` per label.
 
@@ -254,7 +254,7 @@ Create these? [y]
 On approval, create each missing label with its name/color/description from the data file:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" labels create --name "bug" --color "#d73a4a" --description "Something is broken"
+lightspeed labels create --name "bug" --color "#d73a4a" --description "Something is broken"
 ```
 
 Then **finalize `.lightspeed/config.json`**: update the `labels` map so every role records the actual

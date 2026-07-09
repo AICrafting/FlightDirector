@@ -12,7 +12,7 @@ on the issue when it's done.
 All issue actions go through the **lightspeed dispatcher**; branch/merge are git:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" <group> <verb> [--flag value …]
+lightspeed <group> <verb> [--flag value …]
 ```
 
 The dispatcher resolves coordinates, token, and label names from `.lightspeed/config.json` — you pass
@@ -20,7 +20,7 @@ The dispatcher resolves coordinates, token, and label names from `.lightspeed/co
 names. Read `stages[0]` (the first integration branch) via:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config '.code.stages[0].name'
+lightspeed config '.code.stages[0].name'
 ```
 
 Merge mechanics (strategy, gate) are owned by `promoting-a-branch` — do not read single-value
@@ -49,8 +49,8 @@ merge config fields or hand-merge here. Config + verbs:
 - **Read the issue *and its comments* first.** The body alone can be stale — clarifications,
   scope corrections, and decisions often live in the comments. Fetch both before you plan:
   ```
-  "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues get      --number N
-  "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues comments --number N
+  lightspeed issues get      --number N
+  lightspeed issues comments --number N
   ```
   If a comment contradicts the body, the later comment wins — work to that, and say so.
 - Determine the issue number `N` and derive a short slug from its title (lowercase, hyphens, no
@@ -61,10 +61,10 @@ merge config fields or hand-merge here. Config + verbs:
 ```
 # stages[0] is the first integration branch; fork the feature worktree from it.
 # Run this from the repo root.
-BASE="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config '.code.stages[0].name')"
+BASE="$(lightspeed config '.code.stages[0].name')"
 git worktree add -b "feature/<N>-<slug>" ".worktrees/<N>-<slug>" "$BASE"
 # Do the work inside .worktrees/<N>-<slug>.
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues set-status --number N --status in-progress
+lightspeed issues set-status --number N --status in-progress
 ```
 
 Do the work inside the `.worktrees/<N>-<slug>` directory.
@@ -75,7 +75,7 @@ When the work is done and waiting on the user to verify, hand the board over and
 it's ready to test, on which branch:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues set-status --number N --status to-test
+lightspeed issues set-status --number N --status to-test
 ```
 
 (One call — it drops `in-progress` and adds `to-test` atomically.)
@@ -99,14 +99,14 @@ Only after explicit approval:
      exists, fall back to a rough estimate and the model you know you're running. (The log is
      optional and personal — gitignored, not shipped by this plugin.)
    ```
-   "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues comment --number N --body-file "$SCRATCH/done.md"
+   lightspeed issues comment --number N --body-file "$SCRATCH/done.md"
    ```
 2. **Add the `model/<primary>` label** for the main model used (e.g. `model/opus`) — the one with
    the most tokens/cost in the log when available, else the model you ran. Idempotent; later
    episodes may add another `model/*`. See `model/*` in
    [default-labels.md](../../references/default-labels.md):
    ```
-   "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues label-add --number N --label model/opus
+   lightspeed issues label-add --number N --label model/opus
    ```
 3. **Promote the branch** `feature/<N>-<slug>` → `stages[0]` using `promoting-a-branch` (invoke
    the skill in this session). It applies the hop's merge strategy/gate **and** drives the
