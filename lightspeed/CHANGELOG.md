@@ -15,6 +15,19 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 _Nothing yet._
 
+## [0.7.1] - 2026-07-09
+
+### Fixed
+
+- Skills now invoke the dispatcher as a bare `lightspeed` (and `batch-manifest`)
+  command instead of `"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed"`. `CLAUDE_PLUGIN_ROOT`
+  is **not** exported to the Bash tool (only to hook/MCP/LSP/monitor subprocesses),
+  so in real projects every dispatcher call failed with `exit 127`
+  (`/scripts/lightspeed: no such file`). The plugin now ships `bin/lightspeed` and
+  `bin/batch-manifest` entrypoints; Claude Code adds a plugin's `bin/` to the Bash
+  tool `PATH`, so the bare command resolves reliably in any project. No config or
+  setup change is required.
+
 ## [0.7.0] - 2026-07-03
 
 ### Added

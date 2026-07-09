@@ -10,7 +10,7 @@ every hop — feature → `stages[0]`, `stages[i]` → `stages[i+1]` — paramet
 
 All backend access is through the dispatcher; pipeline lives in `.lightspeed/config.json` `code.stages`:
 
-    "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config '.code.stages'
+    lightspeed config '.code.stages'
 
 See [lightspeed-setup.md](../../references/lightspeed-setup.md) and
 [adapter-contract.md](../../references/adapter-contract.md).
@@ -30,7 +30,7 @@ See [lightspeed-setup.md](../../references/lightspeed-setup.md) and
 
 ```
 BRANCH="$(git branch --show-current)"
-STAGES="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config '.code.stages')"
+STAGES="$(lightspeed config '.code.stages')"
 ```
 
 - If `BRANCH` is one of the stage names at index `i`, the target is stage `i+1` (error if it's
@@ -57,7 +57,7 @@ resolution). These drive the PR's `$KEYWORD #N` lines (see Step 4) and the test-
 For each resolved `#N`, fetch the issue and draft a user-visible test plan:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues get --number N
+lightspeed issues get --number N
 ```
 
 Write one plan per issue (numbered steps + an `Expected:` line; or `- no user surface — verify
@@ -111,10 +111,10 @@ Resolve whether the **target stage** closes issues (drives the PR keyword *and* 
 the target stage's index:
 
 ```
-LAST_IDX=$(( $("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config '.code.stages | length') - 1 ))
-CLOSES="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config ".code.stages[<i>].closesIssues // null")"
+LAST_IDX=$(( $(lightspeed config '.code.stages | length') - 1 ))
+CLOSES="$(lightspeed config ".code.stages[<i>].closesIssues // null")"
 if [ "$CLOSES" = "null" ]; then [ "<i>" -eq "$LAST_IDX" ] && CLOSES=true || CLOSES=false; fi
-ISSUE_STATUS="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config ".code.stages[<i>].issueStatus // empty")"
+ISSUE_STATUS="$(lightspeed config ".code.stages[<i>].issueStatus // empty")"
 # PR issue keyword: Closes only if the target stage closes issues, else Ready (keeps issue open).
 KEYWORD=Ready; [ "$CLOSES" = true ] && KEYWORD=Closes
 ```
@@ -133,7 +133,7 @@ fi
 ```
 
 ```
-PR="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" pr open --head "$BRANCH" --base <target> \
+PR="$(lightspeed pr open --head "$BRANCH" --base <target> \
         --title "…" --body-file "$SCRATCH/pr-body.md")"   # → number⇥url
 PR_NUM="$(printf '%s' "$PR" | cut -f1)"
 ```
@@ -144,7 +144,7 @@ that was never pushed can't send the watcher chasing a run that doesn't exist. I
 a `--timeout` (default 900s) rather than polling forever:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" ci watch --pr "$PR_NUM" \
+lightspeed ci watch --pr "$PR_NUM" \
    --status-file "$SCRATCH/ls-ci-$BRANCH.json"
 ```
 
@@ -154,7 +154,7 @@ per your `post-merge-qa` policy (`--strategy` may be `merge|squash|rebase` per t
 convention):
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" pr merge --number "$PR_NUM" --strategy squash
+lightspeed pr merge --number "$PR_NUM" --strategy squash
 ```
 
 ## Step 5: Drive linked-issue lifecycle from the target stage
@@ -166,11 +166,11 @@ them now with the same snippet). For each resolved `#N`:
 
 - `ISSUE_STATUS` non-empty → set the stage's status atomically:
   ```
-  "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues set-status --number N --status "$ISSUE_STATUS"
+  lightspeed issues set-status --number N --status "$ISSUE_STATUS"
   ```
 - `CLOSES` is `true` → close it; otherwise leave it **open** so a later promotion handles it:
   ```
-  "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues close --number N
+  lightspeed issues close --number N
   ```
 
 This is the whole lifecycle: an issue's status and open/closed state follow its stage position.

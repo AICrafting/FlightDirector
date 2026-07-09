@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# PATH entrypoint for the batch-manifest helper (plugin bin/ is auto-added to PATH).
+here="$(cd "$(dirname "$0")" && pwd)"
+exec "$here/../scripts/batch-manifest" "$@"
