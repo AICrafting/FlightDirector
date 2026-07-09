@@ -12,7 +12,7 @@ the one-issue-one-branch invariant. Each issue keeps its own branch; a spoken se
 
 All backend access is through the dispatcher; pipeline + zones live in `.lightspeed/config.json`.
 Per-hop mechanics (merge/sign/PR/CI) are owned by `promoting-a-branch` — reuse them, don't
-reinvent. Manifest state is managed by `lightspeed/scripts/batch-manifest`.
+reinvent. Manifest state is managed by the `batch-manifest` command.
 
 ## Red flags — STOP
 
