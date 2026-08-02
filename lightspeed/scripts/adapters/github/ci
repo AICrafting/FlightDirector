@@ -46,8 +46,18 @@ case "$verb" in
       # Aggregate over ALL runs for this SHA (a PR can trigger several workflows):
       # keep watching while any is not yet `completed`; once all are completed the
       # verdict is failure if any conclusion isn't success/skipped/neutral.
+      # Superseded attempts don't count (#43): within each workflow, score the
+      # latest run per trigger event (in-run re-runs already mutate the same
+      # run via run_attempt; this handles repeated dispatches), and a newest
+      # manual workflow_dispatch supersedes that workflow's earlier runs
+      # outright — a human explicitly re-ran it.
       metrics="$(printf '%s' "$body" | jq -r '
-        [.workflow_runs[]?] as $r
+        [.workflow_runs[]?]
+        | group_by(.workflow_id // .id)
+        | map( max_by(.id) as $l
+             | if ($l.event // "") == "workflow_dispatch" then [$l]
+               else group_by(.event // "") | map(max_by(.id)) end )
+        | (add // []) as $r
         | ($r|length) as $total
         | ([$r[] | select(.status != "completed")] | length) as $pending
         | ([$r[] | select(.status == "completed")

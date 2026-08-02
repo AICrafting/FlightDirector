@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # GitLab issues adapter — verbs: list get comments create update comment attach
-# set-status clear-status label-add close reopen. See ../../../references/adapter-contract.md.
+# set-status clear-status label-add assign unassign close reopen. See ../../../references/adapter-contract.md.
 # GitLab addresses issues by their per-project `iid` (what the contract calls --number),
 # labels by name, and stores the body in `description`.
 set -euo pipefail
@@ -215,6 +215,38 @@ case "$verb" in
     _api PUT "/issues/${number}" "$(jq -n --arg a "$csv" '{add_labels:$a}')" >/dev/null
     ;;
 
+  # Replace the issue's assignees with the given user(s). GitLab wants numeric
+  # user ids, so each --user login is resolved via the instance-wide /users
+  # lookup. `unassign` clears (assignee_ids:[0] is GitLab's documented "none").
+  assign)
+    number=""; users=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --user)   users+=("$2"); shift 2 ;;
+      *) die "issues assign: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues assign: --number required"
+    [ ${#users[@]} -gt 0 ] || die "issues assign: at least one --user required"
+    ids="[]"
+    for u in "${users[@]}"; do
+      uid="$(curl -sS "${GL_HEADERS[@]}" "${LS_API%/}/users?username=${u}" \
+        | jq -r '.[0].id // empty')"
+      [ -n "$uid" ] || die "issues assign: no GitLab user '${u}'"
+      ids="$(printf '%s' "$ids" | jq -c --argjson id "$uid" '. + [$id]')"
+    done
+    _api PUT "/issues/${number}" "$(jq -n --argjson ids "$ids" '{assignee_ids:$ids}')" >/dev/null
+    ;;
+
+  unassign)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues unassign: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues unassign: --number required"
+    _api PUT "/issues/${number}" '{"assignee_ids":[0]}' >/dev/null
+    ;;
+
   close)
     number=""
     while [ $# -gt 0 ]; do case "$1" in
@@ -235,5 +267,5 @@ case "$verb" in
     _api PUT "/issues/${number}" "$(jq -n '{state_event:"reopen"}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add close reopen)" ;;
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add assign unassign close reopen)" ;;
 esac

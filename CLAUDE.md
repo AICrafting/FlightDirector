@@ -12,6 +12,27 @@ Claude Tools, skills and plugins
 - **Trailing whitespace:** Trimmed on save (except for .md files)
 - **Final newlines:** Trimmed (but leave one final newline)
 
+## Issue tracking — lightspeed
+
+This repo manages issues/PRs/CI with the **lightspeed** plugin. The backend is
+**Forgejo** at `forge.example.com` — NOT GitHub — so never reach for `gh` here.
+Coordinates, stage pipeline, and label names live in `.lightspeed/config.json`
+(token in `.lightspeed/secrets.json`, git-ignored). Act through the lightspeed
+skills (working-an-issue, promoting-a-branch, filing-issues, …) or the
+dispatcher: `lightspeed <group> <verb>`.
+
+Workflow red lines — these hold for every model and survive context
+compaction; re-read them before any git write, especially if the session's
+earlier instructions were summarized away or the model changed mid-session:
+
+- Each issue is worked on its own `feature/<N>-<slug>` branch in its own
+  `.worktrees/<N>-<slug>` worktree — NEVER commit directly to `develop` or
+  any later stage.
+- Merging is gated on the user's explicit go-ahead ("promote"); it happens
+  through the promoting-a-branch skill, never by hand.
+- Keep the issue's status label honest at every transition
+  (in-progress → to-test → …) via `lightspeed issues set-status`.
+
 ## Prompt logging
 
 Every prompt is automatically logged to `prompt_log.jsonl` (git-ignored) via hooks in `.claude/settings.local.json` (personal/local — the hooks shell out to scripts in `~/.claude-shared`, so they don't travel with the repo). Each line is a JSON record:

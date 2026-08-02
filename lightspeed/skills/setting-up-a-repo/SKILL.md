@@ -1,6 +1,6 @@
 ---
 name: setting-up-a-repo
-description: Use when setting up a repo for lightspeed for the first time — "set up this repo", "set up lightspeed", "configure lightspeed", "set up labels", "bootstrap labels", "add the default labels" — or when filing/triage reveals the repo has no lightspeed config or few labels. Writes the lightspeed config + secrets (backend coordinates, stage pipeline, worker model), then reconciles a default label taxonomy against existing labels and creates only what's missing, after a preview.
+description: Use when setting up a repo for lightspeed for the first time — "set up this repo", "set up lightspeed", "configure lightspeed", "set up labels", "bootstrap labels", "add the default labels" — when filing/triage reveals the repo has no lightspeed config or few labels, or when retrofitting the CLAUDE.md backend breadcrumb onto an already-configured repo ("add the lightspeed note/breadcrumb"). Writes the lightspeed config + secrets (backend coordinates, stage pipeline, worker model), reconciles a default label taxonomy against existing labels (creating only what's missing, after a preview), and leaves a backend breadcrumb in CLAUDE.md.
 ---
 
 # Setting Up a Repo
@@ -17,7 +17,7 @@ data; this skill is the logic. Config schema:
 Once config + secrets exist (Steps 1–3), all label actions go through the dispatcher:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" labels <list|create> …
+lightspeed labels <list|create> …
 ```
 
 ## Why a skill and not a script
@@ -47,7 +47,12 @@ never guess a backend into the config.
 **First, reuse an existing lightspeed config.** If `.lightspeed/config.json` already exists, read
 it and treat it as the source of truth: show its coordinates + stage pipeline back to the user and
 ask whether to reuse it as-is (skip to the label reconcile, Step 5) or revise it. Don't re-ask for
-values it already has.
+values it already has. Either way, check `CLAUDE.md` for the backend breadcrumb (Step 9) — repos
+set up before that step existed won't have one, and a re-run is how they retrofit it.
+
+**Retrofit-only shortcut:** when the user just wants the breadcrumb added to an
+already-configured repo ("add the lightspeed note/breadcrumb to CLAUDE.md"), read the backend +
+host from the existing config and jump straight to Step 9 — no label reconcile needed.
 
 **Detect the CODE backend from the git remote host.** Read the remote URL —
 `git config --get remote.origin.url` (or `git remote -v`) — and map the host to a backend:
@@ -205,7 +210,7 @@ works.
   and each label's listed equivalents.
 - Fetch what the repo already has:
   ```
-  "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" labels list
+  lightspeed labels list
   ```
   Output is `name⇥color⇥description` per label.
 
@@ -254,7 +259,7 @@ Create these? [y]
 On approval, create each missing label with its name/color/description from the data file:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" labels create --name "bug" --color "#d73a4a" --description "Something is broken"
+lightspeed labels create --name "bug" --color "#d73a4a" --description "Something is broken"
 ```
 
 Then **finalize `.lightspeed/config.json`**: update the `labels` map so every role records the actual
@@ -270,6 +275,48 @@ safe — everything now present becomes EXISTS/ADOPT.
 > **non-exclusive** (an issue can legitimately be touched by more than one model) in Forgejo's
 > label settings, per your preference. Not applicable to GitHub (no such feature); GitLab expresses
 > exclusivity differently (via `scope::value` naming, tier-gated).
+
+## Step 9: Leave a backend breadcrumb in CLAUDE.md
+
+Agents reflexively assume GitHub — "issue #21" pattern-matches to `gh` — and a `.lightspeed/`
+directory alone hasn't proven loud enough to stop that. So finish setup by writing the backend
+into the repo's `CLAUDE.md` (project instructions load every session; a memory directory is
+per-user and doesn't travel with the repo).
+
+Append this block — with the *actual* backend, host, and stage names from the config —
+creating `CLAUDE.md` if the repo has none. Show it to the user before writing (it's their
+instructions file):
+
+```markdown
+## Issue tracking — lightspeed
+
+This repo manages issues/PRs/CI with the **lightspeed** plugin. The backend is
+**<backend>** at `<host>` — NOT GitHub — so never reach for `gh` here.
+Coordinates, stage pipeline, and label names live in `.lightspeed/config.json`
+(token in `.lightspeed/secrets.json`, git-ignored). Act through the lightspeed
+skills (working-an-issue, promoting-a-branch, filing-issues, …) or the
+dispatcher: `lightspeed <group> <verb>`.
+
+Workflow red lines — these hold for every model and survive context
+compaction; re-read them before any git write, especially if the session's
+earlier instructions were summarized away or the model changed mid-session:
+
+- Each issue is worked on its own `feature/<N>-<slug>` branch in its own
+  `.worktrees/<N>-<slug>` worktree — NEVER commit directly to the integration
+  branch (`<stages[0]>`) or any later stage.
+- Merging is gated on the user's explicit go-ahead ("promote"); it happens
+  through the promoting-a-branch skill, never by hand.
+- Keep the issue's status label honest at every transition
+  (in-progress → to-test → …) via `lightspeed issues set-status`.
+```
+
+For a GitHub-backend repo, keep the block but drop the "NOT GitHub" clause and say plainly that
+issue actions still go through the dispatcher/skills, not raw `gh`. For a split setup, name both
+axes (e.g. "code on Forgejo at …, issues in Jira project ABC").
+
+**Idempotent:** if `CLAUDE.md` already has an "Issue tracking — lightspeed" section, update it
+in place (the backend may have changed) rather than appending a duplicate. If the project uses
+`AGENTS.md` instead of `CLAUDE.md`, put the block there.
 
 ## Common mistakes
 

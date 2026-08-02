@@ -11,7 +11,7 @@ drawing on what was actually discussed in the session.
 All backend access goes through the **lightspeed dispatcher** — never raw API calls, never MCP:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" <group> <verb> [--flag value …]
+lightspeed <group> <verb> [--flag value …]
 ```
 
 The dispatcher reads `.lightspeed/config.json` for the backend, coordinates, and label-name map, so
@@ -48,7 +48,7 @@ you'll upload them after the issue is created (Step 7).
 ## Step 2: Dedupe-check against open issues
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues list --state open --limit 50
+lightspeed issues list --state open --limit 50
 ```
 
 Output is `number⇥title⇥labels` per line — already projected, so it's light in context; raise
@@ -94,7 +94,7 @@ Step 6 — that keeps multi-line markdown and code fences intact without shell-q
 See the real taxonomy, then pick 1–3 of the **most specific** applicable labels:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" labels list
+lightspeed labels list
 ```
 
 Output is `name⇥color⇥description`. Good distinctions: `bug` / `feature` / `ux` / `polish` /
@@ -103,7 +103,7 @@ Output is `name⇥color⇥description`. Good distinctions: `bug` / `feature` / `
 **only if the user agrees**:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" labels create --name "new-label" --color "#0088ff"
+lightspeed labels create --name "new-label" --color "#0088ff"
 ```
 
 **Colour by prefix.** If the new label carries a **known namespaced prefix** (`area/*`,
@@ -120,7 +120,7 @@ default taxonomy in one pass rather than creating labels one at a time here.
 No confirmation needed to create. Labels are applied in the same call (they must already exist):
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues create \
+lightspeed issues create \
   --title "…" --body-file "$SCRATCH/issue-body.md" --label bug --label ux
 ```
 
@@ -131,10 +131,10 @@ It prints the new issue `number`. Report: *"Created #N: [title]"*.
 Upload each recorded image, then embed the returned URL in the body:
 
 ```
-URL="$("$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues attach --number N \
+URL="$(lightspeed issues attach --number N \
         --file /path/to/screenshot.png --name screenshot.png)"
 # append "## Screenshot\n\n![screenshot]($URL)" to the body file, then:
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues update --number N --body-file "$SCRATCH/issue-body.md"
+lightspeed issues update --number N --body-file "$SCRATCH/issue-body.md"
 ```
 
 **File notes:** screencapture temp files are deleted within seconds — copy to a stable location
@@ -147,10 +147,10 @@ Only after the user agrees to the planned change:
 
 ```
 # Update title and/or body (only the fields you pass are changed)
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues update --number N --title "…" --body-file "$SCRATCH/issue-body.md"
+lightspeed issues update --number N --title "…" --body-file "$SCRATCH/issue-body.md"
 
 # Or add a comment
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues comment --number N --body "…"
+lightspeed issues comment --number N --body "…"
 ```
 
 When rewriting a stale body, show the old content in `~~strikethrough~~` above the new content

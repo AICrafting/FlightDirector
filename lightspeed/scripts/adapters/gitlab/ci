@@ -50,9 +50,17 @@ case "$verb" in
         "${PROJECT_API}/pipelines?sha=${sha}&per_page=20" 2>/dev/null || true)"
       # Aggregate over ALL pipelines for this SHA: keep watching while any is
       # pending; once none are pending the verdict is failure if any failed.
+      # Superseded pipelines don't count (#43): job retries mutate the pipeline
+      # in place (same id), so per-source only the latest pipeline is scored; a
+      # newest `web` pipeline (manual "run pipeline") supersedes ALL earlier
+      # pipelines for the sha — a human explicitly re-ran it. A missing source
+      # falls back to the pipeline's own id, i.e. no collapse.
       metrics="$(printf '%s' "$body" | jq -r \
         --argjson pend "$_PENDING" --argjson pass "$_PASSED" '
-        [.[]?] as $r
+        [.[]?]
+        | (if length == 0 then []
+           elif (max_by(.id).source // "") == "web" then [max_by(.id)]
+           else group_by(.source // .id) | map(max_by(.id)) end) as $r
         | ($r|length) as $total
         | ([$r[] | select(.status as $s | $pend | index($s))] | length) as $pending
         | ([$r[] | select(.status as $s | ($pend | index($s)) | not)

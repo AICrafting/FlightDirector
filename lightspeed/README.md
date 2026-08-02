@@ -1,8 +1,9 @@
 # lightspeed (Claude Code plugin)
 
 Six skills for running an issue + code workflow on a repo from within a Claude Code session.
-Everything goes through the **lightspeed dispatcher** — `scripts/lightspeed <group> <verb>` —
-which calls the backend's REST API with `curl`. Backend-agnostic by design (Forgejo today;
+Everything goes through the **lightspeed dispatcher** — `lightspeed <group> <verb>` (on
+PATH via the plugin's `bin/`) — which calls the backend's REST API with `curl`.
+Backend-agnostic by design (Forgejo today;
 GitHub/GitLab/etc. behind the same contract later); no MCP server to install.
 
 > **New here?** The **[User Guide](GUIDE.md)** covers why you'd want this, how to install it,
@@ -24,7 +25,7 @@ Skills never embed backend endpoints or handle tokens. They invoke verbs through
 which resolves the right backend for the axis from config and execs that backend's adapter:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues list --state open --limit 50
+lightspeed issues list --state open --limit 50
 ```
 
 - **Adapters** (`scripts/adapters/<backend>/`) are pure `curl`/`jq` over the REST API, with a
