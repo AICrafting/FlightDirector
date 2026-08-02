@@ -75,6 +75,8 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 | `set-status`| `--number N` `--status ROLE`           | (nothing) — resolves ROLE→label name→id internally, removes other status/* first |
 | `clear-status`| `--number N`                         | (nothing) — removes every managed `status/*` label from the issue |
 | `label-add` | `--number N` `--label NAME` (repeatable) | (nothing) — adds existing labels by name (errors if a name doesn't exist) |
+| `assign`    | `--number N` `--user LOGIN` (repeatable) | (nothing) — **replaces** the issue's assignees with the given user(s). Forgejo/GitHub take logins as-is; GitLab resolves login→numeric id via the instance `/users` lookup; Jira resolves email/name→accountId and allows only ONE `--user` (single-assignee model) |
+| `unassign`  | `--number N`                           | (nothing) — removes all assignees |
 | `close`     | `--number N`                           | (nothing) |
 | `reopen`    | `--number N`                           | (nothing) — inverse of `close`; sets the issue's state back to open |
 

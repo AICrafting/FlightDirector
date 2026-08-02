@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Jira Cloud issues adapter (REST v3) — verbs: list get comments create update
-# comment set-status clear-status label-add close reopen.
+# comment set-status clear-status label-add assign unassign close reopen.
 #
 # Jira specifics (see ../../../references/adapter-contract.md, "Jira backend"):
 #   - The `--number` value is a Jira KEY (e.g. KAN-123), treated as an opaque id.
@@ -206,6 +206,35 @@ case "$verb" in
     _api PUT "/rest/api/3/issue/${number}" "$(jq -n --argjson o "$ops" '{update:{labels:$o}}')" >/dev/null
     ;;
 
+  # Assign the issue to one user. Jira Cloud wants an accountId, so --user
+  # (email or display name) is resolved via user search; Jira holds a single
+  # assignee, so --user is NOT repeatable here. `unassign` clears it.
+  assign)
+    number=""; user=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --user)   [ -z "$user" ] || die "issues assign: Jira supports a single assignee — pass --user once"
+                user="$2"; shift 2 ;;
+      *) die "issues assign: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues assign: --number required"
+    [ -n "$user" ]   || die "issues assign: --user required"
+    aid="$(_api GET "/rest/api/3/user/search?query=$(jq -rn --arg q "$user" '$q|@uri')" \
+      | jq -r '.[0].accountId // empty')"
+    [ -n "$aid" ] || die "issues assign: no Jira user matches '${user}'"
+    _api PUT "/rest/api/3/issue/${number}/assignee" "$(jq -n --arg id "$aid" '{accountId:$id}')" >/dev/null
+    ;;
+
+  unassign)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues unassign: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues unassign: --number required"
+    _api PUT "/rest/api/3/issue/${number}/assignee" '{"accountId":null}' >/dev/null
+    ;;
+
   close)
     number=""
     while [ $# -gt 0 ]; do case "$1" in
@@ -237,5 +266,5 @@ case "$verb" in
     _api POST "/rest/api/3/issue/${number}/transitions" "$(jq -n --arg id "$tid" '{transition:{id:$id}}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get comments create update comment set-status clear-status label-add close reopen)" ;;
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment set-status clear-status label-add assign unassign close reopen)" ;;
 esac

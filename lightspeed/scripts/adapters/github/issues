@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# GitHub issues adapter — verbs: list get comments create comment set-status close.
+# GitHub issues adapter — verbs: list get comments create update comment
+# set-status clear-status label-add assign unassign close reopen.
 # See ../../../references/adapter-contract.md.
 set -euo pipefail
 ADAPTER_NAME="github/issues"
@@ -185,6 +186,31 @@ case "$verb" in
     _api POST "/issues/${number}/labels" "$(jq -n --argjson l "$names_json" '{labels:$l}')" >/dev/null
     ;;
 
+  # Replace the issue's assignees with the given user login(s). Repeatable
+  # --user; `unassign` clears them all.
+  assign)
+    number=""; users=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --user)   users+=("$2"); shift 2 ;;
+      *) die "issues assign: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues assign: --number required"
+    [ ${#users[@]} -gt 0 ] || die "issues assign: at least one --user required"
+    payload="$(printf '%s\n' "${users[@]}" | jq -R . | jq -s '{assignees:.}')"
+    _api PATCH "/issues/${number}" "$payload" >/dev/null
+    ;;
+
+  unassign)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "issues unassign: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues unassign: --number required"
+    _api PATCH "/issues/${number}" '{"assignees":[]}' >/dev/null
+    ;;
+
   close)
     number=""
     while [ $# -gt 0 ]; do case "$1" in
@@ -205,5 +231,5 @@ case "$verb" in
     _api PATCH "/issues/${number}" "$(jq -n '{state:"open"}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add close reopen)" ;;
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add assign unassign close reopen)" ;;
 esac
