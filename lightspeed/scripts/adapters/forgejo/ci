@@ -54,8 +54,20 @@ case "$verb" in
       # Aggregate over ALL runs for this SHA (a PR can trigger several): keep
       # watching while any is pending; once none are pending the verdict is
       # failure if any run failed, else success. total/pending/failed on one line.
+      # Superseded attempts don't count (#43): within each workflow, score the
+      # latest run per trigger event — a retried-to-green flake must not watch
+      # as failure — and if the workflow's newest run is a manual
+      # workflow_dispatch, it supersedes the workflow's earlier runs outright
+      # (a human explicitly re-ran it). A missing workflow_id falls back to
+      # the run's own id, i.e. no collapse.
       metrics="$(printf '%s' "$body" | jq -r --arg sha "$sha" '
-        [.workflow_runs[]? | select((.commit_sha // .head_sha // "")|startswith($sha)) | .status] as $s
+        [.workflow_runs[]? | select((.commit_sha // .head_sha // "")|startswith($sha))]
+        | group_by(.workflow_id // .id)
+        | map( max_by(.id) as $l
+             | if ($l.trigger_event // $l.event // "") == "workflow_dispatch" then [$l]
+               else group_by(.trigger_event // .event // "") | map(max_by(.id)) end )
+        | (add // [])
+        | map(.status) as $s
         | ($s|length) as $total
         | ([$s[] | select(. as $x | ["waiting","running","queued","in_progress","blocked","unknown",""] | index($x))] | length) as $pending
         | ([$s[] | select((. as $x | ["waiting","running","queued","in_progress","blocked","unknown",""] | index($x)) | not)
