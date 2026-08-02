@@ -41,11 +41,12 @@ case "$url" in
     esac ;;
   *actions/*)
     body="$(cat "$FAKE_RESP/runs.json")"
-    # GitHub filters runs server-side via ?head_sha=…; emulate that so an
-    # unmatched SHA yields an empty list (Forgejo filters client-side in jq).
+    # GitHub and Forgejo filter runs server-side via ?head_sha=…; emulate that
+    # so an unmatched SHA yields an empty list. GitHub run objects carry
+    # head_sha, Forgejo /actions/runs objects carry commit_sha — match either.
     case "$url" in *head_sha=*)
       q="${url##*head_sha=}"; q="${q%%&*}"
-      body="$(printf '%s' "$body" | jq -c --arg s "$q" '.workflow_runs |= map(select(.head_sha==$s))')"
+      body="$(printf '%s' "$body" | jq -c --arg s "$q" '.workflow_runs |= map(select((.head_sha // .commit_sha)==$s))')"
     esac ;;
   *) body='{}' ;;
 esac
@@ -78,9 +79,10 @@ printf '{"head":{"sha":"%s"},"sha":"%s"}\n' "$REMOTE_SHA" "$REMOTE_SHA" >"$RESP/
 # kind: ok (finished success) | fail (finished failure) | run (still running).
 run_obj() {
 	case "$1:$2" in
-		forgejo:ok)   printf '{"id":%s,"head_sha":"%s","status":"success"}'   "$3" "$4" ;;
-		forgejo:fail) printf '{"id":%s,"head_sha":"%s","status":"failure"}'   "$3" "$4" ;;
-		forgejo:run)  printf '{"id":%s,"head_sha":"%s","status":"running"}'   "$3" "$4" ;;
+		forgejo:ok)   printf '{"id":%s,"commit_sha":"%s","status":"success"}'   "$3" "$4" ;;
+		forgejo:fail) printf '{"id":%s,"commit_sha":"%s","status":"failure"}'   "$3" "$4" ;;
+		forgejo:run)  printf '{"id":%s,"commit_sha":"%s","status":"running"}'   "$3" "$4" ;;
+		forgejo:wait) printf '{"id":%s,"commit_sha":"%s","status":"waiting"}'   "$3" "$4" ;;
 		github:ok)    printf '{"id":%s,"head_sha":"%s","status":"completed","conclusion":"success"}'    "$3" "$4" ;;
 		github:fail)  printf '{"id":%s,"head_sha":"%s","status":"completed","conclusion":"failure"}'    "$3" "$4" ;;
 		github:run)   printf '{"id":%s,"head_sha":"%s","status":"in_progress","conclusion":null}'       "$3" "$4" ;;
@@ -157,6 +159,26 @@ for backend in forgejo github gitlab; do
 	check "$backend: errors when neither --sha nor --pr given" \
 		"$([ "$rc" != 0 ] && grep -q "sha or --pr" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 done
+
+# 9. Forgejo blind spot (#53): a run still in `waiting` state has no task yet, so
+#    the old /actions/tasks poll saw nothing and reported "no CI run found". The
+#    /actions/runs endpoint lists it immediately — the watcher must report it as
+#    pending, not missing. (Times out non-zero since the run never completes.)
+printf '\033[1m── forgejo: waiting runs (#53) ──\033[0m\n'
+set_runs forgejo "$(run_obj forgejo wait 44 "$REMOTE_SHA")"
+out="$(run_watch forgejo 2 --sha "$REMOTE_SHA")"; rc=$?
+check "forgejo: a waiting run is seen as pending, not 'no CI run found'" \
+	"$(grep -q "pending=1 failed=0 status=pending" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+check "forgejo: waiting-run timeout message is the terminal-state one" \
+	"$(grep -q "no CI run found" <<<"$out" && echo 0 || echo 1)" "out=$out"
+
+# 10. A short SHA prefix must still match: ?head_sha= is an exact server-side
+#     filter, so the adapter may only send it for a full 40-char SHA and must
+#     fall back to the client-side startswith match otherwise.
+set_runs forgejo "$(run_obj forgejo ok 45 "$REMOTE_SHA")"
+out="$(run_watch forgejo 10 --sha "${REMOTE_SHA:0:12}")"; rc=$?
+check "forgejo: short --sha prefix still finds the run" \
+	"$([ "$rc" = 0 ] && grep -q "status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 
 printf '\033[1m────────────────────────────\033[0m\n'
 printf 'Passed: %d  Failed: %d\n' "$pass" "$fail"
