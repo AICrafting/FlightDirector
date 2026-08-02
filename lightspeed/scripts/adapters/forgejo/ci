@@ -41,13 +41,21 @@ case "$verb" in
     poll="${LS_CI_POLL_SECONDS:-30}"
     start="$(date +%s)"; seen=0; last_sig=""
     while true; do
+      # /actions/runs (not /actions/tasks): a task only exists once a runner has
+      # picked the job up, so a run still `waiting` is invisible to the tasks
+      # endpoint and used to read as "no CI run found" (#53). Runs are listed
+      # the moment they're created; the server filters by head_sha, but run
+      # objects carry the commit as commit_sha.
+      # ?head_sha= is an exact match — only usable for a full 40-char SHA; a
+      # short prefix falls back to the unfiltered list + the startswith below.
+      filter=""; [ "${#sha}" -eq 40 ] && filter="head_sha=${sha}&"
       body="$(curl -sS -H "Authorization: token ${LS_TOKEN}" \
-        "${REPO_API}/actions/tasks?limit=20" 2>/dev/null || true)"
+        "${REPO_API}/actions/runs?${filter}limit=20" 2>/dev/null || true)"
       # Aggregate over ALL runs for this SHA (a PR can trigger several): keep
       # watching while any is pending; once none are pending the verdict is
       # failure if any run failed, else success. total/pending/failed on one line.
       metrics="$(printf '%s' "$body" | jq -r --arg sha "$sha" '
-        [.workflow_runs[]? | select((.head_sha // "")|startswith($sha)) | .status] as $s
+        [.workflow_runs[]? | select((.commit_sha // .head_sha // "")|startswith($sha)) | .status] as $s
         | ($s|length) as $total
         | ([$s[] | select(. as $x | ["waiting","running","queued","in_progress","blocked","unknown",""] | index($x))] | length) as $pending
         | ([$s[] | select((. as $x | ["waiting","running","queued","in_progress","blocked","unknown",""] | index($x)) | not)
@@ -90,8 +98,13 @@ case "$verb" in
     [ -n "$sha" ] || [ -n "$branch" ] || die "ci log: --sha SHA or --failed BRANCH required"
 
     if [ -n "$sha" ]; then
-      run="$(_api GET "/actions/runs?head_sha=${sha}&limit=20" \
-        | jq -c '[.workflow_runs[]?] | sort_by(.started // .created) | last // empty')"
+      # ?head_sha= is an exact match — only usable for a full 40-char SHA; the
+      # client-side startswith keeps short prefixes working (and harmlessly
+      # re-checks the full-SHA case).
+      filter=""; [ "${#sha}" -eq 40 ] && filter="head_sha=${sha}&"
+      run="$(_api GET "/actions/runs?${filter}limit=20" \
+        | jq -c --arg sha "$sha" '[.workflow_runs[]? | select((.commit_sha // "")|startswith($sha))]
+          | sort_by(.started // .created) | last // empty')"
     else
       run="$(_api GET "/actions/runs?ref=refs/heads/${branch}&status=failure&limit=1" \
         | jq -c '.workflow_runs[0] // empty')"

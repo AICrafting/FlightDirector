@@ -90,6 +90,13 @@ check "--sha names the failed job in a header" \
 check "--sha skips logs of jobs that passed" \
 	"$(grep -q "FAKE-LOG job=102" <<<"$out" && echo 0 || echo 1)" "out=$out"
 
+# 1b. Short SHA prefix: ?head_sha= is exact-match server-side, so the adapter
+#     must fall back to client-side startswith — and must not silently pick a
+#     different run (run 43 is newer but on another commit).
+out="$(run_log --sha "${SHA_FAIL:0:12}")"; rc=$?
+check "short --sha prefix finds the right run's failed job" \
+	"$([ "$rc" = 0 ] && grep -q "FAKE-LOG job=101" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+
 # 2. --failed BRANCH → latest failed run for the branch, no local git needed.
 out="$(run_log --failed develop)"; rc=$?
 check "--failed BRANCH finds the failed run server-side" \
