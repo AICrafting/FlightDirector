@@ -271,6 +271,35 @@ safe — everything now present becomes EXISTS/ADOPT.
 > label settings, per your preference. Not applicable to GitHub (no such feature); GitLab expresses
 > exclusivity differently (via `scope::value` naming, tier-gated).
 
+## Step 9: Leave a backend breadcrumb in CLAUDE.md
+
+Agents reflexively assume GitHub — "issue #21" pattern-matches to `gh` — and a `.lightspeed/`
+directory alone hasn't proven loud enough to stop that. So finish setup by writing the backend
+into the repo's `CLAUDE.md` (project instructions load every session; a memory directory is
+per-user and doesn't travel with the repo).
+
+Append this block — with the *actual* backend and host from the config — creating `CLAUDE.md`
+if the repo has none. Show it to the user before writing (it's their instructions file):
+
+```markdown
+## Issue tracking — lightspeed
+
+This repo manages issues/PRs/CI with the **lightspeed** plugin. The backend is
+**<backend>** at `<host>` — NOT GitHub — so never reach for `gh` here.
+Coordinates, stage pipeline, and label names live in `.lightspeed/config.json`
+(token in `.lightspeed/secrets.json`, git-ignored). Act through the lightspeed
+skills (working-an-issue, promoting-a-branch, filing-issues, …) or the
+dispatcher: `lightspeed <group> <verb>`.
+```
+
+For a GitHub-backend repo, keep the block but drop the "NOT GitHub" clause and say plainly that
+issue actions still go through the dispatcher/skills, not raw `gh`. For a split setup, name both
+axes (e.g. "code on Forgejo at …, issues in Jira project ABC").
+
+**Idempotent:** if `CLAUDE.md` already has an "Issue tracking — lightspeed" section, update it
+in place (the backend may have changed) rather than appending a duplicate. If the project uses
+`AGENTS.md` instead of `CLAUDE.md`, put the block there.
+
 ## Common mistakes
 
 - Creating `feature` when the repo already uses `enhancement` (duplicate taxonomy). Adopt
