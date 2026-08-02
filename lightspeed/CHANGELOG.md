@@ -15,6 +15,33 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 _Nothing yet._
 
+## [0.8.0] - 2026-08-02
+
+### Added
+
+- `issues assign --number N --user LOGIN` (repeatable) and `issues unassign --number N`
+  verbs on all four backends (#52). Assign **replaces** the assignee set. Forgejo/GitHub
+  take logins as-is; GitLab resolves login → id via the instance `/users` lookup; Jira
+  resolves email/display name → accountId and enforces its single-assignee model.
+- `ci log` on Forgejo now fetches real logs (#54): the run is resolved via Forgejo 16's
+  `/actions/runs` API and each failed job's plaintext log is dumped from
+  `/actions/jobs/{id}/logs` — no more "open the web UI" pointer, no host access needed.
+- `setting-up-a-repo` finishes by writing an "Issue tracking — lightspeed" breadcrumb
+  into the repo's `CLAUDE.md` (#50) — backend + host + dispatcher pointers, plus workflow
+  red lines that survive model switches and context compaction (#51). Existing repos can
+  retrofit it with "add the lightspeed breadcrumb" (jumps straight to that step).
+
+### Fixed
+
+- `ci watch` on Forgejo sees runs still in `waiting` state (#53): it now polls
+  `/actions/runs` (runs exist the moment they're created) instead of `/actions/tasks`
+  (entries only appear once a runner picks the job up). Short `--sha` prefixes keep
+  working on both `watch` and `log`.
+- `ci watch` no longer counts superseded runs as failures (#43): only the latest
+  attempt per (workflow, trigger event) is scored, and a newest manual re-dispatch
+  (GitLab: `web` pipeline) supersedes that workflow's earlier runs — a retried-to-green
+  flake now watches green, matching the providers' own UIs.
+
 ## [0.7.1] - 2026-07-09
 
 ### Fixed
