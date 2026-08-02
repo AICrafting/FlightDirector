@@ -10,7 +10,7 @@ List open issues and filter them down to what's actually workable, so the user c
 All backend access goes through the **lightspeed dispatcher** — never raw API calls, never MCP:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" <group> <verb> [--flag value …]
+lightspeed <group> <verb> [--flag value …]
 ```
 
 The dispatcher reads `.lightspeed/config.json` for the backend, coordinates, and the
@@ -25,7 +25,7 @@ wants to file or change something, that's `filing-issues`.
 ## Step 1: List open issues
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues list --state open --limit 50
+lightspeed issues list --state open --limit 50
 ```
 
 Output is one issue per line, tab-separated:

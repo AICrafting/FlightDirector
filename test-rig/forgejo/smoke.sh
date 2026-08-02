@@ -48,6 +48,14 @@ LBLS="$(curl -fsS -H "Authorization: token $TOKEN" "$REPO_API/issues/$N" | jq -r
 [ "$LBLS" = "status/to test" ] && ok "only the latest status label remains ($LBLS)" \
   || no "only the latest status label remains" "got '$LBLS'"
 
+echo "── assign / unassign ──"
+lsp issues assign --number "$N" --user "$OWNER"
+ASG="$(curl -fsS -H "Authorization: token $TOKEN" "$REPO_API/issues/$N" | jq -r '[.assignees[]?.login] | join(",")')"
+[ "$ASG" = "$OWNER" ] && ok "assign sets the assignee ($ASG)" || no "assign sets the assignee" "got '$ASG'"
+lsp issues unassign --number "$N"
+ASG="$(curl -fsS -H "Authorization: token $TOKEN" "$REPO_API/issues/$N" | jq -r '[.assignees[]?.login] | join(",")')"
+[ -z "$ASG" ] && ok "unassign clears assignees" || no "unassign clears assignees" "got '$ASG'"
+
 echo "── comment ──"
 if lsp issues comment --number "$N" --body "a smoke comment"; then
   cnt="$(curl -fsS -H "Authorization: token $TOKEN" "$REPO_API/issues/$N/comments" | jq 'length')"

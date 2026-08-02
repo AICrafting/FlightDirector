@@ -14,7 +14,7 @@ route back to the user tagged by zone. Hands back for **serial** promotion via `
 
 All backend access is through the **lightspeed dispatcher** — never curl, never MCP:
 
-    "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" <group> <verb> [--flag value …]
+    lightspeed <group> <verb> [--flag value …]
 
 Builds on `superpowers:dispatching-parallel-agents`. See
 [lightspeed-setup.md](../../references/lightspeed-setup.md) and
@@ -61,7 +61,7 @@ Render the current board (Display format below) and push back:
 
 1. List open issues via the dispatcher (this is the same data `triaging-issues` uses):
    ```bash
-   "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" issues list --state open --limit 50
+   lightspeed issues list --state open --limit 50
    ```
    Output is `<number>⇥<title>⇥<labels>`. Paginate if a full page returns.
 2. Apply the **workable filter** (identical rule to `triaging-issues`): **exclude** any issue
@@ -69,7 +69,7 @@ Render the current board (Display format below) and push back:
    qa, blocked, deferred) — it's already in the workflow, not a fresh pick.
 3. Resolve zones:
    ```bash
-   "$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" config '.code.zones // "none"'
+   lightspeed config '.code.zones // "none"'
    ```
    - **Configured** → read each issue's **body** (`issues get --number N`); match predicted
      touched paths to a zone's `paths` globs. Labels are a hint, not gospel. Skip issues that
@@ -91,7 +91,7 @@ swap/drop/re-zone issues or override the model (per run or per batch).
 
 Resolve once:
 ```bash
-DISP="$CLAUDE_PLUGIN_ROOT/scripts/lightspeed"
+DISP=lightspeed
 # MAIN repo root (parent of the common git dir) — worktree-safe, matches the dispatcher:
 ROOT="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 BASE="$("$DISP" config '.code.stages[0].name')"
@@ -132,7 +132,7 @@ promotion can reconstruct the grouping — this survives even when zones were *i
 `code.zones`), which nothing else captures:
 
 ```bash
-"$CLAUDE_PLUGIN_ROOT/scripts/batch-manifest" write --run-id "$RUN_ID" \
+batch-manifest write --run-id "$RUN_ID" \
   --zone <zone-a> --issues "<zone-a issue numbers>" \
   --zone <zone-b> --issues "<zone-b issue numbers>"   # …one --zone/--issues pair per zone
 ```

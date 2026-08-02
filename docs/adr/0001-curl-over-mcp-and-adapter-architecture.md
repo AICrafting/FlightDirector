@@ -21,6 +21,9 @@ Three forces pushed us to re-examine that:
    watcher. Fetching failed-run logs requires reading archived log files / the Forgejo DB on
    the host — the MCP server (and the Forgejo REST API) don't expose raw logs at all. Both
    need a shell script with a token in the environment.
+   *(Update 2026-08, #54: Forgejo 16 added `GET /actions/jobs/{id}/logs`; `ci log` now
+   fetches per-job plaintext logs over the REST API — no host access needed. The watcher
+   argument stands.)*
 
 2. **Context cost of MCP bulk reads.** `mcp__forgejo__list_repo_issues` returns full issue
    JSON into the conversation context. Read-heavy operations (dedup scanning, triage

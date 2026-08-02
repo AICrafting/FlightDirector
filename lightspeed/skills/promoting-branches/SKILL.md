@@ -12,7 +12,7 @@ the one-issue-one-branch invariant. Each issue keeps its own branch; a spoken se
 
 All backend access is through the dispatcher; pipeline + zones live in `.lightspeed/config.json`.
 Per-hop mechanics (merge/sign/PR/CI) are owned by `promoting-a-branch` — reuse them, don't
-reinvent. Manifest state is managed by `lightspeed/scripts/batch-manifest`.
+reinvent. Manifest state is managed by the `batch-manifest` command.
 
 ## Red flags — STOP
 
@@ -26,7 +26,7 @@ reinvent. Manifest state is managed by `lightspeed/scripts/batch-manifest`.
 ## Step 1: Resolve the hop
 
 ```bash
-DISP="$CLAUDE_PLUGIN_ROOT/scripts/lightspeed"
+DISP=lightspeed
 BASE="$("$DISP" config '.code.stages[0].name')"
 MERGE="$("$DISP" config '.code.stages[0].merge // "direct"')"   # direct | pr
 ```
@@ -56,8 +56,8 @@ Match each `feature/<N>-<slug>` to its issue `<N>`; keep those at `to-test` and 
 - **"promote each zone" / "the first zone"** → read the manifest:
   ```bash
   LIVE="<space-separated candidate issue numbers>"
-  "$CLAUDE_PLUGIN_ROOT/scripts/batch-manifest" heal --live "$LIVE"   # self-heal + consume before reading
-  "$CLAUDE_PLUGIN_ROOT/scripts/batch-manifest" groups                # zone<TAB>n,n,n per line
+  batch-manifest heal --live "$LIVE"   # self-heal + consume before reading
+  batch-manifest groups                # zone<TAB>n,n,n per line
   ```
   "each zone" → one group per printed zone; "the first zone" → the first (if several manifests make
   this ambiguous, ask which). A candidate branch mapping to **no** zone or **multiple** zones is
@@ -123,7 +123,7 @@ Then **consume the manifest** for what was promoted:
 
 ```bash
 LIVE_AFTER="<issue numbers still at to-test>"
-"$CLAUDE_PLUGIN_ROOT/scripts/batch-manifest" heal --live "$LIVE_AFTER"
+batch-manifest heal --live "$LIVE_AFTER"
 ```
 
 ## Step 6: Report

@@ -24,11 +24,13 @@ lightspeed/scripts/
 
 ## Invocation
 
-Skills call the dispatcher, never an adapter directly, resolving the plugin path via
-`$CLAUDE_PLUGIN_ROOT`:
+Skills call the dispatcher, never an adapter directly. The plugin ships `bin/lightspeed`
+(and `bin/batch-manifest`); Claude Code adds the plugin's `bin/` directory to the Bash
+tool's `PATH`, so skills invoke it as a bare command — no plugin-root environment
+variable needed:
 
 ```
-"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" <group> <verb> [--flag value …]
+lightspeed <group> <verb> [--flag value …]
 ```
 
 The dispatcher:
@@ -73,6 +75,8 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 | `set-status`| `--number N` `--status ROLE`           | (nothing) — resolves ROLE→label name→id internally, removes other status/* first |
 | `clear-status`| `--number N`                         | (nothing) — removes every managed `status/*` label from the issue |
 | `label-add` | `--number N` `--label NAME` (repeatable) | (nothing) — adds existing labels by name (errors if a name doesn't exist) |
+| `assign`    | `--number N` `--user LOGIN` (repeatable) | (nothing) — **replaces** the issue's assignees with the given user(s). Forgejo/GitHub take logins as-is; GitLab resolves login→numeric id via the instance `/users` lookup; Jira resolves email/name→accountId and allows only ONE `--user` (single-assignee model) |
+| `unassign`  | `--number N`                           | (nothing) — removes all assignees |
 | `close`     | `--number N`                           | (nothing) |
 | `reopen`    | `--number N`                           | (nothing) — inverse of `close`; sets the issue's state back to open |
 
@@ -95,8 +99,8 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 
 | Verb    | Args                                              | stdout |
 |---------|---------------------------------------------------|--------|
-| `watch` | `--pr N` \| `--sha SHA` `[--status-file PATH] [--timeout SECS]` | one line per state change: `ci runs=<n> pending=<p> failed=<f> status=<pending\|success\|failure>`; **aggregates all runs** for the SHA — stays watching while any is pending, verdict is `failure` if any run failed. Exits 0 once none pending. `--pr` resolves the PR's head SHA (the SHA the run reports — prefer it; a local `--sha` may be unpushed). `--timeout` (env `LS_CI_WATCH_TIMEOUT` / config `code.ciWatchTimeout`; default 900; 0 disables) exits non-zero rather than polling forever. Background-friendly for the `Monitor` tool. |
-| `log`   | `--sha SHA` (or `--failed BRANCH`)                | raw failed-job log to stdout (host-access dependent; see ADR consequences) |
+| `watch` | `--pr N` \| `--sha SHA` `[--status-file PATH] [--timeout SECS]` | one line per state change: `ci runs=<n> pending=<p> failed=<f> status=<pending\|success\|failure>`; **aggregates all runs** for the SHA — stays watching while any is pending, verdict is `failure` if any run failed. Exits 0 once none pending. `--pr` resolves the PR's head SHA (the SHA the run reports — prefer it; a local `--sha` may be unpushed). `--timeout` (env `LS_CI_WATCH_TIMEOUT` / config `code.ciWatchTimeout`; default 900; 0 disables) exits non-zero rather than polling forever. **Superseded runs don't count**: only the latest attempt per (workflow, trigger event) is scored — a retried-to-green flake watches green — and a newest manual re-dispatch (`workflow_dispatch`; GitLab: `web` pipeline) supersedes that workflow's earlier runs outright. Background-friendly for the `Monitor` tool. |
+| `log`   | `--sha SHA` (or `--failed BRANCH`)                | failed jobs' plaintext logs to stdout, one `── job <id>: <name> ──` header per job, fetched via the backend's per-job logs API (Forgejo 16+: `/actions/jobs/{id}/logs`) |
 
 ## Notes
 

@@ -41,13 +41,33 @@ case "$verb" in
     poll="${LS_CI_POLL_SECONDS:-30}"
     start="$(date +%s)"; seen=0; last_sig=""
     while true; do
+      # /actions/runs (not /actions/tasks): a task only exists once a runner has
+      # picked the job up, so a run still `waiting` is invisible to the tasks
+      # endpoint and used to read as "no CI run found" (#53). Runs are listed
+      # the moment they're created; the server filters by head_sha, but run
+      # objects carry the commit as commit_sha.
+      # ?head_sha= is an exact match — only usable for a full 40-char SHA; a
+      # short prefix falls back to the unfiltered list + the startswith below.
+      filter=""; [ "${#sha}" -eq 40 ] && filter="head_sha=${sha}&"
       body="$(curl -sS -H "Authorization: token ${LS_TOKEN}" \
-        "${REPO_API}/actions/tasks?limit=20" 2>/dev/null || true)"
+        "${REPO_API}/actions/runs?${filter}limit=20" 2>/dev/null || true)"
       # Aggregate over ALL runs for this SHA (a PR can trigger several): keep
       # watching while any is pending; once none are pending the verdict is
       # failure if any run failed, else success. total/pending/failed on one line.
+      # Superseded attempts don't count (#43): within each workflow, score the
+      # latest run per trigger event — a retried-to-green flake must not watch
+      # as failure — and if the workflow's newest run is a manual
+      # workflow_dispatch, it supersedes the workflow's earlier runs outright
+      # (a human explicitly re-ran it). A missing workflow_id falls back to
+      # the run's own id, i.e. no collapse.
       metrics="$(printf '%s' "$body" | jq -r --arg sha "$sha" '
-        [.workflow_runs[]? | select((.head_sha // "")|startswith($sha)) | .status] as $s
+        [.workflow_runs[]? | select((.commit_sha // .head_sha // "")|startswith($sha))]
+        | group_by(.workflow_id // .id)
+        | map( max_by(.id) as $l
+             | if ($l.trigger_event // $l.event // "") == "workflow_dispatch" then [$l]
+               else group_by(.trigger_event // .event // "") | map(max_by(.id)) end )
+        | (add // [])
+        | map(.status) as $s
         | ($s|length) as $total
         | ([$s[] | select(. as $x | ["waiting","running","queued","in_progress","blocked","unknown",""] | index($x))] | length) as $pending
         | ([$s[] | select((. as $x | ["waiting","running","queued","in_progress","blocked","unknown",""] | index($x)) | not)
@@ -77,9 +97,9 @@ case "$verb" in
     done
     ;;
 
-  # Best-effort: Forgejo's REST API does not serve raw job logs (that needs host
-  # access — see ADR 0001 consequences). We surface the run's status + URL from
-  # the API, and point at the web UI for the full log.
+  # Dump the failed jobs' logs for a commit (or the latest failed run on a
+  # branch). Forgejo 16's Actions API serves per-job plaintext logs
+  # (/actions/jobs/{id}/logs) — jobs are listed per run, failed ones dumped.
   log)
     sha=""; branch=""
     while [ $# -gt 0 ]; do case "$1" in
@@ -87,17 +107,37 @@ case "$verb" in
       --failed) branch="$2"; shift 2 ;;
       *) die "ci log: unknown arg '$1'" ;;
     esac; done
-    if [ -z "$sha" ] && [ -n "$branch" ]; then
-      sha="$(git rev-parse "$branch" 2>/dev/null || true)"
-    fi
-    [ -n "$sha" ] || die "ci log: --sha SHA or --failed BRANCH required"
+    [ -n "$sha" ] || [ -n "$branch" ] || die "ci log: --sha SHA or --failed BRANCH required"
 
-    run="$(_api GET "/actions/tasks?limit=50" \
-      | jq -c --arg sha "$sha" '[.workflow_runs[]? | select((.head_sha // "")|startswith($sha))][0] // empty')"
-    [ -n "$run" ] || die "ci log: no CI run found for ${sha}"
-    printf '%s' "$run" | jq -r \
-      '"run \(.id): status=\(.status) conclusion=\(.conclusion // "?")  \(.html_url // .url // "")"'
-    echo "ci log: Forgejo's API does not serve raw job logs — open the run URL above for the full log, or wire host-access log fetch (see ADR 0001)." >&2
+    if [ -n "$sha" ]; then
+      # ?head_sha= is an exact match — only usable for a full 40-char SHA; the
+      # client-side startswith keeps short prefixes working (and harmlessly
+      # re-checks the full-SHA case).
+      filter=""; [ "${#sha}" -eq 40 ] && filter="head_sha=${sha}&"
+      run="$(_api GET "/actions/runs?${filter}limit=20" \
+        | jq -c --arg sha "$sha" '[.workflow_runs[]? | select((.commit_sha // "")|startswith($sha))]
+          | sort_by(.started // .created) | last // empty')"
+    else
+      run="$(_api GET "/actions/runs?ref=refs/heads/${branch}&status=failure&limit=1" \
+        | jq -c '.workflow_runs[0] // empty')"
+    fi
+    [ -n "$run" ] || die "ci log: no CI run found for ${sha:-$branch}"
+    run_id="$(printf '%s' "$run" | jq -r '.id')"
+    printf '%s' "$run" | jq -r '"run \(.id): status=\(.status)  \(.html_url // "")"'
+
+    # Job list is a bare array; a job's terminal failure state is status=failure
+    # (Forgejo folds conclusion into status).
+    failed_jobs="$(_api GET "/actions/runs/${run_id}/jobs" \
+      | jq -c '[.[]? | select(.status=="failure")]')"
+    if [ "$(printf '%s' "$failed_jobs" | jq 'length')" -eq 0 ]; then
+      echo "(no failed jobs for run ${run_id})"; exit 0
+    fi
+    printf '%s' "$failed_jobs" | jq -r '.[] | "\(.id)\t\(.name // "?")"' \
+    | while IFS="$(printf '\t')" read -r jid jname; do
+      echo "── job ${jid}: ${jname} ──"
+      _api GET "/actions/jobs/${jid}/logs" || true
+      echo
+    done
     ;;
 
   *) die "unknown verb '${verb}' (ci: watch log)" ;;

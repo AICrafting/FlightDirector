@@ -1,7 +1,7 @@
 # lightspeed setup
 
 Shared by all lightspeed skills. Every backend operation goes through the **dispatcher** —
-`"$CLAUDE_PLUGIN_ROOT/scripts/lightspeed" <group> <verb> …` — which calls the backend's REST
+`lightspeed <group> <verb> …` — which calls the backend's REST
 API with `curl`. There is no MCP server, and no token handling in the skills themselves. See
 [ADR 0001](../../docs/adr/0001-curl-over-mcp-and-adapter-architecture.md) for why, and
 [adapter-contract.md](adapter-contract.md) for the full verb set.
