@@ -283,8 +283,9 @@ directory alone hasn't proven loud enough to stop that. So finish setup by writi
 into the repo's `CLAUDE.md` (project instructions load every session; a memory directory is
 per-user and doesn't travel with the repo).
 
-Append this block — with the *actual* backend and host from the config — creating `CLAUDE.md`
-if the repo has none. Show it to the user before writing (it's their instructions file):
+Append this block — with the *actual* backend, host, and stage names from the config —
+creating `CLAUDE.md` if the repo has none. Show it to the user before writing (it's their
+instructions file):
 
 ```markdown
 ## Issue tracking — lightspeed
@@ -295,6 +296,18 @@ Coordinates, stage pipeline, and label names live in `.lightspeed/config.json`
 (token in `.lightspeed/secrets.json`, git-ignored). Act through the lightspeed
 skills (working-an-issue, promoting-a-branch, filing-issues, …) or the
 dispatcher: `lightspeed <group> <verb>`.
+
+Workflow red lines — these hold for every model and survive context
+compaction; re-read them before any git write, especially if the session's
+earlier instructions were summarized away or the model changed mid-session:
+
+- Each issue is worked on its own `feature/<N>-<slug>` branch in its own
+  `.worktrees/<N>-<slug>` worktree — NEVER commit directly to the integration
+  branch (`<stages[0]>`) or any later stage.
+- Merging is gated on the user's explicit go-ahead ("promote"); it happens
+  through the promoting-a-branch skill, never by hand.
+- Keep the issue's status label honest at every transition
+  (in-progress → to-test → …) via `lightspeed issues set-status`.
 ```
 
 For a GitHub-backend repo, keep the block but drop the "NOT GitHub" clause and say plainly that
