@@ -1,6 +1,6 @@
 ---
 name: setting-up-a-repo
-description: Use when setting up a repo for lightspeed for the first time — "set up this repo", "set up lightspeed", "configure lightspeed", "set up labels", "bootstrap labels", "add the default labels" — or when filing/triage reveals the repo has no lightspeed config or few labels. Writes the lightspeed config + secrets (backend coordinates, stage pipeline, worker model), then reconciles a default label taxonomy against existing labels and creates only what's missing, after a preview.
+description: Use when setting up a repo for lightspeed for the first time — "set up this repo", "set up lightspeed", "configure lightspeed", "set up labels", "bootstrap labels", "add the default labels" — when filing/triage reveals the repo has no lightspeed config or few labels, or when retrofitting the CLAUDE.md backend breadcrumb onto an already-configured repo ("add the lightspeed note/breadcrumb"). Writes the lightspeed config + secrets (backend coordinates, stage pipeline, worker model), reconciles a default label taxonomy against existing labels (creating only what's missing, after a preview), and leaves a backend breadcrumb in CLAUDE.md.
 ---
 
 # Setting Up a Repo
@@ -47,7 +47,12 @@ never guess a backend into the config.
 **First, reuse an existing lightspeed config.** If `.lightspeed/config.json` already exists, read
 it and treat it as the source of truth: show its coordinates + stage pipeline back to the user and
 ask whether to reuse it as-is (skip to the label reconcile, Step 5) or revise it. Don't re-ask for
-values it already has.
+values it already has. Either way, check `CLAUDE.md` for the backend breadcrumb (Step 9) — repos
+set up before that step existed won't have one, and a re-run is how they retrofit it.
+
+**Retrofit-only shortcut:** when the user just wants the breadcrumb added to an
+already-configured repo ("add the lightspeed note/breadcrumb to CLAUDE.md"), read the backend +
+host from the existing config and jump straight to Step 9 — no label reconcile needed.
 
 **Detect the CODE backend from the git remote host.** Read the remote URL —
 `git config --get remote.origin.url` (or `git remote -v`) — and map the host to a backend:
