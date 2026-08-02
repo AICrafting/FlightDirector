@@ -1,6 +1,6 @@
 ---
 name: setting-up-a-repo
-description: Use when setting up a repo for lightspeed for the first time — "set up this repo", "set up lightspeed", "configure lightspeed", "set up labels", "bootstrap labels", "add the default labels" — or when filing/triage reveals the repo has no lightspeed config or few labels. Writes the lightspeed config + secrets (backend coordinates, stage pipeline, worker model), then reconciles a default label taxonomy against existing labels and creates only what's missing, after a preview.
+description: Use when setting up a repo for lightspeed for the first time — "set up this repo", "set up lightspeed", "configure lightspeed", "set up labels", "bootstrap labels", "add the default labels" — when filing/triage reveals the repo has no lightspeed config or few labels, or when retrofitting the CLAUDE.md backend breadcrumb onto an already-configured repo ("add the lightspeed note/breadcrumb"). Writes the lightspeed config + secrets (backend coordinates, stage pipeline, worker model), reconciles a default label taxonomy against existing labels (creating only what's missing, after a preview), and leaves a backend breadcrumb in CLAUDE.md.
 ---
 
 # Setting Up a Repo
@@ -47,7 +47,12 @@ never guess a backend into the config.
 **First, reuse an existing lightspeed config.** If `.lightspeed/config.json` already exists, read
 it and treat it as the source of truth: show its coordinates + stage pipeline back to the user and
 ask whether to reuse it as-is (skip to the label reconcile, Step 5) or revise it. Don't re-ask for
-values it already has.
+values it already has. Either way, check `CLAUDE.md` for the backend breadcrumb (Step 9) — repos
+set up before that step existed won't have one, and a re-run is how they retrofit it.
+
+**Retrofit-only shortcut:** when the user just wants the breadcrumb added to an
+already-configured repo ("add the lightspeed note/breadcrumb to CLAUDE.md"), read the backend +
+host from the existing config and jump straight to Step 9 — no label reconcile needed.
 
 **Detect the CODE backend from the git remote host.** Read the remote URL —
 `git config --get remote.origin.url` (or `git remote -v`) — and map the host to a backend:
@@ -270,6 +275,35 @@ safe — everything now present becomes EXISTS/ADOPT.
 > **non-exclusive** (an issue can legitimately be touched by more than one model) in Forgejo's
 > label settings, per your preference. Not applicable to GitHub (no such feature); GitLab expresses
 > exclusivity differently (via `scope::value` naming, tier-gated).
+
+## Step 9: Leave a backend breadcrumb in CLAUDE.md
+
+Agents reflexively assume GitHub — "issue #21" pattern-matches to `gh` — and a `.lightspeed/`
+directory alone hasn't proven loud enough to stop that. So finish setup by writing the backend
+into the repo's `CLAUDE.md` (project instructions load every session; a memory directory is
+per-user and doesn't travel with the repo).
+
+Append this block — with the *actual* backend and host from the config — creating `CLAUDE.md`
+if the repo has none. Show it to the user before writing (it's their instructions file):
+
+```markdown
+## Issue tracking — lightspeed
+
+This repo manages issues/PRs/CI with the **lightspeed** plugin. The backend is
+**<backend>** at `<host>` — NOT GitHub — so never reach for `gh` here.
+Coordinates, stage pipeline, and label names live in `.lightspeed/config.json`
+(token in `.lightspeed/secrets.json`, git-ignored). Act through the lightspeed
+skills (working-an-issue, promoting-a-branch, filing-issues, …) or the
+dispatcher: `lightspeed <group> <verb>`.
+```
+
+For a GitHub-backend repo, keep the block but drop the "NOT GitHub" clause and say plainly that
+issue actions still go through the dispatcher/skills, not raw `gh`. For a split setup, name both
+axes (e.g. "code on Forgejo at …, issues in Jira project ABC").
+
+**Idempotent:** if `CLAUDE.md` already has an "Issue tracking — lightspeed" section, update it
+in place (the backend may have changed) rather than appending a duplicate. If the project uses
+`AGENTS.md` instead of `CLAUDE.md`, put the block there.
 
 ## Common mistakes
 
