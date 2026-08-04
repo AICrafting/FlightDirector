@@ -19,6 +19,14 @@ test-rig/
   …
 ```
 
+Scripts that sit at *this* level are backend-free — they need no `up.sh`, no container, and no
+token, so they run anywhere:
+
+- `smoke-worktree-anchor.sh` — regression test for the nested-worktree bug (#57). Builds a
+  throwaway repo, proves a cwd-relative `worktree add` nests under the previous worktree, and
+  proves the `ROOT=` idiom extracted from `working-an-issue/SKILL.md` defeats it. Because it
+  greps the idiom out of the shipped skill, it fails if that snippet drifts.
+
 The adapter contract is backend-agnostic, so the `smoke.sh` assertions are largely the same
 across rigs — only provisioning differs. If/when a second rig lands, the shared assertions are
 a candidate to extract up to this level, driven by each backend's `up`/`down`. Not extracted
