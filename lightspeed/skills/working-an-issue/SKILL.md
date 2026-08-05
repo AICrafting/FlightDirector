@@ -37,6 +37,10 @@ merge config fields or hand-merge here. Config + verbs:
   own worktree under `.worktrees/` (already gitignored) — never commit an issue's work straight
   onto the trunk branch. Each issue's own worktree is what enables working several issues in
   parallel; never reuse one worktree for two issues.
+- **Never let a worktree path resolve against `$PWD`.** Anchor every `git worktree` call with
+  `-C "$ROOT"` (below). The shell's working directory persists between commands, so if you are
+  still inside the *previous* issue's worktree, a relative `.worktrees/<N>-<slug>` creates the
+  new worktree **nested inside that one** — git permits nested worktrees and says nothing.
 - **Keep the board honest.** Every lifecycle transition updates the status label, so the issue's
   state always matches reality. `issues set-status` is atomic — it adds the new status and
   removes the others in one call, so the board can never show two states. Don't do the work and
@@ -59,15 +63,19 @@ merge config fields or hand-merge here. Config + verbs:
 - Create a worktree off `stages[0]` (the first integration branch):
 
 ```
+# MAIN repo root (parent of the common git dir) — worktree-safe, matches the dispatcher.
+# NEVER let this path come from $PWD: the shell's cwd persists across calls, so if you
+# are still inside a previous issue's worktree a relative ".worktrees/…" silently nests
+# the new worktree under it (git allows nested worktrees and prints no warning).
+ROOT="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
+
 # stages[0] is the first integration branch; fork the feature worktree from it.
-# Run this from the repo root.
 BASE="$(lightspeed config '.code.stages[0].name')"
-git worktree add -b "feature/<N>-<slug>" ".worktrees/<N>-<slug>" "$BASE"
-# Do the work inside .worktrees/<N>-<slug>.
+git -C "$ROOT" worktree add -b "feature/<N>-<slug>" ".worktrees/<N>-<slug>" "$BASE"
 lightspeed issues set-status --number N --status in-progress
 ```
 
-Do the work inside the `.worktrees/<N>-<slug>` directory.
+Do the work inside the `$ROOT/.worktrees/<N>-<slug>` directory.
 
 ### 2. Ready for testing
 
@@ -114,9 +122,11 @@ Only after explicit approval:
    a single-trunk repo's terminal `stages[0]` closes the issue; in a multi-stage pipeline it just
    sets the stage's status and the issue stays open until a closing stage. **Do not** set status
    or close the issue here — that is stage-driven now, and double-handling it makes the board lie.
-4. **Remove the issue's worktree** once merged (run from the repo root, not inside the worktree):
+4. **Remove the issue's worktree** once merged (anchored to `$ROOT`, so it works from anywhere —
+   including from inside the worktree being removed):
    ```
-   git worktree remove ".worktrees/<N>-<slug>"
+   ROOT="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
+   git -C "$ROOT" worktree remove ".worktrees/<N>-<slug>"
    ```
 
 ## Common mistakes
@@ -131,8 +141,8 @@ Only after explicit approval:
   Status and close are driven by the target stage in `promoting-a-branch` (Step 5). Setting them
   here too makes the board show a state the pipeline didn't ask for.
 - **Orphaned worktrees** — if a promotion is abandoned, remove the worktree
-  (`git worktree remove --force ".worktrees/<N>-<slug>"`) rather than leaving it dangling. If you
-  abandon the work earlier (before promotion), also clear the issue's status label
-  (`issues clear-status --number N`) after removing the worktree so the board doesn't lie.
+  (`git -C "$ROOT" worktree remove --force ".worktrees/<N>-<slug>"`) rather than leaving it
+  dangling. If you abandon the work earlier (before promotion), also clear the issue's status
+  label (`issues clear-status --number N`) after removing the worktree so the board doesn't lie.
 - Hand-merging instead of delegating to `promoting-a-branch` — the merge strategy and any gate
   checks live there, not here.
