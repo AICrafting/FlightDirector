@@ -15,6 +15,29 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 _Nothing yet._
 
+## [0.9.0] - 2026-08-05
+
+### Fixed
+
+- `working-an-issue` no longer creates an issue's worktree nested inside the
+  *previous* issue's worktree (#57). The worktree path was relative and guarded
+  only by a "run this from the repo root" comment, so a shell whose working
+  directory had persisted from an earlier `cd` resolved `.worktrees/<N>-<slug>`
+  against the worktree it was already in — and git permits nested worktrees
+  without warning, so it failed silently. Worktree `add`/`remove` are now
+  anchored to the main repo root (`git -C "$ROOT"`, resolved from the common git
+  dir), matching what `queue-batches` and the dispatcher already did.
+- `promoting-a-branch` anchors its throwaway promote worktree's `add`/`remove` to
+  `$MAIN` (#57) — already resolved a few lines above, but unused there. Latent
+  rather than user-visible, since the worktree path itself was absolute.
+
+### Added
+
+- `test-rig/smoke-worktree-anchor.sh` — a backend-free regression test (no
+  container, no token, runs anywhere). It reproduces the nesting failure, then
+  greps the anchoring idiom out of `working-an-issue/SKILL.md` and proves it
+  defeats the failure — so the test fails if the shipped snippet drifts.
+
 ## [0.8.0] - 2026-08-02
 
 ### Added
