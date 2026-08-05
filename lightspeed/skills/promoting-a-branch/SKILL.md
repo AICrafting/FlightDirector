@@ -95,10 +95,10 @@ that no worktree holds): use a throwaway worktree, then remove it. The `-$$` (PI
 the path unique so a crashed prior run can't collide.
 
 ```
-git worktree add "$SCRATCH/promote-<target>-$$" "<target>"
+git -C "$MAIN" worktree add "$SCRATCH/promote-<target>-$$" "<target>"
 git -C "$SCRATCH/promote-<target>-$$" merge --no-ff "$BRANCH" && \
     git -C "$SCRATCH/promote-<target>-$$" push
-git worktree remove "$SCRATCH/promote-<target>-$$"
+git -C "$MAIN" worktree remove "$SCRATCH/promote-<target>-$$"
 ```
 
 > **Red flag:** Never run `git switch <target>` from inside the feature worktree — git will
