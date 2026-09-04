@@ -4,6 +4,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DISP="$REPO_ROOT/lightspeed/scripts/lightspeed"
+EXPECTED_VERSION="$(jq -r '.version' "$REPO_ROOT/lightspeed/.codex-plugin/plugin.json")"
 SANDBOX="$(mktemp -d)"
 trap 'rm -rf "$SANDBOX"' EXIT
 
@@ -15,7 +16,7 @@ JSON
 
 (cd "$SANDBOX" && "$DISP" reconcile --harness codex)
 [ "$(jq -r '.schemaVersion' "$SANDBOX/.lightspeed/config.json")" = 1 ]
-[ "$(jq -r '.harnesses.codex.reconciledWith' "$SANDBOX/.lightspeed/config.json")" = 0.9.0 ]
+[ "$(jq -r '.harnesses.codex.reconciledWith' "$SANDBOX/.lightspeed/config.json")" = "$EXPECTED_VERSION" ]
 [ "$(jq -r '.custom.preserve' "$SANDBOX/.lightspeed/config.json")" = true ]
 
 before="$(sha256sum "$SANDBOX/.lightspeed/config.json" | cut -d' ' -f1)"

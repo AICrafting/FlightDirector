@@ -1,6 +1,6 @@
 {
   "name": "lightspeed",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Opinionated issue and code workflow for Forgejo, GitHub, GitLab, and Jira.",
   "author": {
     "name": "Cerebral Gardens"

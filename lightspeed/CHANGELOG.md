@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.10.0] - 2026-09-04
+
 ### Added
 
 - Codex plugin packaging and runtime guidance, sharing the existing skills, dispatcher, adapters,
