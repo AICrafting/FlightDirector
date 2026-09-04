@@ -5,6 +5,8 @@ description: Use when setting up a repo for lightspeed for the first time — "s
 
 # Setting Up a Repo
 
+Before the first command, follow [runtime preflight](../../references/runtime.md).
+
 The first-run setup skill: it writes the `.lightspeed/config.json` + `.lightspeed/secrets.json` the
 dispatcher needs, then brings the repo up to the default label taxonomy — idempotently, adopting
 existing equivalents and creating only the approved missing labels.
@@ -174,6 +176,8 @@ Write `.lightspeed/config.json` in the `.lightspeed/` folder (created in Step 2)
 
 ```json
 {
+  "schemaVersion": 1,
+  "harnesses": { "claude": { "reconciledWith": "<installed-version>" } },
   "code": { "backend": "forgejo", "owner": "…", "repo": "…", "api": "https://…/api/v1",
     "stages": [
       { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },

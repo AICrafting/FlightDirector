@@ -24,6 +24,11 @@ Backend, coordinates, and preferences, across two independent axes:
 
 ```jsonc
 {
+  "schemaVersion": 1,
+  "harnesses": {
+    "claude": { "reconciledWith": "0.9.0" },
+    "codex": { "reconciledWith": "0.9.0" }
+  },
   "code": {
     "backend": "forgejo", "owner": "acme", "repo": "widget",
     "api": "https://git.example.com/api/v1",
@@ -46,6 +51,12 @@ Backend, coordinates, and preferences, across two independent axes:
   }
 }
 ```
+
+- **`schemaVersion`** — version of the committable Lightspeed config schema.
+- **`harnesses.<name>.reconciledWith`** — installed Lightspeed plugin version that last reconciled
+  this config from Claude Code or Codex. Unknown keys are preserved and an older plugin never
+  downgrades a newer stamp. Model discovery is not a migration: missing `model/*` labels are
+  created lazily when work-ledger entries are finalized.
 
 - **`api`** — the instance API base (`…/api/v1`), *not* repo-scoped; the dispatcher appends
   `/repos/<owner>/<repo>`.

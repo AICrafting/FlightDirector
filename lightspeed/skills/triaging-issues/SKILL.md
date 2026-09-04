@@ -5,6 +5,8 @@ description: Use when the user asks what to work on next — "what should I work
 
 # Triaging Issues
 
+Before the first command, follow [runtime preflight](../../references/runtime.md).
+
 List open issues and filter them down to what's actually workable, so the user can pick.
 
 All backend access goes through the **lightspeed dispatcher** — never raw API calls, never MCP:

@@ -37,7 +37,7 @@ case "$verb" in
     done
     ;;
 
-  create)
+  create|ensure)
     name=""
     while [ $# -gt 0 ]; do case "$1" in
       --name)        name="$2"; shift 2 ;;
@@ -52,5 +52,5 @@ case "$verb" in
     printf '%s\n' "$name"
     ;;
 
-  *) die "unknown verb '${verb}' (labels: list resolve create)" ;;
+  *) die "unknown verb '${verb}' (labels: list resolve create ensure)" ;;
 esac

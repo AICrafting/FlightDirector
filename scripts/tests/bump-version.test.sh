@@ -29,13 +29,22 @@ json_version() {
 # --- build a throwaway sandbox repo with two plugins ------------------------
 make_sandbox() {
 	local root="$1"
-	mkdir -p "$root/lightspeed/.claude-plugin" "$root/other/.claude-plugin" "$root/.claude-plugin"
+	mkdir -p "$root/lightspeed/.claude-plugin" "$root/lightspeed/.codex-plugin" \
+		"$root/other/.claude-plugin" "$root/.claude-plugin"
 
 	cat >"$root/lightspeed/.claude-plugin/plugin.json" <<'JSON'
 {
   "name": "lightspeed",
   "version": "1.2.3",
   "description": "test"
+}
+JSON
+	cat >"$root/lightspeed/.codex-plugin/plugin.json" <<'JSON'
+{
+  "name": "lightspeed",
+  "version": "1.2.3",
+  "description": "test",
+  "skills": "./skills/"
 }
 JSON
 
@@ -105,6 +114,9 @@ BUMP_VERSION_ROOT="$SANDBOX" "$BUMP" lightspeed 1.3.0 >/dev/null
 
 check "lightspeed plugin.json bumped" \
 	"$([ "$(json_version "$SANDBOX/lightspeed/.claude-plugin/plugin.json")" = "1.3.0" ] && echo 1 || echo 0)"
+
+check "lightspeed Codex plugin.json bumped" \
+	"$([ "$(json_version "$SANDBOX/lightspeed/.codex-plugin/plugin.json")" = "1.3.0" ] && echo 1 || echo 0)"
 
 check "marketplace lightspeed entry bumped" \
 	"$(grep -A3 '"name": "lightspeed"' "$SANDBOX/.claude-plugin/marketplace.json" | grep -q '"version": "1.3.0"' && echo 1 || echo 0)"

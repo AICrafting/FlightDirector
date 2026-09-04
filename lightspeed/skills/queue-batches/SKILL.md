@@ -5,6 +5,8 @@ description: Use when the user invokes `/queue-batches`, `/queue-batches NxM` (e
 
 # Queue Batches
 
+Before the first command, follow [runtime preflight](../../references/runtime.md).
+
 Dispatches N parallel background agents, each grinding M issues **sequentially** through the
 native per-issue lifecycle (`working-an-issue`) in its own worktree. A *batch is a zone*: the N
 agents work disjoint file zones so the concurrently-active issues stay merge-clean. Every issue
@@ -16,7 +18,7 @@ All backend access is through the **lightspeed dispatcher** — never curl, neve
 
     lightspeed <group> <verb> [--flag value …]
 
-Builds on `superpowers:dispatching-parallel-agents`. See
+Uses the active harness's native parallel-agent facilities. See
 [lightspeed-setup.md](../../references/lightspeed-setup.md) and
 [adapter-contract.md](../../references/adapter-contract.md).
 
@@ -119,13 +121,9 @@ Per zone:
 - Render `templates/agent-prompt.md`, filling `{zone} {model} {dispatcher}=$DISP
   {base_branch}=$BASE {repo_root}=$ROOT {log_path}=$LOG {scratch}=$SCRATCH {issues_ordered}
   {repo_rules}=$REPO_RULES {pre_made_decisions}`.
-- Launch with the `Agent` tool: `run_in_background: true`, `model: <MODEL or override>`.
-  (`<MODEL or override>` is `$MODEL`, unless the user set a model override for this specific zone
-  during plan approval — then use that zone's value.)
-- `TaskCreate` one task per issue — subject `[<zone>] #<N> — <title>`, description
-  `<zone> · <labels>` — plus one per-zone ship task `Ship <zone> (serial promote + cleanup)`.
-- Launch `tail -f "$LOG"` with `run_in_background: true` and attach `Monitor` so each new log line
-  becomes a notification.
+- Select and follow exactly one dispatch reference for the active harness:
+  [Claude Code](references/dispatch-claude.md) or [Codex](references/dispatch-codex.md).
+  Use the approved per-zone model override when present; otherwise use `$MODEL`.
 
 Once every zone's issue set is fixed, record the run manifest (one call, all zones) so batch
 promotion can reconstruct the grouping — this survives even when zones were *inferred* (no
@@ -139,9 +137,9 @@ batch-manifest write --run-id "$RUN_ID" \
 
 ## 4. Monitor + render
 
-On every `Monitor` notification: parse the log line, re-render the board, and `TaskUpdate` the
-matching issue task (`queued` → leave the task `pending`, render `○`; `starting`/`working` →
-in_progress; `complete` → completed; `blocked` → keep in_progress + append the note). When a zone's
+On every worker or log update, parse the line and re-render the board. If the active harness has a
+task-board primitive, update the matching issue task (`queued` → pending; `starting`/`working` →
+in progress; `complete` → completed; `blocked` → in progress with the note). When a zone's
 final line is `status=done`, render that zone's header with `⇥` (done, awaiting promotion); a final
 `status=safety-valved` means the zone did not finish its queue — render its header with `✗` and
 surface its unfinished issues as deferred. Once every zone has emitted a terminal line (`done` or
@@ -178,7 +176,7 @@ When an agent writes `status=blocked`: parse `note="…"`, render the board, the
 
 > **[<zone>] #<N> needs input:** <question>
 
-Wait for the user's answer, then `SendMessage` to the blocked agent's id with body
+Wait for the user's answer, then use the active harness's agent-messaging primitive with body
 `User says: <answer>. Continue.` Treat the agent as `working` until its next log line.
 
 ## 5. Completion & ship

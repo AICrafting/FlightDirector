@@ -5,6 +5,8 @@ description: Use when the user invokes `/issue <description>`, or says "file an 
 
 # Filing Issues
 
+Before the first command, follow [runtime preflight](../../references/runtime.md).
+
 Create, dedupe-check, and update issues. A 3-word input becomes a useful, specific issue by
 drawing on what was actually discussed in the session.
 

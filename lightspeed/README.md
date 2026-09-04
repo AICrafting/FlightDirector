@@ -1,8 +1,9 @@
-# lightspeed (Claude Code plugin)
+# lightspeed (Claude Code + Codex plugin)
 
-Six skills for running an issue + code workflow on a repo from within a Claude Code session.
-Everything goes through the **lightspeed dispatcher** — `lightspeed <group> <verb>` (on
-PATH via the plugin's `bin/`) — which calls the backend's REST API with `curl`.
+Seven skills for running an issue + code workflow from Claude Code or Codex using one shared package.
+Everything goes through the **lightspeed dispatcher** — `lightspeed <group> <verb>` — which calls
+the backend's REST API with `curl`. Skills resolve its installed path rather than requiring Codex
+to inject the plugin's `bin/` directory into `PATH`.
 Backend-agnostic by design (Forgejo today;
 GitHub/GitLab/etc. behind the same contract later); no MCP server to install.
 
@@ -40,6 +41,16 @@ lightspeed issues list --state open --limit 50
 
 - `curl` and `jq` on `PATH`.
 - A per-repo, least-privilege API token. Nothing to install or run.
+- In Codex, permission for the forge hostname and confirmation for network, push, and merge
+  operations as required by the active sandbox profile. `queue-batches` additionally requires
+  Codex multi-agent support; the other skills do not.
+
+## Install
+
+- **Claude Code:** install `lightspeed@cerebralgardens` from this repository's Claude marketplace.
+- **Codex:** add this repository as a local or Git marketplace, install Lightspeed with `/plugins`,
+  then start a new session. The package includes both harness manifests while sharing its skills
+  and scripts.
 
 ## Configuration
 

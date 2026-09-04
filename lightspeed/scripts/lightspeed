@@ -15,15 +15,15 @@ ADAPTERS_DIR="$SELF_DIR/adapters"
 
 die() { echo "lightspeed: $*" >&2; exit 1; }
 
-[ $# -ge 2 ] || die "usage: lightspeed <group> <verb> [args…]  (groups: issues labels pr ci config)"
+[ $# -ge 2 ] || die "usage: lightspeed <group> <verb> [args…]  (groups: issues labels pr ci config reconcile)"
 group="$1"; verb="$2"; shift 2
 
 # Which config axis backs this group.
 case "$group" in
   issues|labels) axis="issues" ;;
   pr|ci)         axis="code" ;;
-  config)        axis="" ;;   # handled below; no adapter needed
-  *) die "unknown group '$group' (expected: issues labels pr ci config)" ;;
+  config|reconcile) axis="" ;;   # handled below; no adapter needed
+  *) die "unknown group '$group' (expected: issues labels pr ci config reconcile)" ;;
 esac
 
 command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
@@ -39,6 +39,36 @@ else
 fi
 cfg="$repo_root/.lightspeed/config.json"
 sec="$repo_root/.lightspeed/secrets.json"
+
+# `lightspeed reconcile --harness claude|codex` — cheap, idempotent compatibility
+# preflight. It mutates only metadata, preserves unknown keys, and refuses to
+# stamp an older installed plugin over a newer recorded version.
+if [ "$group" = "reconcile" ]; then
+  [ "$verb" = "--harness" ] || die "usage: lightspeed reconcile --harness <claude|codex>"
+  harness="${1:-}"
+  case "$harness" in claude|codex) ;; *) die "unsupported harness '$harness' (expected claude or codex)" ;; esac
+  [ -f "$cfg" ] || die "no .lightspeed/config.json at repo root ($repo_root)"
+  manifest="$SELF_DIR/../.codex-plugin/plugin.json"
+  [ -f "$manifest" ] || manifest="$SELF_DIR/../.claude-plugin/plugin.json"
+  version="$(jq -r '.version // empty' "$manifest")"
+  [ -n "$version" ] || die "cannot determine installed Lightspeed version"
+  recorded="$(jq -r --arg h "$harness" '.harnesses[$h].reconciledWith // empty' "$cfg")"
+  [ "$recorded" = "$version" ] && exit 0
+  if [ -n "$recorded" ] && [ "$(printf '%s\n%s\n' "$version" "$recorded" | sort -V | tail -n1)" = "$recorded" ]; then
+    die "config was reconciled by newer Lightspeed $recorded; refusing downgrade to $version"
+  fi
+  tmp="$(mktemp "$cfg.tmp.XXXXXX")"
+  trap 'rm -f "$tmp"' EXIT
+  jq --arg h "$harness" --arg v "$version" \
+    '.schemaVersion = (.schemaVersion // 1) | .harnesses = (.harnesses // {}) | .harnesses[$h].reconciledWith = $v' \
+    "$cfg" >"$tmp"
+  jq -e . "$tmp" >/dev/null
+  chmod --reference="$cfg" "$tmp" 2>/dev/null || true
+  mv "$tmp" "$cfg"
+  trap - EXIT
+  printf 'lightspeed: reconciled %s config with plugin %s\n' "$harness" "$version" >&2
+  exit 0
+fi
 
 # `lightspeed config <jq-filter>` — read the resolved config from anywhere (incl. a worktree).
 if [ "$group" = "config" ]; then

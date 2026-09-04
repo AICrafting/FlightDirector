@@ -5,6 +5,8 @@ description: Use when promoting several first-hop feature branches at once — "
 
 # Promoting Branches (batch)
 
+Before the first command, follow [runtime preflight](../../references/runtime.md).
+
 Promote several **first-hop** feature branches (typically the worktrees a `queue-batches` run left
 at `to-test`) in one go, instead of M serial `promoting-a-branch` invocations — without breaking
 the one-issue-one-branch invariant. Each issue keeps its own branch; a spoken selection resolves to
@@ -109,7 +111,9 @@ promoted** `#N`:
 # 1. Ensure a work-ledger comment exists (queue-batches branches already have one from done-<N>.md;
 #    otherwise write a short finishing record and post it):
 "$DISP" issues comment --number <N> --body-file "$SCRATCH/done-<N>.md"
-# 2. model label:
+# 2. lazily ensure + add the normalized model-family label:
+"$DISP" labels ensure --name model/<primary> --color "#d97757" \
+  --description "Issue was worked on using <Primary>"
 "$DISP" issues label-add --number <N> --label model/<primary>
 # 3. Stage-driven status/close (do NOT hard-code):
 IS="$("$DISP" config '.code.stages[0].issueStatus // empty')"; [ -n "$IS" ] && "$DISP" issues set-status --number <N> --status "$IS"

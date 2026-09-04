@@ -25,9 +25,9 @@ lightspeed/scripts/
 ## Invocation
 
 Skills call the dispatcher, never an adapter directly. The plugin ships `bin/lightspeed`
-(and `bin/batch-manifest`); Claude Code adds the plugin's `bin/` directory to the Bash
-tool's `PATH`, so skills invoke it as a bare command — no plugin-root environment
-variable needed:
+(and `bin/batch-manifest`). Claude Code may add `bin/` to `PATH`, but skills resolve the
+installed plugin root and use the absolute script path so the same package works in Codex. See
+[runtime.md](runtime.md).
 
 ```
 lightspeed <group> <verb> [--flag value …]
@@ -87,6 +87,7 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 | `list`    | (none)                                   | one row per label: `name⇥color⇥description` |
 | `resolve` | `--name NAME` (repeatable)               | one row per input: `name⇥id` (empty id = not found) |
 | `create`  | `--name NAME` `--color #RRGGBB` `[--description D]` | the new label's `id` |
+| `ensure`  | `--name NAME` `--color #RRGGBB` `[--description D]` | existing or new label `id`; preserves existing metadata and tolerates concurrent creation |
 
 ### `pr` (pull request — "MR" on GitLab)
 
