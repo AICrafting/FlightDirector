@@ -5,6 +5,8 @@ description: Use when starting, progressing, or finishing work on a specific iss
 
 # Working an Issue
 
+Before the first command, follow [runtime preflight](../../references/runtime.md).
+
 The per-issue lifecycle: one branch per issue, status labels that mirror reality on the board,
 an explicit human gate before merging, and a finishing record (summary, token cost, model) left
 on the issue when it's done.
@@ -109,12 +111,17 @@ Only after explicit approval:
    ```
    lightspeed issues comment --number N --body-file "$SCRATCH/done.md"
    ```
-2. **Add the `model/<primary>` label** for the main model used (e.g. `model/opus`) — the one with
-   the most tokens/cost in the log when available, else the model you ran. Idempotent; later
+2. **Ensure and add the `model/<primary>` label** for the main model used — the one with the most
+   tokens/cost in the log when available, else the model you ran. Normalize to the stable model
+   family (`gpt-5.6-sol` → `sol`, `claude-opus-4.7` → `opus`). For an unknown family, lowercase
+   and replace non-alphanumeric runs with hyphens rather than guessing. Create the label lazily;
+   `labels ensure` preserves an existing label and safely handles parallel creators. Later
    episodes may add another `model/*`. See `model/*` in
    [default-labels.md](../../references/default-labels.md):
    ```
-   lightspeed issues label-add --number N --label model/opus
+   lightspeed labels ensure --name model/sol --color "#d97757" \
+     --description "Issue was worked on using Sol"
+   lightspeed issues label-add --number N --label model/sol
    ```
 3. **Promote the branch** `feature/<N>-<slug>` → `stages[0]` using `promoting-a-branch` (invoke
    the skill in this session). It applies the hop's merge strategy/gate **and** drives the

@@ -5,6 +5,8 @@ description: Use when advancing the current branch to the next stage — "promot
 
 # Promoting a Branch
 
+Before the first command, follow [runtime preflight](../../references/runtime.md).
+
 Advance the current branch **one stage** up the pipeline. A promotion is the same operation at
 every hop — feature → `stages[0]`, `stages[i]` → `stages[i+1]` — parameterized by which hop.
 

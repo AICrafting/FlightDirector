@@ -47,10 +47,12 @@ SRC="$(awk -v want="\"name\": \"$PLUGIN\"" '
 SRC="${SRC#./}"  # marketplace sources are written like "./lightspeed"
 
 PLUGIN_JSON="$REPO_ROOT/$SRC/.claude-plugin/plugin.json"
+CODEX_PLUGIN_JSON="$REPO_ROOT/$SRC/.codex-plugin/plugin.json"
 CHANGELOG="$REPO_ROOT/$SRC/CHANGELOG.md"
 for f in "$PLUGIN_JSON" "$CHANGELOG"; do
 	[ -f "$f" ] || die "expected file not found: $f"
 done
+[ -f "$CODEX_PLUGIN_JSON" ] || CODEX_PLUGIN_JSON=""
 
 # Current version comes from the plugin's plugin.json (the source of truth).
 OLD="$(grep -m1 '"version"' "$PLUGIN_JSON" | sed 's/.*"version": *"\([^"]*\)".*/\1/')"
@@ -62,6 +64,14 @@ awk -v new="$NEW" '
 	!done && /"version":/ { sub(/"version": "[^"]*"/, "\"version\": \"" new "\""); done=1 }
 	{ print }
 ' "$PLUGIN_JSON" >"$PLUGIN_JSON.tmp" && mv "$PLUGIN_JSON.tmp" "$PLUGIN_JSON"
+
+# Keep the optional Codex manifest in lockstep with the Claude source-of-truth.
+if [ -n "$CODEX_PLUGIN_JSON" ]; then
+	awk -v new="$NEW" '
+		!done && /"version":/ { sub(/"version": "[^"]*"/, "\"version\": \"" new "\""); done=1 }
+		{ print }
+	' "$CODEX_PLUGIN_JSON" >"$CODEX_PLUGIN_JSON.tmp" && mv "$CODEX_PLUGIN_JSON.tmp" "$CODEX_PLUGIN_JSON"
+fi
 
 # --- marketplace.json: only this plugin's entry -----------------------------
 awk -v want="\"name\": \"$PLUGIN\"" -v new="$NEW" '

@@ -13,7 +13,18 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- Codex plugin packaging and runtime guidance, sharing the existing skills, dispatcher, adapters,
+  configuration, and references with Claude Code.
+- Per-harness config reconciliation metadata through `lightspeed reconcile --harness …`.
+- Idempotent `labels ensure`, used to create new `model/*` provenance labels lazily when a ledger
+  is finalized, so newly released model families do not require a Lightspeed release.
+
+### Changed
+
+- `queue-batches` now keeps shared workflow policy separate from Claude Code and Codex dispatch
+  primitives.
 
 ## [0.9.0] - 2026-08-05
 

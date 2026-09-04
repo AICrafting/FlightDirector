@@ -1,7 +1,7 @@
 # lightspeed — User Guide
 
-Run your whole issue-and-code workflow — file, triage, work, promote — from inside a Claude
-Code session, without tabbing over to your forge's web UI. This guide covers **why** you'd want
+Run your whole issue-and-code workflow — file, triage, work, promote — from inside Claude Code
+or Codex, without tabbing over to your forge's web UI. This guide covers **why** you'd want
 it, **how to install** it, and **how to use** it, with a full worked example.
 
 > New to the plugin? Start here. For the at-a-glance skill list and the config schema, see the
@@ -38,7 +38,7 @@ into the session:
 
 ## What you need
 
-- **Claude Code** (the plugin runs as Claude Code skills).
+- **Claude Code or Codex** (the same package supplies skills to both harnesses).
 - **`curl`** and **`jq`** on your `PATH`.
 - A **Forgejo** instance and a repo you can push to.
 - A **per-repo API token** with just the two scopes the skills use: `write:repository` and
@@ -50,7 +50,7 @@ into the session:
 
 ---
 
-## Install
+## Install in Claude Code
 
 1. Add the marketplace that ships lightspeed, then install the plugin:
 
@@ -61,6 +61,14 @@ into the session:
 
 2. That's it — no server to run. The skills activate automatically when you say things that match
    them (see the workflow below).
+
+## Install in Codex
+
+Add this repository as a local or Git plugin marketplace, open `/plugins`, and install Lightspeed.
+Start a new session before invoking a skill. Codex users can explicitly invoke skills with
+`$filing-issues`, `$working-an-issue`, or `$queue-batches`; the same natural-language triggers work
+in both harnesses. Allow the configured forge hostname when Codex requests network permission.
+Parallel queues require Codex multi-agent support; all other workflows run without it.
 
 ---
 

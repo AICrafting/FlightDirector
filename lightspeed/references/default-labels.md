@@ -8,7 +8,9 @@ label, drop one — without touching skill prose.
 Conventions (decided for this plugin):
 - **Type/category labels are flat**: `bug`, `feature`, `tech-debt`.
 - **`model/*` and `area/*` are namespaced.**
-- `model/*` is a fixed set the plugin owns (Claude-specific).
+- `model/*` is an extensible provenance namespace. Setup seeds common labels, and ledger
+  finalization lazily creates a missing label for the active model family without changing an
+  existing label.
 - `area/*` is **project-dependent** — the skill proposes a starter set and confirms with
   the user before creating any; it never assumes these.
 - **One colour per categorical prefix group.** Every `model/*` label shares one colour and
@@ -34,9 +36,13 @@ Conventions (decided for this plugin):
 | `high-value` | `#6f42c1` | High impact, worth prioritizing | `priority/high` |
 | `critical` | `#b60205` | Blocks users or the app | `priority/critical`, `blocker` |
 
-## Model labels (fixed — plugin-owned)
+## Model labels (seeded defaults; extensible at runtime)
 
 One colour for the whole group — Claude's coral, `#d97757`.
+
+Harnesses normalize a model identifier to a stable family (`gpt-5.6-sol` → `sol`,
+`claude-opus-4.7` → `opus`) and run `labels ensure` before attaching it. Unknown families use a
+lowercase, hyphenated form of the reported identifier rather than being guessed or dropped.
 
 | Label | Color | Description | Treat as already-present if the repo has… |
 |---|---|---|---|
