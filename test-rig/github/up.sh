@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 #
-# Provision the GitHub test target for lightspeed adapter testing:
+# Provision the GitHub test target for flight adapter testing:
 #   - verify token + repo access
 #   - ensure seed status labels exist
 #   - ensure .github/workflows/ci.yml exists (for ci watch/log)
-#   - write .work/.lightspeed/config.json + .lightspeed/secrets.json (gitignored)
+#   - write .work/.flightdirector/config.json + .flightdirector/secrets.json (gitignored)
 #
-# Token: $LIGHTSPEED_GH_TOKEN, else a gitignored test-rig/github/.env sourced here.
+# Token: $FLIGHT_GH_TOKEN, else a gitignored test-rig/github/.env sourced here.
 # Never writes the token to a tracked file. Idempotent; safe to re-run.
 set -euo pipefail
 
 RIG_DIR="$(cd "$(dirname "$0")" && pwd)"
 API="https://api.github.com"
 OWNER="DaveWoodCom"
-REPO="LightspeedTestTarget"
+REPO="FlightTestTarget"
 WORK="$RIG_DIR/.work"
 REPO_API="$API/repos/$OWNER/$REPO"
 
@@ -25,9 +25,9 @@ command -v jq   >/dev/null || die "jq not found"
 
 # Resolve token.
 # shellcheck disable=SC1091  # .env is gitignored; shellcheck can't follow it
-[ -n "${LIGHTSPEED_GH_TOKEN:-}" ] || { [ -f "$RIG_DIR/.env" ] && . "$RIG_DIR/.env"; }
-TOKEN="${LIGHTSPEED_GH_TOKEN:-}"
-[ -n "$TOKEN" ] || die "no token — export LIGHTSPEED_GH_TOKEN or put it in test-rig/github/.env (gitignored). Scope: repo + workflow."
+[ -n "${FLIGHT_GH_TOKEN:-${LIGHTSPEED_GH_TOKEN:-}}" ] || { [ -f "$RIG_DIR/.env" ] && . "$RIG_DIR/.env"; }
+TOKEN="${FLIGHT_GH_TOKEN:-${LIGHTSPEED_GH_TOKEN:-}}"
+[ -n "$TOKEN" ] || die "no token — export FLIGHT_GH_TOKEN or put it in test-rig/github/.env (gitignored). Scope: repo + workflow."
 
 H=(-H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
 
@@ -69,7 +69,7 @@ fi
 say "Writing workdir config…"
 # .work/ is its own throwaway git repo so the dispatcher resolves config from HERE
 # (git rev-parse --git-common-dir) instead of walking up to the plugin's own repo.
-rm -rf "$WORK"; mkdir -p "$WORK/.lightspeed"; git -C "$WORK" init -q
+rm -rf "$WORK"; mkdir -p "$WORK/.flightdirector"; git -C "$WORK" init -q
 jq -n --arg api "$API" --arg o "$OWNER" --arg r "$REPO" '{
   code: { backend:"github", owner:$o, repo:$r, api:$api,
           stages:[{name:"main", merge:"pr"}] },
@@ -79,7 +79,7 @@ jq -n --arg api "$API" --arg o "$OWNER" --arg r "$REPO" '{
     "in-review":"status/in review",
     "in-qa":"status/in qa"
   } }
-}' > "$WORK/.lightspeed/config.json"
-jq -n --arg t "$TOKEN" '{ code: { token:$t } }' > "$WORK/.lightspeed/secrets.json"
+}' > "$WORK/.flightdirector/config.json"
+jq -n --arg t "$TOKEN" '{ code: { token:$t } }' > "$WORK/.flightdirector/secrets.json"
 
 say "Up. Workdir: $WORK"

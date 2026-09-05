@@ -8,13 +8,13 @@ set -uo pipefail
 
 RIG_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$RIG_DIR/.work"
-DISP="$RIG_DIR/../../lightspeed/scripts/lightspeed"
-[ -f "$WORK/.lightspeed/config.json" ] || { echo "no workdir config — run ./up.sh first" >&2; exit 1; }
+DISP="$RIG_DIR/../../flight/scripts/flight"
+[ -f "$WORK/.flightdirector/config.json" ] || { echo "no workdir config — run ./up.sh first" >&2; exit 1; }
 
-API="$(jq -r '.code.api' "$WORK/.lightspeed/config.json")"
-OWNER="$(jq -r '.code.owner' "$WORK/.lightspeed/config.json")"
-REPO="$(jq -r '.code.repo' "$WORK/.lightspeed/config.json")"
-TOKEN="$(jq -r '.code.token' "$WORK/.lightspeed/secrets.json")"
+API="$(jq -r '.code.api' "$WORK/.flightdirector/config.json")"
+OWNER="$(jq -r '.code.owner' "$WORK/.flightdirector/config.json")"
+REPO="$(jq -r '.code.repo' "$WORK/.flightdirector/config.json")"
+TOKEN="$(jq -r '.code.token' "$WORK/.flightdirector/secrets.json")"
 REPO_API="$API/repos/$OWNER/$REPO"
 H=(-H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
 TS="$(date -u +%Y%m%d%H%M%S)"

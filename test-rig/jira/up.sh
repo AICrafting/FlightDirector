@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# Provision the Jira Cloud test target for lightspeed adapter testing.
+# Provision the Jira Cloud test target for flight adapter testing.
 # Jira Cloud can't be containerized like Forgejo, so — like the github rig — this
 # verifies access to a LIVE site and writes a gitignored workdir config.
 #
 #   - verify Basic auth (email:api_token) via GET /rest/api/3/myself
 #   - verify project access
-#   - write .work/.lightspeed/config.json + secrets.json (gitignored), with
+#   - write .work/.flightdirector/config.json + secrets.json (gitignored), with
 #     issues.backend=jira and a throwaway `code` backend (issues-axis-only testing)
 #
 # Secrets come from a gitignored test-rig/jira/.env, resolved from the MAIN repo
@@ -30,14 +30,14 @@ ENV_FILE="$MAIN/test-rig/jira/.env"
 # shellcheck disable=SC1090  # .env is gitignored; shellcheck can't follow it
 [ -f "$ENV_FILE" ] && . "$ENV_FILE"
 
-SITE="${LIGHTSPEED_JIRA_SITE:-}"
-EMAIL="${LIGHTSPEED_JIRA_EMAIL:-}"
-TOKEN="${LIGHTSPEED_JIRA_TOKEN:-}"
-PROJECT="${LIGHTSPEED_JIRA_PROJECT:-}"
-[ -n "$SITE" ]    || die "no LIGHTSPEED_JIRA_SITE — set it in $ENV_FILE (e.g. https://x.atlassian.net)"
-[ -n "$EMAIL" ]   || die "no LIGHTSPEED_JIRA_EMAIL — set it in $ENV_FILE"
-[ -n "$TOKEN" ]   || die "no LIGHTSPEED_JIRA_TOKEN — set it in $ENV_FILE (Atlassian API token)"
-[ -n "$PROJECT" ] || die "no LIGHTSPEED_JIRA_PROJECT — set it in $ENV_FILE (project key, e.g. KAN)"
+SITE="${FLIGHT_JIRA_SITE:-${LIGHTSPEED_JIRA_SITE:-}}"
+EMAIL="${FLIGHT_JIRA_EMAIL:-${LIGHTSPEED_JIRA_EMAIL:-}}"
+TOKEN="${FLIGHT_JIRA_TOKEN:-${LIGHTSPEED_JIRA_TOKEN:-}}"
+PROJECT="${FLIGHT_JIRA_PROJECT:-${LIGHTSPEED_JIRA_PROJECT:-}}"
+[ -n "$SITE" ]    || die "no FLIGHT_JIRA_SITE — set it in $ENV_FILE (e.g. https://x.atlassian.net)"
+[ -n "$EMAIL" ]   || die "no FLIGHT_JIRA_EMAIL — set it in $ENV_FILE"
+[ -n "$TOKEN" ]   || die "no FLIGHT_JIRA_TOKEN — set it in $ENV_FILE (Atlassian API token)"
+[ -n "$PROJECT" ] || die "no FLIGHT_JIRA_PROJECT — set it in $ENV_FILE (project key, e.g. KAN)"
 SITE="${SITE%/}"
 
 AUTH=(-u "${EMAIL}:${TOKEN}")
@@ -57,7 +57,7 @@ curl -fsS "${AUTH[@]}" -H "Accept: application/json" "$SITE/rest/api/3/project/$
 # this rig tests only the issues axis); status labels are space-free (Jira labels
 # cannot contain spaces).
 say "Writing workdir config…"
-rm -rf "$WORK"; mkdir -p "$WORK/.lightspeed"; git -C "$WORK" init -q
+rm -rf "$WORK"; mkdir -p "$WORK/.flightdirector"; git -C "$WORK" init -q
 jq -n --arg site "$SITE" --arg proj "$PROJECT" --arg email "$EMAIL" '{
   code:   { backend:"none", stages:[{name:"main", merge:"pr"}] },
   issues: { backend:"jira", api:$site, project:$proj, email:$email },
@@ -67,7 +67,7 @@ jq -n --arg site "$SITE" --arg proj "$PROJECT" --arg email "$EMAIL" '{
     "in-review":"status/in-review",
     "in-qa":"status/in-qa"
   } }
-}' > "$WORK/.lightspeed/config.json"
-jq -n --arg t "$TOKEN" '{ issues: { token:$t } }' > "$WORK/.lightspeed/secrets.json"
+}' > "$WORK/.flightdirector/config.json"
+jq -n --arg t "$TOKEN" '{ issues: { token:$t } }' > "$WORK/.flightdirector/secrets.json"
 
 say "Up. Workdir: $WORK  (site=$SITE project=$PROJECT)"

@@ -1,4 +1,4 @@
-# lightspeed test rig
+# flight test rig
 
 A disposable Forgejo instance for exercising the adapters against a real API. **Dev tooling —
 not part of the plugin.** Requires `docker` (+ compose) and `jq`.
@@ -11,12 +11,12 @@ not part of the plugin.** Requires `docker` (+ compose) and `jq`.
 
 - **Port:** `3000` by default; override with `RIG_PORT=3100 ./up.sh`.
 - **Image:** `code.forgejo.org/forgejo/forgejo:15` (pinned to the current major); override with `FORGEJO_IMAGE=…`.
-- **Workdir:** `.work/` — a throwaway git repo holding `.lightspeed/config.json` +
-  `.lightspeed/secrets.json` pointed at the rig. Gitignored. Drive the adapters by hand from
+- **Workdir:** `.work/` — a throwaway git repo holding `.flightdirector/config.json` +
+  `.flightdirector/secrets.json` pointed at the rig. Gitignored. Drive the adapters by hand from
   there:
 
   ```bash
-  ( cd test-rig/forgejo/.work && ../../../lightspeed/scripts/lightspeed issues list )
+  ( cd test-rig/forgejo/.work && ../../../flight/scripts/flight issues list )
   ```
 
 ## Not covered

@@ -66,7 +66,7 @@ export LS_CI_POLL_SECONDS=1          # keep the loop snappy under test
 run_watch() {
 	local backend="$1" tmo="$2"; shift 2
 	PATH="$FAKE_DIR:$PATH" LS_CI_WATCH_TIMEOUT="$tmo" \
-		bash "$REPO_ROOT/lightspeed/scripts/adapters/$backend/ci" watch "$@" 2>&1
+		bash "$REPO_ROOT/flight/scripts/adapters/$backend/ci" watch "$@" 2>&1
 }
 
 REMOTE_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"   # what CI actually ran on

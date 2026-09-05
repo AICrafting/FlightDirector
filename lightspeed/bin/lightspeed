@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-# PATH entrypoint for the lightspeed dispatcher (plugin bin/ is auto-added to PATH).
-# Delegates to the real dispatcher so adapter resolution (relative to scripts/) is unchanged.
-here="$(cd "$(dirname "$0")" && pwd)"
-exec "$here/../scripts/lightspeed" "$@"

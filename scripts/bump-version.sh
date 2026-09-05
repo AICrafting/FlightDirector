@@ -26,13 +26,13 @@ die() {
 
 PLUGIN="${1:-}"
 NEW="${2:-}"
-[ -n "$PLUGIN" ] || die "usage: bump-version.sh <plugin> <new-version> (e.g. lightspeed 0.5.0)"
-[ -n "$NEW" ] || die "usage: bump-version.sh <plugin> <new-version> (e.g. lightspeed 0.5.0)"
+[ -n "$PLUGIN" ] || die "usage: bump-version.sh <plugin> <new-version> (e.g. flight 0.5.0)"
+[ -n "$NEW" ] || die "usage: bump-version.sh <plugin> <new-version> (e.g. flight 0.5.0)"
 [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "not a semver X.Y.Z version: '$NEW'"
 [ -f "$MARKETPLACE_JSON" ] || die "marketplace manifest not found: $MARKETPLACE_JSON"
 
 # Resolve the plugin's source directory from its marketplace entry. The trailing
-# quote in the name match keeps "light" from matching "lightspeed".
+# quote in the name match keeps a prefix like "fli" from matching "flight".
 SRC="$(awk -v want="\"name\": \"$PLUGIN\"" '
 	index($0, want) { found = 1 }
 	found && /"source"/ {
@@ -44,7 +44,7 @@ SRC="$(awk -v want="\"name\": \"$PLUGIN\"" '
 	}
 ' "$MARKETPLACE_JSON")"
 [ -n "$SRC" ] || die "plugin '$PLUGIN' not found in $MARKETPLACE_JSON"
-SRC="${SRC#./}"  # marketplace sources are written like "./lightspeed"
+SRC="${SRC#./}"  # marketplace sources are written like "./flight"
 
 PLUGIN_JSON="$REPO_ROOT/$SRC/.claude-plugin/plugin.json"
 CODEX_PLUGIN_JSON="$REPO_ROOT/$SRC/.codex-plugin/plugin.json"

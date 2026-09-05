@@ -14,7 +14,7 @@
 # here, so the test fails if the shipped snippet drifts.
 set -uo pipefail
 RIG_DIR="$(cd "$(dirname "$0")" && pwd)"
-SKILL="$RIG_DIR/../lightspeed/skills/working-an-issue/SKILL.md"
+SKILL="$RIG_DIR/../flight/skills/working-an-issue/SKILL.md"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 

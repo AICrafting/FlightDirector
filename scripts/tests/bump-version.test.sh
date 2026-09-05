@@ -29,19 +29,19 @@ json_version() {
 # --- build a throwaway sandbox repo with two plugins ------------------------
 make_sandbox() {
 	local root="$1"
-	mkdir -p "$root/lightspeed/.claude-plugin" "$root/lightspeed/.codex-plugin" \
+	mkdir -p "$root/flight/.claude-plugin" "$root/flight/.codex-plugin" \
 		"$root/other/.claude-plugin" "$root/.claude-plugin"
 
-	cat >"$root/lightspeed/.claude-plugin/plugin.json" <<'JSON'
+	cat >"$root/flight/.claude-plugin/plugin.json" <<'JSON'
 {
-  "name": "lightspeed",
+  "name": "flight",
   "version": "1.2.3",
   "description": "test"
 }
 JSON
-	cat >"$root/lightspeed/.codex-plugin/plugin.json" <<'JSON'
+	cat >"$root/flight/.codex-plugin/plugin.json" <<'JSON'
 {
-  "name": "lightspeed",
+  "name": "flight",
   "version": "1.2.3",
   "description": "test",
   "skills": "./skills/"
@@ -61,8 +61,8 @@ JSON
   "name": "cerebralgardens",
   "plugins": [
     {
-      "name": "lightspeed",
-      "source": "./lightspeed",
+      "name": "flight",
+      "source": "./flight",
       "version": "1.2.3",
       "keywords": ["forgejo", "github"]
     },
@@ -75,7 +75,7 @@ JSON
 }
 JSON
 
-	cat >"$root/lightspeed/CHANGELOG.md" <<'MD'
+	cat >"$root/flight/CHANGELOG.md" <<'MD'
 # Changelog
 
 ## [Unreleased]
@@ -105,30 +105,30 @@ MD
 
 TODAY="$(date -u +%F)"
 
-# --- happy path: bump only lightspeed ---------------------------------------
+# --- happy path: bump only flight ---------------------------------------
 SANDBOX="$(mktemp -d)"
 trap 'rm -rf "$SANDBOX"' EXIT
 make_sandbox "$SANDBOX"
 
-BUMP_VERSION_ROOT="$SANDBOX" "$BUMP" lightspeed 1.3.0 >/dev/null
+BUMP_VERSION_ROOT="$SANDBOX" "$BUMP" flight 1.3.0 >/dev/null
 
-check "lightspeed plugin.json bumped" \
-	"$([ "$(json_version "$SANDBOX/lightspeed/.claude-plugin/plugin.json")" = "1.3.0" ] && echo 1 || echo 0)"
+check "flight plugin.json bumped" \
+	"$([ "$(json_version "$SANDBOX/flight/.claude-plugin/plugin.json")" = "1.3.0" ] && echo 1 || echo 0)"
 
-check "lightspeed Codex plugin.json bumped" \
-	"$([ "$(json_version "$SANDBOX/lightspeed/.codex-plugin/plugin.json")" = "1.3.0" ] && echo 1 || echo 0)"
+check "flight Codex plugin.json bumped" \
+	"$([ "$(json_version "$SANDBOX/flight/.codex-plugin/plugin.json")" = "1.3.0" ] && echo 1 || echo 0)"
 
-check "marketplace lightspeed entry bumped" \
-	"$(grep -A3 '"name": "lightspeed"' "$SANDBOX/.claude-plugin/marketplace.json" | grep -q '"version": "1.3.0"' && echo 1 || echo 0)"
+check "marketplace flight entry bumped" \
+	"$(grep -A3 '"name": "flight"' "$SANDBOX/.claude-plugin/marketplace.json" | grep -q '"version": "1.3.0"' && echo 1 || echo 0)"
 
-check "lightspeed CHANGELOG has dated new heading" \
-	"$(grep -q "^## \[1.3.0\] - $TODAY\$" "$SANDBOX/lightspeed/CHANGELOG.md" && echo 1 || echo 0)"
+check "flight CHANGELOG has dated new heading" \
+	"$(grep -q "^## \[1.3.0\] - $TODAY\$" "$SANDBOX/flight/CHANGELOG.md" && echo 1 || echo 0)"
 
-check "lightspeed CHANGELOG has fresh empty Unreleased" \
-	"$(grep -q '^## \[Unreleased\]$' "$SANDBOX/lightspeed/CHANGELOG.md" && grep -q '_Nothing yet._' "$SANDBOX/lightspeed/CHANGELOG.md" && echo 1 || echo 0)"
+check "flight CHANGELOG has fresh empty Unreleased" \
+	"$(grep -q '^## \[Unreleased\]$' "$SANDBOX/flight/CHANGELOG.md" && grep -q '_Nothing yet._' "$SANDBOX/flight/CHANGELOG.md" && echo 1 || echo 0)"
 
-check "lightspeed CHANGELOG preserves prior Unreleased content" \
-	"$(grep -q 'A shiny new thing.' "$SANDBOX/lightspeed/CHANGELOG.md" && echo 1 || echo 0)"
+check "flight CHANGELOG preserves prior Unreleased content" \
+	"$(grep -q 'A shiny new thing.' "$SANDBOX/flight/CHANGELOG.md" && echo 1 || echo 0)"
 
 # --- isolation: the other plugin must be untouched --------------------------
 check "other plugin.json untouched" \
@@ -147,7 +147,7 @@ else
 	check "errors when plugin arg missing" 1
 fi
 
-if BUMP_VERSION_ROOT="$SANDBOX" "$BUMP" lightspeed 2>/dev/null; then
+if BUMP_VERSION_ROOT="$SANDBOX" "$BUMP" flight 2>/dev/null; then
 	check "errors when version arg missing" 0
 else
 	check "errors when version arg missing" 1
@@ -159,14 +159,14 @@ else
 	check "errors on unknown plugin" 1
 fi
 
-if BUMP_VERSION_ROOT="$SANDBOX" "$BUMP" lightspeed not-a-version 2>/dev/null; then
+if BUMP_VERSION_ROOT="$SANDBOX" "$BUMP" flight not-a-version 2>/dev/null; then
 	check "errors on non-semver version" 0
 else
 	check "errors on non-semver version" 1
 fi
 
-# lightspeed is now at 1.3.0; bumping to the same value should be refused.
-if BUMP_VERSION_ROOT="$SANDBOX" "$BUMP" lightspeed 1.3.0 2>/dev/null; then
+# flight is now at 1.3.0; bumping to the same value should be refused.
+if BUMP_VERSION_ROOT="$SANDBOX" "$BUMP" flight 1.3.0 2>/dev/null; then
 	check "errors when new version equals current" 0
 else
 	check "errors when new version equals current" 1
