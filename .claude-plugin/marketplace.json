@@ -1,11 +1,11 @@
 {
-  "name": "cerebralgardens",
+  "name": "flightdirector",
   "owner": {
-    "name": "Cerebral Gardens",
+    "name": "AI Crafting",
     "email": "dave@cerebralgardens.com"
   },
   "metadata": {
-    "description": "Cerebral Gardens' Claude Code plugins."
+    "description": "The Flight Director family of Claude Code plugins, by AI Crafting."
   },
   "plugins": [
     {

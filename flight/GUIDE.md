@@ -56,7 +56,7 @@ into the session:
 
    ```
    /plugin marketplace add <this-repo> (eg: https://hostname/owner/repo.git [.git is required]) 
-   /plugin install flight@cerebralgardens
+   /plugin install flight@flightdirector
    ```
 
 2. That's it — no server to run. The skills activate automatically when you say things that match

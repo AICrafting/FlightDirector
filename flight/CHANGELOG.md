@@ -18,8 +18,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - **Renamed the plugin from `lightspeed` to `flight`**, the first member of the **Flight Director**
   plugin family (#67). In NASA comms the flight director's callsign is "Flight", so the family
   is the title and this plugin is the callsign. The rename covers both harness manifests
-  (Claude Code and Codex), so install `flight@cerebralgardens` (Claude Code) or install *Flight*
+  (Claude Code and Codex), so install `flight@flightdirector` (Claude Code) or install *Flight*
   from `/plugins` (Codex). Skills are now namespaced `flight:<skill>`.
+- **Marketplace and publisher renamed** (#68): the marketplace is now **`flightdirector`** (was
+  `cerebralgardens`) and the publisher is **AI Crafting** (was Cerebral Gardens). A marketplace's
+  name comes from its manifest, so existing consumers must `claude plugin marketplace remove
+  cerebralgardens`, re-add the repo, and reinstall as `flight@flightdirector`.
 - The dispatcher is now **`flight <group> <verb>`**. The plugin ships `bin/flight`.
 - The per-repo config folder is now **`.flightdirector/`** (`config.json` + gitignored
   `secrets.json`, plus `batches/`), shared by every Flight Director plugin.

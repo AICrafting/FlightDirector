@@ -53,7 +53,7 @@ flight issues list --state open --limit 50
 
 ## Install
 
-- **Claude Code:** install `flight@cerebralgardens` from this repository's Claude marketplace.
+- **Claude Code:** install `flight@flightdirector` from this repository's Claude marketplace (the `flightdirector` marketplace, by AI Crafting).
 - **Codex:** add this repository as a local or Git marketplace, install Flight with `/plugins`,
   then start a new session. The package includes both harness manifests while sharing its skills
   and scripts.
