@@ -3,7 +3,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-ADAPTER="$REPO_ROOT/lightspeed/scripts/adapters/forgejo/labels"
+ADAPTER="$REPO_ROOT/flight/scripts/adapters/forgejo/labels"
 SANDBOX="$(mktemp -d)"
 trap 'rm -rf "$SANDBOX"' EXIT
 

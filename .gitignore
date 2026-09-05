@@ -7,7 +7,8 @@
 
 # Secrets and sensitive data
 secret*
-.lightspeed/secrets.json
+.flightdirector/secrets.json
+.lightspeed/secrets.json   # pre-rename config folder, still honoured
 
 # - Keys
 *.pem
@@ -20,7 +21,8 @@ prompt_log.jsonl
 # Git worktrees
 .worktrees/
 
-# lightspeed queue-batches run manifests (transient local state)
+# flight queue-batches run manifests (transient local state)
+.flightdirector/batches/
 .lightspeed/batches/
 
 # Environment files
@@ -33,5 +35,5 @@ prompt_log.jsonl
 # External references
 external/
 
-# lightspeed test rig workdir (holds a token)
+# flight test rig workdir (holds a token)
 test-rig/*/.work/

@@ -1,11 +1,11 @@
 ---
-# Disposable Forgejo for exercising the lightspeed adapters against a live API.
+# Disposable Forgejo for exercising the flight adapters against a live API.
 # Not part of the plugin — dev tooling only. Bring up with ./up.sh, tear down with ./down.sh.
 services:
   forgejo:
     # Pinned to the current major for reproducibility; bump deliberately. Override per-run with FORGEJO_IMAGE.
     image: ${FORGEJO_IMAGE:-code.forgejo.org/forgejo/forgejo:15}
-    container_name: lightspeed-rig-forgejo
+    container_name: flight-rig-forgejo
     environment:
       FORGEJO__database__DB_TYPE: sqlite3
       FORGEJO__security__INSTALL_LOCK: "true"
@@ -17,7 +17,7 @@ services:
     ports:
       - "${RIG_PORT:-3000}:3000"
     volumes:
-      - lightspeed-rig-data:/data
+      - flight-rig-data:/data
 
 volumes:
-  lightspeed-rig-data:
+  flight-rig-data:

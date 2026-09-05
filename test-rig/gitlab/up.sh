@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Provision the GitLab test target for lightspeed adapter testing:
+# Provision the GitLab test target for flight adapter testing:
 #   - verify token + project access
 #   - ensure seed status labels exist
 #   - ensure a .gitlab-ci.yml exists on the default branch (for ci watch/log)
-#   - write .work/.lightspeed/config.json + secrets.json (gitignored)
+#   - write .work/.flightdirector/config.json + secrets.json (gitignored)
 #
 # Creds resolve from a gitignored test-rig/gitlab/.env. Because this may run from a
 # linked worktree (where that gitignored file does NOT exist), resolve it from the
@@ -27,11 +27,11 @@ MAIN="$(cd "$(git -C "$RIG_DIR" rev-parse --git-common-dir)/.." && pwd)"
 if [ -f "$MAIN/test-rig/gitlab/.env" ]; then . "$MAIN/test-rig/gitlab/.env"
 elif [ -f "$RIG_DIR/.env" ]; then . "$RIG_DIR/.env"; fi
 
-TOKEN="${LIGHTSPEED_GITLAB_TOKEN:-}"
-API="${LIGHTSPEED_GITLAB_API:-https://gitlab.com/api/v4}"
-PROJECT="${LIGHTSPEED_GITLAB_PROJECT:-}"
-[ -n "$TOKEN" ]   || die "no token — set LIGHTSPEED_GITLAB_TOKEN in test-rig/gitlab/.env (gitignored). Scope: api."
-[ -n "$PROJECT" ] || die "no project — set LIGHTSPEED_GITLAB_PROJECT (group/project) in test-rig/gitlab/.env"
+TOKEN="${FLIGHT_GITLAB_TOKEN:-${LIGHTSPEED_GITLAB_TOKEN:-}}"
+API="${FLIGHT_GITLAB_API:-${LIGHTSPEED_GITLAB_API:-https://gitlab.com/api/v4}}"
+PROJECT="${FLIGHT_GITLAB_PROJECT:-${LIGHTSPEED_GITLAB_PROJECT:-}}"
+[ -n "$TOKEN" ]   || die "no token — set FLIGHT_GITLAB_TOKEN in test-rig/gitlab/.env (gitignored). Scope: api."
+[ -n "$PROJECT" ] || die "no project — set FLIGHT_GITLAB_PROJECT (group/project) in test-rig/gitlab/.env"
 
 OWNER="${PROJECT%/*}"    # everything before the last '/'
 REPO="${PROJECT##*/}"    # the final path segment
@@ -80,7 +80,7 @@ fi
 # Write the gitignored workdir config. .work/ is its own throwaway git repo so the
 # dispatcher resolves config from HERE (git rev-parse --git-common-dir).
 say "Writing workdir config…"
-rm -rf "$WORK"; mkdir -p "$WORK/.lightspeed"; git -C "$WORK" init -q
+rm -rf "$WORK"; mkdir -p "$WORK/.flightdirector"; git -C "$WORK" init -q
 jq -n --arg api "$API" --arg o "$OWNER" --arg r "$REPO" '{
   code: { backend:"gitlab", owner:$o, repo:$r, api:$api,
           stages:[{name:"main", merge:"pr"}] },
@@ -90,7 +90,7 @@ jq -n --arg api "$API" --arg o "$OWNER" --arg r "$REPO" '{
     "in-review":"status/in review",
     "in-qa":"status/in qa"
   } }
-}' > "$WORK/.lightspeed/config.json"
-jq -n --arg t "$TOKEN" '{ code: { token:$t } }' > "$WORK/.lightspeed/secrets.json"
+}' > "$WORK/.flightdirector/config.json"
+jq -n --arg t "$TOKEN" '{ code: { token:$t } }' > "$WORK/.flightdirector/secrets.json"
 
 say "Up. Workdir: $WORK  (project $PROJECT, default branch $DEFAULT_BRANCH)"

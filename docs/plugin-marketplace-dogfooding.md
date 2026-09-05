@@ -4,8 +4,13 @@ How Claude Code plugin marketplaces actually resolve, and the two-marketplace
 split we use so that **published consumers** (other repos, real users) and
 **local dogfooding** (editing the plugin in this repo) never cross.
 
-Written while untangling `lightspeed`. Applies to the **second plugin** too —
-same mechanics, same setup.
+Written while untangling `flight` (then called `lightspeed`). Applies to the **second plugin**
+too — same mechanics, same setup.
+
+> **After the lightspeed → flight rename:** the dev-marketplace symlink and entry are keyed by
+> plugin name, so recreate them — `ln -sfn …/ClaudeSkills/flight "$DEVMP/flight"`, rename the
+> `plugins[]` entry to `flight`, remove the stale `$DEVMP/lightspeed` symlink — then
+> `claude plugin uninstall lightspeed@cerebralgardens-dev` and `install flight@cerebralgardens-dev`.
 
 ---
 
@@ -22,7 +27,7 @@ The fix is **two marketplaces with different names**, split by source:
 | Marketplace | Source | Resolves to | Enabled in |
 |---|---|---|---|
 | `cerebralgardens` | **git** (forgejo URL) | published `develop` snapshot | other repos + real users |
-| `cerebralgardens-dev` | **directory** (+ symlink to live tree) | your live `lightspeed/` tree | this repo (dogfood) |
+| `cerebralgardens-dev` | **directory** (+ symlink to live tree) | your live `flight/` tree | this repo (dogfood) |
 
 ---
 
@@ -67,7 +72,7 @@ These drove every design decision. Re-verify with `--help` if a CC version chang
 4. **Plugin `source` in a marketplace manifest** accepts **only a `./`-relative
    path inside the marketplace root**. Not absolute paths, not `..` traversal,
    not an object form. That's why the dev marketplace uses a **symlink** named
-   `lightspeed` pointing at the live tree, with `"source": "./lightspeed"`.
+   `flight` pointing at the live tree, with `"source": "./flight"`.
 
 5. **`plugin install` snapshots a COPY into a version-keyed cache** at
    `$CLAUDE_CONFIG_DIR/plugins/cache/<marketplace>/<plugin>/<version>/` (real files,
@@ -106,8 +111,8 @@ claude plugin marketplace add https://codeberg.org/cerebralgardens/claude-tools.
 ```bash
 DEVMP=~/.claude-marketplaces/cerebralgardens-dev
 mkdir -p "$DEVMP/.claude-plugin"
-# symlink makes "./lightspeed" resolve to the live tree:
-ln -sfn /path/to/ClaudeSkills/lightspeed "$DEVMP/lightspeed"
+# symlink makes "./flight" resolve to the live tree:
+ln -sfn /path/to/ClaudeSkills/flight "$DEVMP/flight"
 
 cat > "$DEVMP/.claude-plugin/marketplace.json" <<'JSON'
 {
@@ -115,7 +120,7 @@ cat > "$DEVMP/.claude-plugin/marketplace.json" <<'JSON'
   "owner": { "name": "Cerebral Gardens", "email": "dave@cerebralgardens.com" },
   "metadata": { "description": "LOCAL DEV checkout of Cerebral Gardens' plugins (dogfooding the live tree)." },
   "plugins": [
-    { "name": "lightspeed", "source": "./lightspeed", "version": "0.3.0", "description": "Live-tree lightspeed for dogfooding." }
+    { "name": "flight", "source": "./flight", "version": "0.3.0", "description": "Live-tree flight for dogfooding." }
   ]
 }
 JSON
@@ -128,17 +133,17 @@ claude plugin marketplace add "$DEVMP"          # single arg again
 
 ```bash
 # THIS repo (dogfood) — run from the repo root:
-claude plugin install lightspeed@cerebralgardens-dev --scope local
+claude plugin install flight@cerebralgardens-dev --scope local
 
 # A consuming repo (e.g. other_project) — run from that repo:
-claude plugin install lightspeed@cerebralgardens --scope local
+claude plugin install flight@cerebralgardens --scope local
 ```
 
 ### 4. Verify + reload
 
 ```bash
 claude plugin marketplace list   # claude-plugins-official + cerebralgardens + cerebralgardens-dev
-claude plugin list               # this repo: lightspeed@cerebralgardens-dev (enabled)
+claude plugin list               # this repo: flight@cerebralgardens-dev (enabled)
 ```
 Then `/reload-plugins` (or restart the session) — `list` shows stale
 enabled/disabled state until you reload.
@@ -155,9 +160,9 @@ version-keyed cache dir and reinstall:
 ```bash
 CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"   # your profile dir; defaults to ~/.claude when unset
 VER=0.6.0                                   # = the version in the dev manifest (keep in sync when it bumps)
-rm -rf "$CFG/plugins/cache/cerebralgardens-dev/lightspeed/$VER"
-claude plugin uninstall lightspeed@cerebralgardens-dev --scope local
-claude plugin install   lightspeed@cerebralgardens-dev --scope local
+rm -rf "$CFG/plugins/cache/cerebralgardens-dev/flight/$VER"
+claude plugin uninstall flight@cerebralgardens-dev --scope local
+claude plugin install   flight@cerebralgardens-dev --scope local
 # then:
 /reload-plugins      # or restart the session
 ```
@@ -182,11 +187,11 @@ Tested matrix (live edit → did it reach the cache?):
 - **The `disabled` line in `plugin list` may belong to another repo.**
   `installed_plugins.json` is global; `plugin list` shows all local-scope
   installs and marks them enabled/disabled relative to the *current* project. An
-  entry like `lightspeed@cerebralgardens (local) ✘ disabled` here is
+  entry like `flight@cerebralgardens (local) ✘ disabled` here is
   other_project's legitimate install (its record carries
   `projectPath: …/other_project`). **Do not delete it** — it's not stale cruft for
   this repo, and removing it breaks `other_project`.
-- **Keep `$DEVMP/lightspeed` a symlink.** Replace it with a copy and the dev
+- **Keep `$DEVMP/flight` a symlink.** Replace it with a copy and the dev
   marketplace freezes.
 - **Don't register the published plugin as a `directory` source.** That's the
   original leak. Published = git source only.
@@ -197,7 +202,7 @@ Tested matrix (live edit → did it reach the cache?):
 
 ## Reusing this for the second plugin
 
-1. Put the plugin folder in this repo (alongside `lightspeed/`), with its own
+1. Put the plugin folder in this repo (alongside `flight/`), with its own
    `.claude-plugin/plugin.json`. It ships from the **same published marketplace**
    (`cerebralgardens`) — just add it to the published `marketplace.json`'s
    `plugins` array.
