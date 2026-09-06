@@ -47,6 +47,13 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   local ref can't be the merge base. `promoting-branches` runs the same check before its first
   merge and again immediately before the single end-of-run push. Both skills say explicitly:
   do not reflexively `git pull` a diverged stage branch.
+- **The per-stage `strategy` knob is now documented in the config reference and read, not
+  hard-coded, by `promoting-a-branch`** (#64). `code.stages[i].strategy` is `merge` | `squash` |
+  `rebase` and **defaults to `merge`** — a true merge keeps the same commits travelling
+  `feature → develop → qa → main`, which is what Flight's one-branch-per-issue pipeline expects.
+  `promoting-a-branch` Step 1 now resolves `$STRATEGY` from the target stage and Step 4 merges
+  with it; its worked example changed from `--strategy squash` to the resolved value. The knob
+  applies to `pr` hops only — a `direct` hop always merges `--no-ff`.
 
 ### Security
 
