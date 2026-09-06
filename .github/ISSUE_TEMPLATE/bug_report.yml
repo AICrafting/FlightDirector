@@ -1,0 +1,116 @@
+---
+name: Bug report
+description: Something in a Flight Director plugin is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The more of the boxes below you can fill in, the faster this gets fixed.
+
+        **Never paste `.flightdirector/secrets.json`, an API token, or any other credential.**
+        `config.json` is fine once you redact the host/owner/repo if they are private.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: My report contains no API tokens or other secrets.
+          required: true
+
+  - type: dropdown
+    id: harness
+    attributes:
+      label: Harness
+      description: Where you were running the plugin.
+      options:
+        - Claude Code
+        - Codex
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: harness-version
+    attributes:
+      label: Harness version
+      description: e.g. `claude --version`, or the Codex build you are on.
+      placeholder: "claude 2.0.14"
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin and version
+      description: Which plugin, at which version (`/plugin` in Claude Code, or the `version` in its `plugin.json`).
+      placeholder: "flight 0.11.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend
+      description: The forge the failing axis points at.
+      options:
+        - Forgejo / Gitea
+        - GitHub
+        - GitLab
+        - Jira
+        - Not backend-specific
+    validations:
+      required: true
+
+  - type: input
+    id: entrypoint
+    attributes:
+      label: Skill or command involved
+      description: The skill that was running, or the dispatcher command you ran.
+      placeholder: "working-an-issue, or: flight issues set-status --number 42 --status to-test"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected to happen
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened
+      description: Include the error output verbatim if there was any.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Redacted .flightdirector/config.json
+      description: >
+        The `code` / `issues` axes and the `stages` pipeline are usually what matters.
+        Redact anything private — and never attach `secrets.json`.
+      render: json
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Logs, screenshots, a link to a failing CI run.

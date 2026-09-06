@@ -36,8 +36,9 @@ must be proposed from the actual project, not seeded from a table.
 - **Never create `area/*` labels without project input.** They're project-dependent — propose,
   then wait for the user to confirm/edit.
 - **One confirmation gate before creating anything.** Show the full plan first.
-- **Never commit `.flightdirector/secrets.json`.** It holds the token — add it to `.gitignore`
-  before writing it.
+- **Never commit `.flightdirector/secrets.json`.** It holds the token — add the
+  `.flightdirector/secrets*` glob to `.gitignore` before writing it, so backups and
+  per-backend variants (`secrets.local.json`, `secrets.json.bak`, …) can't leak either.
 
 ## Step 0: Detect existing backends — offer, then confirm
 
@@ -59,11 +60,11 @@ the move (show the commands, wait for a yes), then run:
 
 ```
 git mv .lightspeed/config.json .flightdirector/config.json   # tracked → keeps history
-mv .lightspeed/secrets.json .flightdirector/secrets.json     # gitignored → plain mv
+mv .lightspeed/secrets* .flightdirector/                     # gitignored → plain mv (any secrets file)
 rmdir .lightspeed 2>/dev/null || true                        # leave it if anything else is inside
 ```
 
-Then add `.flightdirector/secrets.json` and `.flightdirector/batches/` to `.gitignore` (keep the
+Then add `.flightdirector/secrets*` and `.flightdirector/batches/` to `.gitignore` (keep the
 old `.lightspeed/…` lines if other branches still use them) and continue as a re-run over the
 existing config. Until the move happens the dispatcher keeps working off the legacy folder with a
 one-line notice on stderr — so never block a user on the migration.
@@ -135,8 +136,10 @@ token-creation steps differ per backend (GitHub, GitLab, Forgejo, Jira) — see
 [flight-setup.md](../../references/flight-setup.md) for the config schema. Then:
 
 1. Create the config folder: `mkdir -p .flightdirector`.
-2. Add `.flightdirector/secrets.json`, `.worktrees/`, **and** `.flightdirector/batches/` to `.gitignore`
-   **first** (create `.gitignore` if needed). `.worktrees/` is where `working-an-issue` creates
+2. Add `.flightdirector/secrets*`, `.worktrees/`, **and** `.flightdirector/batches/` to `.gitignore`
+   **first** (create `.gitignore` if needed). Ignore the whole `secrets*` family, not just
+   `secrets.json` — a second token file or a backup made while rotating a token is otherwise one
+   `git add -A` from being committed. `.worktrees/` is where `working-an-issue` creates
    per-issue git worktrees, and `.flightdirector/batches/` is where `queue-batches` writes per-run
    batch manifests — both are per-run local state (not secrets) that must be ignored so they
    don't appear as untracked content in the repo.
@@ -192,8 +195,8 @@ Write `.flightdirector/config.json` in the `.flightdirector/` folder (created in
 
 ```json
 {
-  "schemaVersion": 1,
-  "harnesses": { "claude": { "reconciledWith": "<installed-version>" } },
+  "schemaVersion": 2,
+  "harnesses": { "claude": { "plugins": { "flight": { "reconciledWith": "<installed-version>" } } } },
   "code": { "backend": "forgejo", "owner": "…", "repo": "…", "api": "https://…/api/v1",
     "stages": [
       { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },
@@ -360,6 +363,7 @@ to move it there so there is one copy, not two that drift.
   `enhancement` as the role's name and record it in the config.
 - Creating labels but forgetting to finalize the `labels` map in `.flightdirector/config.json` — then the
   other skills use plugin defaults and ignore the names you adopted.
-- Writing `.flightdirector/secrets.json` without gitignoring it first — that leaks the token.
+- Writing `.flightdirector/secrets.json` without gitignoring `.flightdirector/secrets*` first — that
+  leaks the token.
 - Seeding `area/*` from the table without checking the project.
 - Recoloring or renaming an existing label to match the default. Only add what's missing.

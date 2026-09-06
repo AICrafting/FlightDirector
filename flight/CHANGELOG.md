@@ -13,7 +13,62 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- **The docs no longer frame flight as a tool for a self-hosted Forgejo instance** (#99). The
+  User Guide, both READMEs, and the config reference now lead with the backend contract —
+  Forgejo/Gitea, GitHub, and GitLab at full parity, Jira for the issues axis — with per-backend
+  prerequisites and least-privilege token tables that link to `references/backends.md` as the
+  single maintained list. The config reference's GitHub section no longer claims
+  `setting-up-a-repo` can't offer GitHub (it detects a `github.com` remote). The dispatcher also
+  accepts a backend-neutral **`FLIGHT_TOKEN`** environment override alongside `LS_TOKEN`;
+  `FORGEJO_TOKEN` keeps working as the legacy name.
+
+- **The reconcile stamp is now scoped per plugin, not just per harness** (#88): schema version 2
+  records `harnesses.<harness>.plugins.<plugin>.reconciledWith` instead of a bare
+  `harnesses.<harness>.reconciledWith`. `.flightdirector/` is shared by every Flight Director
+  plugin, so the old single key would have had future plugins overwriting each other's stamp and
+  comparing their version against another plugin's in the downgrade guard. Existing configs
+  migrate themselves on the next `flight reconcile` (the old key moves to `plugins.flight` and is
+  removed) — no manual step.
+
+- **Reading an issue's comments on pickup is now an explicit requirement** (#82): a red flag in
+  `working-an-issue` ("the later comment wins"), a required first step in the `queue-batches`
+  worker prompt (workers previously never fetched comments), and `promoting-a-branch` /
+  `promoting-branches` read comments before drafting test plans.
+- **`git -C <path>` is now the modelled form for every git command in the skills** (#65):
+  `working-an-issue`, `promoting-a-branch`, `promoting-branches` and the `queue-batches` worker
+  prompt bind the relevant checkout path once (`$WT` / `$ROOT` / `$MAIN`) and anchor every git
+  invocation to it, with a compaction-proof red flag — a bare `git` command is a bug — so an
+  agent that has `cd`'d elsewhere can no longer commit to the wrong repo or branch. The
+  guidance also notes that `git -C "$WT" add <path>` resolves `<path>` relative to `$WT`.
+- **Feature worktrees now start from an up-to-date `stages[0]`** (#84): `working-an-issue`
+  Step 1, the `queue-batches` worker prompt, and `promoting-branches`' integration worktree all
+  fetch `origin/<stages[0]>` and compare before `worktree add` — level → proceed, behind →
+  fast-forward or fork from the origin tip (and say so), ahead/diverged → **STOP** rather than
+  `git pull`. Offline or with no remote, work continues from the local ref but the base is
+  reported as **unverified**, and the pickup line states the base's freshness either way.
+- **Promotions now check upstream freshness before merging or pushing** (#66):
+  `promoting-a-branch` gained a Step 4a that fetches `origin/<target>` (and re-affirms the
+  source branch on a `direct` hop) and classifies the target as up-to-date / behind / ahead /
+  diverged — behind fast-forwards and says so, ahead or diverged **stops and reports** rather
+  than reconciling. Its Case 2 throwaway worktree now forks from `origin/<target>` so a stale
+  local ref can't be the merge base. `promoting-branches` runs the same check before its first
+  merge and again immediately before the single end-of-run push. Both skills say explicitly:
+  do not reflexively `git pull` a diverged stage branch.
+- **The per-stage `strategy` knob is now documented in the config reference and read, not
+  hard-coded, by `promoting-a-branch`** (#64). `code.stages[i].strategy` is `merge` | `squash` |
+  `rebase` and **defaults to `merge`** — a true merge keeps the same commits travelling
+  `feature → develop → qa → main`, which is what Flight's one-branch-per-issue pipeline expects.
+  `promoting-a-branch` Step 1 now resolves `$STRATEGY` from the target stage and Step 4 merges
+  with it; its worked example changed from `--strategy squash` to the resolved value. The knob
+  applies to `pr` hops only — a `direct` hop always merges `--no-ff`.
+
+### Security
+
+- **`setting-up-a-repo` now gitignores the whole `.flightdirector/secrets*` family** (#80), not just
+  `secrets.json`, so a second token file or a backup made while rotating a token (`secrets.local.json`,
+  `secrets.json.bak`, `secrets-github.json`, editor swap copies) can't be committed either.
 
 ## [0.11.0] - 2026-09-06
 

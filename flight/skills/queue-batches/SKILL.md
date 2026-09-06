@@ -44,8 +44,12 @@ Before anything else, detect an in-flight or awaiting-cleanup prior run. Block (
 passes `force`) if either is true:
 
 ```bash
+# Bind the MAIN repo root once (the one permitted bare git — it bootstraps the path);
+# every git command below is anchored to it with -C.
+ROOT="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
+
 # Leftover per-issue worktrees from a previous queue:
-git worktree list | grep -E '\.worktrees/[0-9]+-' || true
+git -C "$ROOT" worktree list | grep -E '\.worktrees/[0-9]+-' || true
 # Leftover zone status logs not yet cleaned up:
 ls "$SCRATCH"/queue-status/*.log 2>/dev/null || true
 ```
@@ -94,7 +98,9 @@ swap/drop/re-zone issues or override the model (per run or per batch).
 Resolve once:
 ```bash
 DISP=flight
-# MAIN repo root (parent of the common git dir) — worktree-safe, matches the dispatcher:
+# MAIN repo root (parent of the common git dir) — worktree-safe, matches the dispatcher.
+# Already bound in step 0; re-derive only if this is a fresh shell. Every git command in this
+# skill and in the dispatched agents is anchored with `git -C <path>` — a bare `git` is a bug.
 ROOT="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 BASE="$("$DISP" config '.code.stages[0].name')"
 MODEL="$("$DISP" config '.code.queueBatches.defaultModel // "sonnet"')"   # unless user overrode

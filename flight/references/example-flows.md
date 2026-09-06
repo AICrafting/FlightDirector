@@ -40,7 +40,7 @@ in the session and integrate straight onto the trunk.
 
 ```json
 "code": {
-  "backend": "forgejo", "owner": "me", "repo": "sketch",
+  "backend": "forgejo", "owner": "me", "repo": "sketch",   // or "github" / "gitlab" — stages are backend-independent
   "stages": [
     { "name": "main", "merge": "direct", "issueStatus": "done" }
   ]

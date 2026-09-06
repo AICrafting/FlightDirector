@@ -37,7 +37,7 @@ check "legacy fallback prints a deprecation notice naming .flightdirector/" \
 	"$(grep -q 'flightdirector' "$R/err" && grep -qi 'deprecat' "$R/err" && echo 1 || echo 0)"
 (cd "$R" && "$DISP" reconcile --harness claude 2>/dev/null)
 check "reconcile writes into the legacy dir when that is the one in use" \
-	"$([ -n "$(jq -r '.harnesses.claude.reconciledWith // empty' "$R/.lightspeed/config.json")" ] && echo 1 || echo 0)"
+	"$([ -n "$(jq -r '.harnesses.claude.plugins.flight.reconciledWith // empty' "$R/.lightspeed/config.json")" ] && echo 1 || echo 0)"
 
 # --- 3. both present → new wins, no notice ----------------------------------
 R="$SANDBOX/both"; mkdir -p "$R/.flightdirector" "$R/.lightspeed"; git -C "$R" init -q

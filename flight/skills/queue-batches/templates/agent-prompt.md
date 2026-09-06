@@ -54,23 +54,63 @@ If you hit a decision not covered here, use the **safety valve** — don't guess
 
 For each issue `#N` with slug `<slug>`:
 
-1. **Create the worktree off `stages[0]`** (run from `{repo_root}`):
+1. **Read the issue AND its comments — before anything else.** The plan you were handed was
+   built from the issue *body*; the comment thread may have since changed the scope, the
+   acceptance, or the decision. When a comment contradicts the body, **the later comment wins**.
+   ```bash
+   {dispatcher} issues get      --number <N>
+   {dispatcher} issues comments --number <N>
+   ```
+   If the thread materially changes the issue from what the batch plan assumed, use the safety
+   valve (below) rather than silently building to the new reading.
+2. **Verify `{base_branch}` is current, then create the worktree off it** (anchored to
+   `{repo_root}`, never to `$PWD`), and bind its path to `$WT` — every git command from here on is
+   `git -C "$WT" …`. You run in parallel with sibling zones, so the base is the ref most likely to
+   have moved under you — never fork from a stale local ref:
+   ```bash
+   if git -C "{repo_root}" remote get-url origin >/dev/null 2>&1 \
+      && git -C "{repo_root}" fetch -q origin "{base_branch}"; then
+       LOCAL="$(git -C "{repo_root}" rev-parse "{base_branch}")"
+       REMOTE="$(git -C "{repo_root}" rev-parse "origin/{base_branch}")"
+       MB="$(git -C "{repo_root}" merge-base "{base_branch}" "origin/{base_branch}")"
+   else
+       LOCAL=offline   # no origin, or the fetch failed
+   fi
+   ```
+   - **Level** (`LOCAL` = `REMOTE`) → fork from `{base_branch}`. Note *"base {base_branch}:
+     level with origin"*.
+   - **Behind** (`LOCAL` = `MB`) → **fork from `origin/{base_branch}`** (simplest and safest
+     while siblings run: don't move a shared local branch under them) and say how far behind it
+     was. Never work from the stale ref.
+   - **Ahead or diverged** (`REMOTE` = `MB`, or neither) → **STOP.** Do not create the worktree,
+     do not `git pull`. Safety-valve with `status=blocked` and report the divergence.
+   - **Offline / no origin** → warn, continue from local `{base_branch}`, and record the base as
+     **UNVERIFIED** in the log line and in your finishing record.
    ```bash
    git -C "{repo_root}" worktree add -b "feature/<N>-<slug>" \
-     "{repo_root}/.worktrees/<N>-<slug>" "{base_branch}"
+     "{repo_root}/.worktrees/<N>-<slug>" "<the ref the check selected>"
+   WT="{repo_root}/.worktrees/<N>-<slug>"
    {dispatcher} issues set-status --number <N> --status in-progress
-   echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=starting" >> {log_path}
+   echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=starting comments=<count> base=<level|ff-N|unverified>" >> {log_path}
    ```
-2. **Work inside `{repo_root}/.worktrees/<N>-<slug>`.** Re-read the issue's Acceptance section;
+3. **Work inside `$WT`, driving git there by path rather than by `cd`.** Re-read the issue's
+   Acceptance section *as amended by the comments*;
    treat each bullet as a separate must-pass condition. Tests must pass after every commit; one
-   commit per issue (small logical subcommits OK). Midway, optionally:
+   commit per issue (small logical subcommits OK):
+   ```bash
+   git -C "$WT" status
+   git -C "$WT" add <repo-relative path>      # paths resolve relative to $WT, not to your cwd
+   git -C "$WT" commit -m "feat(#<N>): …"
+   git -C "$WT" log --oneline -3
+   ```
+   Midway, optionally:
    ```bash
    echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=working note=\"<short>\"" >> {log_path}
    ```
-3. **Before declaring done — walk the user-visible surface.** Don't satisfy only the literal
+4. **Before declaring done — walk the user-visible surface.** Don't satisfy only the literal
    acceptance phrase; trace every related field/element a reporter would see. If the real scope
    is materially larger than the issue's framing, safety-valve instead of shipping a narrow read.
-4. **Hand to the merge gate (do NOT promote):**
+5. **Hand to the merge gate (do NOT promote):**
    ```bash
    {dispatcher} issues set-status --number <N> --status to-test
    # Write your finishing record (work summary + model/token note; see working-an-issue
@@ -79,7 +119,7 @@ For each issue `#N` with slug `<slug>`:
      --description "Issue was worked on using <Primary>"
    {dispatcher} issues label-add --number <N> --label model/<primary>
    {dispatcher} issues comment --number <N> --body-file "{scratch}/done-<N>.md"
-   SHA=$(git -C "{repo_root}/.worktrees/<N>-<slug>" rev-parse --short HEAD)
+   SHA=$(git -C "$WT" rev-parse --short HEAD)
    echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=complete commit=$SHA" >> {log_path}
    ```
    Leave the worktree in place (unmerged) and move to the next issue. The user promotes serially
@@ -101,10 +141,21 @@ answer. Shipping 3 solid issues beats forcing 5 shaky ones.
 ## Universal hard rules (always)
 
 - **No `git push`.** Branches stay local for user review.
+- **Every git command is `git -C "$WT" …` (or `git -C "$ROOT" …` for worktree management). A
+  bare `git` command is a bug, even if you think you're in the right directory.** Your shell's
+  working directory persists across tool calls and you will `cd` around during a task; an
+  unanchored `git commit` can land on the **wrong repository or the wrong branch** — e.g. onto
+  the trunk in the main checkout instead of `feature/<N>-<slug>`. Note that `git -C "$WT" add
+  <path>` resolves `<path>` relative to `$WT`, not to your current directory: that is what you
+  want, but it differs from a bare `git add` from a subdirectory, so pass repo-relative paths.
+  `-C` does not help non-git tools — `cd`-dependent scripts and test runners still need an
+  explicit path of their own.
 - **No promotion / no merge to any stage.** Stop each issue at `to-test`.
 - **Dispatcher only** for backend access (`{dispatcher} issues …`) — never curl or MCP.
 - **Tests green after every commit.**
 - **Safety-valve on uncertainty** rather than guessing.
+- **Never fork a feature branch from an unfetched `{base_branch}`**, and never `git pull` to
+  "fix" a diverged one — stop and report.
 
 ## Repo-specific rules
 

@@ -41,7 +41,8 @@ The dispatcher:
 3. Exports the resolved coordinates + token into the adapter's environment: `LS_API`,
    `LS_OWNER`, `LS_REPO`, `LS_TOKEN`, `LS_TRUNK` (code's trunk branch), `LS_LABELS_JSON`
    (the `labels` map, for role→name resolution), and `LS_BACKEND`. Token precedence:
-   `LS_TOKEN`/`FORGEJO_TOKEN` env override, else the secrets file (axis, `code → issues`).
+   `LS_TOKEN` / `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a legacy
+   name), else the secrets file (axis, `code → issues`).
 4. Execs `adapters/<backend>/<group> <verb> [args…]`.
 
 So adapters are pure: they read coordinates/token from `LS_*` env, never parse config, never
