@@ -58,7 +58,7 @@ There are three distinct layers — keep them straight:
 | What | Where | Runs | Purpose |
 |---|---|---|---|
 | **Pre-push checks** | `scripts/checks/*.sh` via `scripts/runChecks.sh` | `.githooks/pre-push` (local), on demand | Working-tree cleanliness: `lint.sh` (yamllint + shellcheck), `verifyGitLogs.sh` (commit signatures) |
-| **Script unit tests** | `scripts/tests/*.test.sh` via `scripts/runTests.sh` | CI (`.forgejo/workflows/tests.yml`), on demand | Unit tests for the repo's own scripts (e.g. `bump-version.test.sh`) |
+| **Script unit tests** | `scripts/tests/*.test.sh` via `scripts/runTests.sh` | CI (`.github/workflows/tests.yml`), on demand | Unit tests for the repo's own scripts (e.g. `bump-version.test.sh`) |
 | **Integration rigs** | `test-rig/<backend>/` | on demand | Per-backend adapter smoke tests (see below) |
 
 ```bash

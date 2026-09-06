@@ -10,7 +10,7 @@ on:
 jobs:
   yamllint:
     name: yamllint
-    runs-on: docker
+    runs-on: ubuntu-latest
     container:
       image: cytopia/yamllint:latest
     steps:
@@ -19,7 +19,7 @@ jobs:
           apk add --update npm
 
       - name: Checkout
-        uses: https://code.forgejo.org/actions/checkout@v6
+        uses: actions/checkout@v6
 
       - name: Run yamllint
         run: |
@@ -27,7 +27,7 @@ jobs:
 
   shellcheck:
     name: shellcheck
-    runs-on: docker
+    runs-on: ubuntu-latest
     container:
       image: koalaman/shellcheck-alpine:latest
     steps:
@@ -36,7 +36,7 @@ jobs:
           apk add --update npm
 
       - name: Checkout
-        uses: https://code.forgejo.org/actions/checkout@v6
+        uses: actions/checkout@v6
 
       - name: Run shellcheck
         run: |
