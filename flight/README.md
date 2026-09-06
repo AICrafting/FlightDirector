@@ -54,10 +54,22 @@ flight issues list --state open --limit 50
 
 ## Install
 
-- **Claude Code:** install `flight@flightdirector` from this repository's Claude marketplace (the `flightdirector` marketplace, by AI Crafting).
-- **Codex:** add this repository as a local or Git marketplace, install Flight with `/plugins`,
-  then start a new session. The package includes both harness manifests while sharing its skills
-  and scripts.
+Both harnesses install from the same marketplace — `flightdirector`, hosted at
+<https://github.com/AICrafting/FlightDirector>. The package ships a manifest for each harness
+(`.claude-plugin/` and `.codex-plugin/`) over one shared set of skills and scripts.
+
+- **Claude Code:**
+  ```
+  /plugin marketplace add https://github.com/AICrafting/FlightDirector.git
+  /plugin install flight@flightdirector
+  ```
+- **Codex:**
+  ```
+  codex plugin marketplace add https://github.com/AICrafting/FlightDirector.git
+  codex plugin add flight@flightdirector
+  ```
+  or install *Flight* from the `flightdirector` tab of `/plugins`. Start a new session before
+  invoking a skill.
 
 ## Configuration
 
