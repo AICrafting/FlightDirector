@@ -25,12 +25,15 @@ done
 if [ "$method" = GET ]; then
 	if [ "${FORGEJO_PAGE_TWO:-0}" = 1 ]; then
 		case "$url" in
-			*page=1) jq -n '[range(100) | {id: ., name: ("filler-" + tostring)}]' >"$out" ;;
-			*page=2) printf '%s' '[{"id":7,"name":"model/gpt-5","color":"d97757","description":"old"}]' >"$out" ;;
+			*page=1) jq -n '[range(50) | {id: ., name: ("first-" + tostring)}]' >"$out" ;;
+			*page=2) jq -n '[range(49) | {id: (100 + .), name: ("second-" + tostring)}] + [{id:7,name:"model/gpt-5",color:"d97757",description:"old"}]' >"$out" ;;
 			*) printf '%s' '[]' >"$out" ;;
 		esac
 	else
-		printf '%s' '[{"id":7,"name":"model/gpt-5","color":"d97757","description":"old"}]' >"$out"
+		case "$url" in
+			*page=1) printf '%s' '[{"id":7,"name":"model/gpt-5","color":"d97757","description":"old"}]' >"$out" ;;
+			*) printf '%s' '[]' >"$out" ;;
+		esac
 	fi
 else
 	printf '%s' '{"id":7}' >"$out"

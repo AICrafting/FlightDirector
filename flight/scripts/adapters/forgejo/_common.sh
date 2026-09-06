@@ -44,10 +44,11 @@ _all_labels() {
     _LABELS_CACHE='[]'
     page=1
     while :; do
+      [ "$page" -le 1000 ] || die "labels pagination exceeded 1000 pages"
       batch="$(_api GET "/labels?limit=100&page=$page")"
       _LABELS_CACHE="$(jq -cn --argjson accumulated "$_LABELS_CACHE" --argjson batch "$batch" '$accumulated + $batch')"
       count="$(printf '%s' "$batch" | jq 'length')"
-      [ "$count" -eq 100 ] || break
+      [ "$count" -gt 0 ] || break
       page=$((page + 1))
     done
   fi

@@ -22,7 +22,7 @@ while [ $# -gt 0 ]; do
 	esac
 done
 if [ "$method" = GET ]; then
-	if [ "${LABEL_EXISTS:-0}" = 1 ]; then
+	if [ "${LABEL_EXISTS:-0}" = 1 ] && [[ "$url" = *page=1 ]]; then
 		printf '%s' '[{"id":7,"name":"model/sol","color":"d97757","description":"existing"}]' >"$out"
 	else
 		printf '%s' '[]' >"$out"
