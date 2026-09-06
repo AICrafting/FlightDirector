@@ -34,6 +34,11 @@ reinvent. Manifest state is managed by the `batch-manifest` command.
 - **Never build an integration worktree on an unfetched `BASE`.** Fetch and compare before every
   `worktree add` off `stages[0]` (Step 4). Local ahead of / diverged from `origin/$BASE` → STOP
   and report; never `git pull` to reconcile it.
+- **Fetch `BASE` before the first merge and re-check before the push.** A batch promote merges a
+  whole group into a *local* `BASE` and pushes once at the end — the workload most likely to race
+  a parallel agent or another machine. Behind → fast-forward and say so; **ahead or diverged →
+  STOP** the group, do not `git pull`, and report. A stale base means every merge in the group
+  was computed against the wrong tree.
 
 ## Step 1: Resolve the hop
 
@@ -93,10 +98,30 @@ checkout that holds `BASE` (usually the main repo root `MAIN`):
 # $MAIN was bound in Step 1 — reuse it; do not re-derive it from $PWD.
 # MAIN holds stages[0] in the usual case. If stages[0] is NOT checked out in any
 # worktree, use promoting-a-branch Step 4 "Case 2" (a throwaway worktree) instead.
+
+# --- Upstream freshness check (promoting-a-branch Step 4a) — BEFORE the first merge ---
+git -C "$MAIN" fetch -q origin "$BASE"
+LOCAL="$(git -C "$MAIN" rev-parse "$BASE")"
+REMOTE="$(git -C "$MAIN" rev-parse "origin/$BASE")"
+MB="$(git -C "$MAIN" merge-base "$BASE" "origin/$BASE")"
+#   LOCAL = REMOTE  → up to date, proceed
+#   LOCAL = MB      → behind; git -C "$MAIN" merge --ff-only "origin/$BASE", say so, proceed
+#   REMOTE = MB     → ahead (unpushed commits on the stage) → STOP, report, do not pull
+#   otherwise       → diverged → STOP, report, do not auto-reconcile
+# No origin / fetch fails (offline): warn, continue, and mark BASE unverified in the report.
+
 for each branch feature/<N>-<slug> in the group:
     git -C "$MAIN" merge --no-ff "feature/<N>-<slug>" -m "Merge feature/<N>-<slug> into $BASE (#<N>)"
     # if the merge commit signs badly (%G? = B), re-sign: git -C "$MAIN" commit --amend --no-edit -S
     # on conflict: git -C "$MAIN" merge --abort; record SKIPPED(<N>, conflict); continue
+# --- Re-check freshness immediately before the push: the group's merges took time, and a
+#     sibling promote or another machine may have moved origin/$BASE meanwhile. Same four
+#     states as above; behind → the push is a non-fast-forward, so fast-forward is not
+#     possible with merges already stacked on top — STOP and report rather than pulling.
+git -C "$MAIN" fetch -q origin "$BASE"
+[ "$(git -C "$MAIN" rev-parse "origin/$BASE")" = \
+  "$(git -C "$MAIN" merge-base "$BASE" "origin/$BASE")" ] || {
+    echo "origin/$BASE moved during the batch — STOP and report; do not pull" >&2; }
 git -C "$MAIN" push   # once, after the group's merges
 ```
 
@@ -172,3 +197,7 @@ manifest for a re-run.
   integration worktree's path) so it can never act on the wrong one.
 - Creating the integration worktree off a `BASE` nobody fetched — the whole batch is then built
   on stale code and every PR carries the drift.
+- Merging a whole group into a `BASE` nobody fetched, then discovering at the single end-of-run
+  push that origin moved — now M merge commits sit on a diverged local branch.
+- `git pull`-ing to rescue a rejected push. Stop and report; the user reconciles a diverged
+  stage branch, not the agent.

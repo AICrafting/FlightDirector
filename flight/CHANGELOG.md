@@ -39,6 +39,14 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   fast-forward or fork from the origin tip (and say so), ahead/diverged → **STOP** rather than
   `git pull`. Offline or with no remote, work continues from the local ref but the base is
   reported as **unverified**, and the pickup line states the base's freshness either way.
+- **Promotions now check upstream freshness before merging or pushing** (#66):
+  `promoting-a-branch` gained a Step 4a that fetches `origin/<target>` (and re-affirms the
+  source branch on a `direct` hop) and classifies the target as up-to-date / behind / ahead /
+  diverged — behind fast-forwards and says so, ahead or diverged **stops and reports** rather
+  than reconciling. Its Case 2 throwaway worktree now forks from `origin/<target>` so a stale
+  local ref can't be the merge base. `promoting-branches` runs the same check before its first
+  merge and again immediately before the single end-of-run push. Both skills say explicitly:
+  do not reflexively `git pull` a diverged stage branch.
 
 ### Security
 
