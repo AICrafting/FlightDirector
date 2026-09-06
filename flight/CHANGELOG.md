@@ -13,11 +13,7 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-### Changed
-
-- Install docs (README, GUIDE) now use the public marketplace URL
-  `https://github.com/AICrafting/FlightDirector.git` and give Codex the same step-by-step
-  install as Claude Code (`codex plugin marketplace add …`, `codex plugin add flight@flightdirector`) (#74).
+_Nothing yet._
 
 ## [0.11.0] - 2026-09-06
 
@@ -34,6 +30,9 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   cerebralgardens`, re-add the repo, and reinstall as `flight@flightdirector`.
 - The dispatcher is now **`flight <group> <verb>`**. The plugin ships `bin/flight`.
 - Manifests now declare `"license": "MIT"` (#71), mirroring the repo's `LICENSE`.
+- Install docs (README, GUIDE) now use the public marketplace URL
+  `https://github.com/AICrafting/FlightDirector.git` and give Codex the same step-by-step
+  install as Claude Code (`codex plugin marketplace add …`, `codex plugin add flight@flightdirector`) (#74).
 - The per-repo config folder is now **`.flightdirector/`** (`config.json` + gitignored
   `secrets.json`, plus `batches/`), shared by every Flight Director plugin.
 - `setting-up-a-repo` writes the `.flightdirector/` layout, offers to migrate a legacy
