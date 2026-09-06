@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.11.0] - 2026-09-06
+
 ### Changed
 
 - **Renamed the plugin from `lightspeed` to `flight`**, the first member of the **Flight Director**
@@ -25,6 +29,7 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   name comes from its manifest, so existing consumers must `claude plugin marketplace remove
   cerebralgardens`, re-add the repo, and reinstall as `flight@flightdirector`.
 - The dispatcher is now **`flight <group> <verb>`**. The plugin ships `bin/flight`.
+- Manifests now declare `"license": "MIT"` (#71), mirroring the repo's `LICENSE`.
 - The per-repo config folder is now **`.flightdirector/`** (`config.json` + gitignored
   `secrets.json`, plus `batches/`), shared by every Flight Director plugin.
 - `setting-up-a-repo` writes the `.flightdirector/` layout, offers to migrate a legacy
