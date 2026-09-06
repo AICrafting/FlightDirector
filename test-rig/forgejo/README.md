@@ -10,7 +10,9 @@ not part of the plugin.** Requires `docker` (+ compose) and `jq`.
 ```
 
 - **Port:** `3000` by default; override with `RIG_PORT=3100 ./up.sh`, or copy `.env.example` to
-  `.env` (gitignored) and set it there — both `up.sh` and docker compose read it.
+  `.env` (gitignored) and set it there. The same file can override the admin user/password/email
+  and the test repo name (`FLIGHT_FORGEJO_USER` / `_PASS` / `_EMAIL` / `_REPO`) — all defaulted,
+  since the instance is disposable.
 - **Image:** `code.forgejo.org/forgejo/forgejo:15` (pinned to the current major); override with `FORGEJO_IMAGE=…`.
 - **Workdir:** `.work/` — a throwaway git repo holding `.flightdirector/config.json` +
   `.flightdirector/secrets.json` pointed at the rig. Gitignored. Drive the adapters by hand from

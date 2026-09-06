@@ -1,11 +1,11 @@
 # Flight GitHub test rig
 
-Exercises the GitHub adapter against a **real** repo (`DaveWoodCom/FlightTestTarget`).
-**Dev tooling — not part of the plugin.** Requires `curl` + `jq` and a token (scope: **repo +
-workflow**).
+Exercises the GitHub adapter against a **real** repo — the one named by `FLIGHT_GH_REPO` in
+`.env` (a throwaway repo you own). **Dev tooling — not part of the plugin.** Requires `curl` +
+`jq` and a token (scope: **repo + workflow**).
 
 ```bash
-export FLIGHT_GH_TOKEN=ghp_…   # or: cp .env.example .env (gitignored) and fill it in
+cp .env.example .env   # gitignored; fill in FLIGHT_GH_REPO=owner/repo and FLIGHT_GH_TOKEN
 ./up.sh        # verify token, seed labels + ci workflow, write .work/ config
 ./smoke.sh     # exercise every verb against the live repo (marker-tagged), with assertions
 ./down.sh      # close/delete only rig-tagged artifacts; remove .work/

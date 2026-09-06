@@ -83,11 +83,11 @@ lsp pr merge --number "$prnum" --strategy squash && ok "pr merge exits 0" || no 
 
 echo "── ci watch (the seeded workflow on the rig push) ──"
 LINES="$(timeout 180 bash -c "cd '$WORK' && '$DISP' ci watch --sha '$HEAD_SHA'" || true)"
-grep -qE "task-[0-9]+ status=" <<<"$LINES" && ok "ci watch streams task status lines" || no "ci watch streams task status lines" "$LINES"
-if grep -q "status=completed" <<<"$LINES"; then
-  ok "ci watch reaches completed"
+grep -qE "^ci runs=[0-9]+ .*status=" <<<"$LINES" && ok "ci watch streams aggregate status lines" || no "ci watch streams aggregate status lines" "$LINES"
+if grep -q "status=success" <<<"$LINES"; then
+  ok "ci watch reaches success"
 else
-  printf '\033[33m  ⚠ ci watch did not reach completed (soft — Actions may be slow)\033[0m\n'
+  printf '\033[33m  ⚠ ci watch did not reach success (soft — Actions may be slow)\033[0m\n'
 fi
 
 echo
