@@ -8,13 +8,13 @@ set -uo pipefail
 
 RIG_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$RIG_DIR/.work"
-DISP="$RIG_DIR/../../lightspeed/scripts/lightspeed"
-[ -f "$WORK/.lightspeed/config.json" ] || { echo "no workdir config — run ./up.sh first" >&2; exit 1; }
+DISP="$RIG_DIR/../../flight/scripts/flight"
+[ -f "$WORK/.flightdirector/config.json" ] || { echo "no workdir config — run ./up.sh first" >&2; exit 1; }
 
-PROJECT="$(jq -r '.issues.project' "$WORK/.lightspeed/config.json")"
-SITE="$(jq -r '.issues.api' "$WORK/.lightspeed/config.json")"; SITE="${SITE%/}"
-EMAIL="$(jq -r '.issues.email' "$WORK/.lightspeed/config.json")"
-TOKEN="$(jq -r '.issues.token' "$WORK/.lightspeed/secrets.json")"
+PROJECT="$(jq -r '.issues.project' "$WORK/.flightdirector/config.json")"
+SITE="$(jq -r '.issues.api' "$WORK/.flightdirector/config.json")"; SITE="${SITE%/}"
+EMAIL="$(jq -r '.issues.email' "$WORK/.flightdirector/config.json")"
+TOKEN="$(jq -r '.issues.token' "$WORK/.flightdirector/secrets.json")"
 AUTH=(-u "${EMAIL}:${TOKEN}")
 # Jira's JQL search index is eventually consistent — `issues get` and direct
 # issue reads are immediate, but `issues list` (JQL) lags a create/label change

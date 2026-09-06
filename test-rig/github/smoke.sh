@@ -8,13 +8,13 @@ set -uo pipefail
 
 RIG_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$RIG_DIR/.work"
-DISP="$RIG_DIR/../../lightspeed/scripts/lightspeed"
-[ -f "$WORK/.lightspeed/config.json" ] || { echo "no workdir config — run ./up.sh first" >&2; exit 1; }
+DISP="$RIG_DIR/../../flight/scripts/flight"
+[ -f "$WORK/.flightdirector/config.json" ] || { echo "no workdir config — run ./up.sh first" >&2; exit 1; }
 
-API="$(jq -r '.code.api' "$WORK/.lightspeed/config.json")"
-OWNER="$(jq -r '.code.owner' "$WORK/.lightspeed/config.json")"
-REPO="$(jq -r '.code.repo' "$WORK/.lightspeed/config.json")"
-TOKEN="$(jq -r '.code.token' "$WORK/.lightspeed/secrets.json")"
+API="$(jq -r '.code.api' "$WORK/.flightdirector/config.json")"
+OWNER="$(jq -r '.code.owner' "$WORK/.flightdirector/config.json")"
+REPO="$(jq -r '.code.repo' "$WORK/.flightdirector/config.json")"
+TOKEN="$(jq -r '.code.token' "$WORK/.flightdirector/secrets.json")"
 REPO_API="$API/repos/$OWNER/$REPO"
 H=(-H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
 TS="$(date -u +%Y%m%d%H%M%S)"
@@ -83,11 +83,11 @@ lsp pr merge --number "$prnum" --strategy squash && ok "pr merge exits 0" || no 
 
 echo "── ci watch (the seeded workflow on the rig push) ──"
 LINES="$(timeout 180 bash -c "cd '$WORK' && '$DISP' ci watch --sha '$HEAD_SHA'" || true)"
-grep -qE "task-[0-9]+ status=" <<<"$LINES" && ok "ci watch streams task status lines" || no "ci watch streams task status lines" "$LINES"
-if grep -q "status=completed" <<<"$LINES"; then
-  ok "ci watch reaches completed"
+grep -qE "^ci runs=[0-9]+ .*status=" <<<"$LINES" && ok "ci watch streams aggregate status lines" || no "ci watch streams aggregate status lines" "$LINES"
+if grep -q "status=success" <<<"$LINES"; then
+  ok "ci watch reaches success"
 else
-  printf '\033[33m  ⚠ ci watch did not reach completed (soft — Actions may be slow)\033[0m\n'
+  printf '\033[33m  ⚠ ci watch did not reach success (soft — Actions may be slow)\033[0m\n'
 fi
 
 echo

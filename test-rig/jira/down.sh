@@ -14,8 +14,8 @@ ENV_FILE="$MAIN/test-rig/jira/.env"
 # shellcheck disable=SC1090  # .env is gitignored; shellcheck can't follow it
 [ -n "$MAIN" ] && [ -f "$ENV_FILE" ] && . "$ENV_FILE"
 
-SITE="${LIGHTSPEED_JIRA_SITE:-}"; EMAIL="${LIGHTSPEED_JIRA_EMAIL:-}"
-TOKEN="${LIGHTSPEED_JIRA_TOKEN:-}"; PROJECT="${LIGHTSPEED_JIRA_PROJECT:-}"
+SITE="${FLIGHT_JIRA_SITE:-${LIGHTSPEED_JIRA_SITE:-}}"; EMAIL="${FLIGHT_JIRA_EMAIL:-${LIGHTSPEED_JIRA_EMAIL:-}}"
+TOKEN="${FLIGHT_JIRA_TOKEN:-${LIGHTSPEED_JIRA_TOKEN:-}}"; PROJECT="${FLIGHT_JIRA_PROJECT:-${LIGHTSPEED_JIRA_PROJECT:-}}"
 SITE="${SITE%/}"
 
 if [ -n "$SITE" ] && [ -n "$EMAIL" ] && [ -n "$TOKEN" ] && [ -n "$PROJECT" ]; then

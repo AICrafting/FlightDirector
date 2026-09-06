@@ -58,7 +58,7 @@ export FAKE_RESP="$RESP"
 export LS_API="http://fake" LS_OWNER="o" LS_REPO="r" LS_TOKEN="t"
 
 run_log() {
-	PATH="$FAKE_DIR:$PATH" bash "$REPO_ROOT/lightspeed/scripts/adapters/forgejo/ci" log "$@" 2>&1
+	PATH="$FAKE_DIR:$PATH" bash "$REPO_ROOT/flight/scripts/adapters/forgejo/ci" log "$@" 2>&1
 }
 
 SHA_FAIL="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

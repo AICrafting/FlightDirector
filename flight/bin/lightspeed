@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# DEPRECATED PATH entrypoint — the dispatcher is now `flight` (the plugin was
+# renamed from lightspeed to flight under the Flight Director family). Kept for
+# one release so existing AGENTS.md / CLAUDE.md breadcrumbs and muscle memory keep working.
+echo "lightspeed: deprecated — the dispatcher is now \`flight\`; update your AGENTS.md / CLAUDE.md breadcrumb (this alias will be removed in a future release)." >&2
+here="$(cd "$(dirname "$0")" && pwd)"
+exec "$here/../scripts/flight" "$@"

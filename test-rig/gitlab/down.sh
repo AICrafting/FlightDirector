@@ -11,11 +11,11 @@ RIG_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$RIG_DIR/.work"
 say() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
 
-if [ -f "$WORK/.lightspeed/config.json" ]; then
-  API="$(jq -r '.code.api' "$WORK/.lightspeed/config.json")"
-  OWNER="$(jq -r '.code.owner' "$WORK/.lightspeed/config.json")"
-  REPO="$(jq -r '.code.repo' "$WORK/.lightspeed/config.json")"
-  TOKEN="$(jq -r '.code.token' "$WORK/.lightspeed/secrets.json" 2>/dev/null || echo "")"
+if [ -f "$WORK/.flightdirector/config.json" ]; then
+  API="$(jq -r '.code.api' "$WORK/.flightdirector/config.json")"
+  OWNER="$(jq -r '.code.owner' "$WORK/.flightdirector/config.json")"
+  REPO="$(jq -r '.code.repo' "$WORK/.flightdirector/config.json")"
+  TOKEN="$(jq -r '.code.token' "$WORK/.flightdirector/secrets.json" 2>/dev/null || echo "")"
   ENC="$(printf '%s' "$OWNER/$REPO" | jq -sRr @uri)"
   PROJECT_API="$API/projects/$ENC"
   H=(-H "PRIVATE-TOKEN: $TOKEN")

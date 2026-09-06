@@ -1,6 +1,6 @@
 ---
 # Seeded by test-rig/gitlab/up.sh into the target project at .gitlab-ci.yml.
-# Trivial pipeline so `lightspeed ci watch/log` have a real pipeline to observe.
+# Trivial pipeline so `flight ci watch/log` have a real pipeline to observe.
 # Runs only for rig/* branches to keep it out of the way of real work.
 rig-check:
   stage: test

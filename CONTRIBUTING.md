@@ -1,7 +1,7 @@
 # Contributing
 
 Notes for people working **on** the tools in this repo. If you just want to *use*
-lightspeed in your own repo, that's [`lightspeed/GUIDE.md`](lightspeed/GUIDE.md) —
+flight in your own repo, that's [`flight/GUIDE.md`](flight/GUIDE.md) —
 nothing here (bumping versions, adapters, the test rigs) is something a plugin
 *user* ever does.
 
@@ -15,16 +15,16 @@ own docs/changelog; shared tooling lives at the root.
 
 ```
 .
-├── lightspeed/                  # the lightspeed plugin
+├── flight/                  # the flight plugin
 │   ├── .claude-plugin/plugin.json
 │   ├── GUIDE.md                 # user-facing guide
 │   ├── README.md
 │   ├── CHANGELOG.md             # this plugin's changelog
 │   ├── skills/                  # the skills (filing-issues, working-an-issue, …)
 │   ├── scripts/
-│   │   ├── lightspeed           # the dispatcher (single entrypoint)
+│   │   ├── flight           # the dispatcher (single entrypoint)
 │   │   └── adapters/<backend>/  # per-backend adapters (forgejo, github, …)
-│   └── references/              # adapter-contract.md, lightspeed-setup.md, default-labels.md
+│   └── references/              # adapter-contract.md, flight-setup.md, default-labels.md
 ├── .claude-plugin/marketplace.json   # published marketplace manifest (all plugins)
 ├── scripts/                     # repo-wide tooling (checks, tests, release)
 ├── test-rig/                    # per-backend integration rigs
@@ -34,13 +34,13 @@ own docs/changelog; shared tooling lives at the root.
 └── README.md
 ```
 
-A **second tool** would slot in as a sibling of `lightspeed/` (its own dir with a
+A **second tool** would slot in as a sibling of `flight/` (its own dir with a
 `plugin.json`), gain an entry in `.claude-plugin/marketplace.json`, its own
 `CHANGELOG.md`, and a line in the root `CHANGELOG.md` index.
 
 ## Dev setup / dogfooding
 
-This repo dogfoods lightspeed on itself via a **two-marketplace split** (a published
+This repo dogfoods flight on itself via a **two-marketplace split** (a published
 git-source marketplace and a local directory-source one symlinked to the live tree).
 The full setup, the refresh cycle after you change the plugin, and the gotchas are in
 **[docs/plugin-marketplace-dogfooding.md](docs/plugin-marketplace-dogfooding.md)**.
@@ -87,12 +87,12 @@ git ls-files -s scripts/your-new-script.sh   # verify it shows 100755
 
 ## Adapter development
 
-All backend access goes through the **dispatcher** (`lightspeed/scripts/lightspeed`)
+All backend access goes through the **dispatcher** (`flight/scripts/flight`)
 — never raw API calls or MCP. It routes `<group> <verb>` to a per-backend adapter and
-resolves coordinates/tokens from `.lightspeed/config.json`.
+resolves coordinates/tokens from `.flightdirector/config.json`.
 
 ```
-lightspeed/scripts/adapters/<backend>/
+flight/scripts/adapters/<backend>/
   _common.sh    # shared helpers for the backend
   issues        # the four groups, one executable each
   labels
@@ -102,7 +102,7 @@ lightspeed/scripts/adapters/<backend>/
 
 The contract every adapter implements — the groups, verbs, arguments, and output/exit
 conventions — is
-**[lightspeed/references/adapter-contract.md](lightspeed/references/adapter-contract.md)**.
+**[flight/references/adapter-contract.md](flight/references/adapter-contract.md)**.
 Adding a backend means adding `adapters/<backend>/{issues,labels,pr,ci}` (an
 issues-axis-only backend implements just `issues` + `labels`); the dispatcher picks it
 up by name with no dispatcher changes.
@@ -115,8 +115,8 @@ work: GitLab (#12) and Jira (#13).
 
 ## Branch / PR conventions
 
-lightspeed develops itself through its own pipeline: **feature → develop → qa → main**
-(`code.stages` in `.lightspeed/config.json`). Use the skills:
+flight develops itself through its own pipeline: **feature → develop → qa → main**
+(`code.stages` in `.flightdirector/config.json`). Use the skills:
 
 - **`working-an-issue`** — one branch + worktree per issue under `.worktrees/`, status
   labels that track the board, an explicit human merge gate.
@@ -128,10 +128,13 @@ Other conventions:
 - **Signed commits are required.** The pre-push `verifyGitLogs.sh` rejects any unpushed
   commit whose signature isn't good (`%G?` of `G`/`U`). Merge commits occasionally sign
   badly (`B`) — re-sign with `git commit --amend --no-edit -S` before pushing.
-- **Commit trailers** — see [CLAUDE.md](CLAUDE.md) for the required `Co-Authored-By` /
-  session trailers.
+- **Agent instructions** — repo-wide rules for coding agents live in [AGENTS.md](AGENTS.md)
+  (Codex reads it directly; [CLAUDE.md](CLAUDE.md) imports it via `@AGENTS.md` and adds only
+  Claude Code-specific notes). Edit `AGENTS.md` for anything both harnesses should know.
+- **Commit trailers** — the required `Co-Authored-By` / session trailers are added by each
+  harness; keep them on agent-authored commits.
 - **Code style** — tabs (width 4); trailing whitespace trimmed on save (except `.md`);
-  leave one final newline. See [CLAUDE.md](CLAUDE.md).
+  leave one final newline. See [AGENTS.md](AGENTS.md).
 
 ## Cutting a release
 
@@ -140,7 +143,7 @@ needs rolling. `scripts/bump-version.sh` does the in-repo mechanical part in one
 it takes the **plugin name**, so it works for any plugin in this repo:
 
 ```bash
-scripts/bump-version.sh lightspeed 0.5.0
+scripts/bump-version.sh flight 0.5.0
 ```
 
 It resolves the plugin's directory from its `source` in `.claude-plugin/marketplace.json`,
@@ -158,7 +161,7 @@ see [docs/plugin-marketplace-dogfooding.md](docs/plugin-marketplace-dogfooding.m
 
 ## Writing skills
 
-The skills under `lightspeed/skills/` follow the superpowers **`writing-skills`**
+The skills under `flight/skills/` follow the superpowers **`writing-skills`**
 conventions (a skill is a directory with a `SKILL.md` plus any `references/` or
 `templates/`). Invoke that skill when creating or editing a skill, and mirror the voice
 and structure of the existing skills (red-flags section, numbered lifecycle,

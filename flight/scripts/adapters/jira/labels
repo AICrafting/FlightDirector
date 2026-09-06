@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+#
+# Jira Cloud labels adapter (REST v3) — verbs: list resolve create.
+#
+# Jira labels are THIN: bare strings with no colour or description, and no id
+# distinct from the name. They spring into existence the first time they are
+# applied to an issue. So:
+#   - list    emits `name⇥⇥` (empty colour + description).
+#   - resolve returns the name as its own id: `name⇥name`.
+#   - create  is effectively a no-op (succeeds idempotently, echoes the name).
+# See ../../../references/adapter-contract.md, "Jira backend specifics".
+set -euo pipefail
+ADAPTER_NAME="jira/labels"
+# shellcheck source-path=SCRIPTDIR source=_common.sh
+source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+
+verb="${1:-}"; shift || true
+
+case "$verb" in
+  list)
+    # /rest/api/3/label returns the instance's labels, paginated. Colour and
+    # description don't exist on Jira labels, so both columns are empty.
+    _api GET "/rest/api/3/label?maxResults=1000" \
+      | jq -r '(.values // [])[] | [., "", ""] | @tsv'
+    ;;
+
+  resolve)
+    names=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --name) names+=("$2"); shift 2 ;;
+      *) die "labels resolve: unknown arg '$1'" ;;
+    esac; done
+    [ ${#names[@]} -gt 0 ] || die "labels resolve: at least one --name required"
+    # A Jira label is its own id (bare string). Always resolves to itself.
+    for n in "${names[@]}"; do
+      printf '%s\t%s\n' "$n" "$n"
+    done
+    ;;
+
+  create|ensure)
+    name=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --name)        name="$2"; shift 2 ;;
+      --color)       shift 2 ;;   # ignored: Jira labels have no colour
+      --description) shift 2 ;;   # ignored: Jira labels have no description
+      *) die "labels create: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$name" ] || die "labels create: --name required"
+    case "$name" in *" "*) die "labels create: Jira labels cannot contain spaces — '$name' is invalid";; esac
+    # No-op: Jira labels have no standalone existence; they appear on first use.
+    # Succeed idempotently and echo the name as its id (colour/description ignored).
+    printf '%s\n' "$name"
+    ;;
+
+  *) die "unknown verb '${verb}' (labels: list resolve create ensure)" ;;
+esac
