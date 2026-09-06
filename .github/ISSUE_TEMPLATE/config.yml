@@ -1,0 +1,12 @@
+---
+blank_issues_enabled: false
+contact_links:
+  - name: Flight user guide
+    url: https://github.com/AICrafting/FlightDirector/blob/main/flight/GUIDE.md
+    about: Installation, first-run setup, and a full worked example — check here before filing a bug.
+  - name: Contributing
+    url: https://github.com/AICrafting/FlightDirector/blob/main/CONTRIBUTING.md
+    about: Working on the plugins themselves — repo layout, checks and tests, adapter development.
+  - name: Report a security vulnerability
+    url: https://github.com/AICrafting/FlightDirector/blob/main/SECURITY.md
+    about: Please report vulnerabilities privately by email rather than opening a public issue.

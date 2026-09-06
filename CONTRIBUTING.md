@@ -148,6 +148,24 @@ Other conventions:
 - **Code style** — tabs (width 4); trailing whitespace trimmed on save (except `.md`);
   leave one final newline. See [AGENTS.md](AGENTS.md).
 
+## Filing issues and opening PRs on GitHub
+
+Public issues live on **GitHub** (`AICrafting/FlightDirector`) — the tracker this repo's
+flight config points at is private, so GitHub is where outside reports land and get triaged.
+Blank issues are disabled; pick one of the forms:
+
+- [`.github/ISSUE_TEMPLATE/bug_report.yml`](.github/ISSUE_TEMPLATE/bug_report.yml) — harness,
+  plugin version, backend, the skill or dispatcher command, expected vs actual, and a
+  **redacted** `.flightdirector/config.json`. Never attach `secrets.json` or a token.
+- [`.github/ISSUE_TEMPLATE/feature_request.yml`](.github/ISSUE_TEMPLATE/feature_request.yml) —
+  the problem first, then the proposed behaviour and what it touches.
+- Security problems go to [SECURITY.md](SECURITY.md) by email, **not** to an issue.
+
+Pull requests are pre-filled from
+[`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md), which mirrors what the
+`promoting-a-branch` skill produces: a summary, a `## Test plans` block (numbered steps ending
+in `Expected:`), the `Ready #N` / `Closes #N` lines, and the signed-commit checklist.
+
 ## Cutting a release
 
 When you bump a plugin's version, three things must move together and its changelog
