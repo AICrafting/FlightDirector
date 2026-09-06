@@ -68,9 +68,13 @@ Enable the pre-push hook once per clone:
 git config core.hooksPath .githooks
 ```
 
-The hook reads the ref list git passes on stdin and skips the checks when the push
-carries no commits (a `git push --delete <branch>`, or nothing to push) — there is
-nothing to lint or signature-check in that case.
+The hook reads the ref list git passes on stdin and verifies signatures on exactly
+the commits each ref will push (`<remote>..<local>`, or everything not yet on the
+remote for a new branch), then runs the remaining checks with the signature pass
+skipped (`RUNCHECKS_SKIP`). A push that carries no commits (a `git push --delete
+<branch>`, or nothing to push) runs nothing at all. `verifyGitLogs.sh` can also be
+run by hand with a count or any `git rev-list` selection, e.g.
+`scripts/checks/verifyGitLogs.sh origin/develop..HEAD`.
 
 CI runs two workflows on push to `develop` and on PRs: **`lint`** (yamllint +
 shellcheck) and **`tests`** (`runTests.sh`).
