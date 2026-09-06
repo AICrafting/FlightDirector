@@ -195,8 +195,8 @@ Write `.flightdirector/config.json` in the `.flightdirector/` folder (created in
 
 ```json
 {
-  "schemaVersion": 1,
-  "harnesses": { "claude": { "reconciledWith": "<installed-version>" } },
+  "schemaVersion": 2,
+  "harnesses": { "claude": { "plugins": { "flight": { "reconciledWith": "<installed-version>" } } } },
   "code": { "backend": "forgejo", "owner": "…", "repo": "…", "api": "https://…/api/v1",
     "stages": [
       { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },

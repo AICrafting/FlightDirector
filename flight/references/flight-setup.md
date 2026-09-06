@@ -31,10 +31,10 @@ Backend, coordinates, and preferences, across two independent axes:
 
 ```jsonc
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "harnesses": {
-    "claude": { "reconciledWith": "0.9.0" },
-    "codex": { "reconciledWith": "0.9.0" }
+    "claude": { "plugins": { "flight": { "reconciledWith": "0.11.0" } } },
+    "codex":  { "plugins": { "flight": { "reconciledWith": "0.11.0" } } }
   },
   "code": {
     "backend": "forgejo", "owner": "acme", "repo": "widget",
@@ -59,11 +59,18 @@ Backend, coordinates, and preferences, across two independent axes:
 }
 ```
 
-- **`schemaVersion`** — version of the committable Flight config schema.
-- **`harnesses.<name>.reconciledWith`** — installed Flight plugin version that last reconciled
-  this config from Claude Code or Codex. Unknown keys are preserved and an older plugin never
-  downgrades a newer stamp. Model discovery is not a migration: missing `model/*` labels are
-  created lazily when work-ledger entries are finalized.
+- **`schemaVersion`** — version of the committable Flight config schema. Schema 2 nested the
+  reconcile stamp under `plugins` (see below); schema 1 configs migrate themselves on the next
+  reconcile, so there is no manual step.
+- **`harnesses.<harness>.plugins.<plugin>.reconciledWith`** — installed version of that Flight
+  Director plugin that last reconciled this config from that harness (`claude` or `codex`). The
+  stamp is scoped per harness **and** per plugin because `.flightdirector/` is shared by the whole
+  family: without the `plugins.<name>` level, two plugins would overwrite one key and each would
+  compare its version against the other's. A schema 1 config's bare
+  `harnesses.<harness>.reconciledWith` is flight's stamp by definition — `flight reconcile` moves
+  it to `plugins.flight.reconciledWith` and drops the old key. Unknown keys are preserved and an
+  older plugin never downgrades a newer stamp *of the same plugin*. Model discovery is not a
+  migration: missing `model/*` labels are created lazily when work-ledger entries are finalized.
 
 - **`api`** — the instance API base (`…/api/v1`), *not* repo-scoped; the dispatcher appends
   `/repos/<owner>/<repo>`.
