@@ -118,13 +118,37 @@ addressed by their per-project `iid`. See the adapter contract's *GitLab backend
 **project** access token from the project's *Settings → Access Tokens*. Sent as the
 `PRIVATE-TOKEN` header.
 
-**Minimum scope:** **`api`**.
+**Minimum scope:** **`api`** (classic personal or project access token).
 
 The adapter creates and merges issues, labels, merge requests, and reads pipelines/job traces —
 all write operations under GitLab's single `api` scope. The read-only `read_api` scope is **not**
 sufficient (it can't create issues or merge MRs), and GitLab has no finer read/write split that
 still covers issues *and* MRs, so `api` is the minimum. A **project** access token with `api`
 confines that scope to the one project.
+
+**Fine-grained personal access token** (gitlab.com's newer per-project tokens have no `api`
+scope; you pick per-resource permissions instead). Grant, for the one project:
+
+| Resource | Permissions | Used by |
+|---|---|---|
+| Project | Read | project lookup, default branch |
+| Work Item | Read, Create, Update | `issues` (issues *and* their comments/notes) |
+| Label | Read, Create, Update | `labels`, `issues set-status` |
+| Merge Request | Read, Create, Update, Merge | `pr` |
+| Pipeline | Read | `ci runs` / `ci watch` |
+| Job | Read | `ci log` (per-job traces) |
+| Markdown Upload | Read, Create | `issues attach` |
+| Repository | Read, Write | branches / files (rig + promotion) |
+
+Not needed: Member, Webhook, Personal Access Token, or any *User* permission — the adapter never
+calls `GET /user`. If GitLab's editor names a permission differently, its 403 body says exactly
+which one is missing (`insufficient_granular_scope … [Work Item: Read]`).
+
+**Token expiry:** every GitLab token has a mandatory expiry date (gitlab.com caps it at 400
+days). A token past its date fails with `401 invalid_token` on *every* call — check the date
+before debugging scopes. **Project access tokens** create a bot user that must actually hold a
+role on the project; a bot with no membership reports `access_level: null` and gets
+`404 Project Not Found` for its own project regardless of scopes.
 
 ---
 

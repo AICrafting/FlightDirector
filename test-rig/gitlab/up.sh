@@ -39,11 +39,11 @@ ENC="$(printf '%s' "$PROJECT" | jq -sRr @uri)"
 PROJECT_API="$API/projects/$ENC"
 H=(-H "PRIVATE-TOKEN: $TOKEN")
 
-say "Verifying token…"
-curl -fsS "${H[@]}" "$API/user" >/dev/null || die "token rejected by GET /user"
-say "Verifying project access ($PROJECT)…"
+# Verify token + project access in one call. (Deliberately not GET /user: a fine-grained
+# personal access token scoped to the project can't answer it, and the adapter never needs it.)
+say "Verifying token + project access ($PROJECT)…"
 DEFAULT_BRANCH="$(curl -fsS "${H[@]}" "$PROJECT_API" | jq -r '.default_branch // "main"')" \
-  || die "cannot access project $PROJECT (check token scope/path)"
+  || die "cannot access project $PROJECT (token rejected, or wrong scope/permissions/path)"
 
 # Seed status labels (idempotent). name|color(#hex)|description
 say "Ensuring seed labels…"

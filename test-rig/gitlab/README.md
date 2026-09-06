@@ -2,7 +2,8 @@
 
 Exercises the GitLab adapter against a **real** project (`cerebralgardens/lightspeed-test`).
 **Dev tooling — not part of the plugin.** Requires `curl` + `jq` and a personal/project access
-token (scope: **api**).
+token (scope: **api**), or a fine-grained personal access token with the per-resource permissions
+listed under *GitLab* in [`flight/references/backends.md`](../../flight/references/backends.md).
 
 ```bash
 # put creds in test-rig/gitlab/.env (gitignored):
