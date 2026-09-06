@@ -54,7 +54,9 @@ Backend, coordinates, and preferences, across two independent axes:
       "deferred":    "status/deferred"
     },
     "model": { "opus": "model/opus", "sonnet": "model/sonnet",
-               "haiku": "model/haiku", "fable": "model/fable" }
+               "haiku": "model/haiku", "fable": "model/fable",
+               "sol": "model/sol", "terra": "model/terra",
+               "luna": "model/luna", "astra": "model/astra" }
   }
 }
 ```

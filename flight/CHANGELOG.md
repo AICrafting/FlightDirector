@@ -15,6 +15,13 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
+- **Model provenance labels are now derived deterministically by the dispatcher** (#85).
+  `flight labels model-family --id <id>` recognizes GPT/Claude codenames and vendor prefixes,
+  while `labels ensure --model <id>` creates the standard `model/<family>` label metadata.
+  Common OpenAI families (Sol, Terra, Luna, Astra) are seeded during setup, finishing skills call
+  the helper instead of interpreting model ids in prose, and `labels edit` provides an
+  association-preserving rename path on Forgejo, GitHub, and GitLab (Jira labels remain free text).
+
 - **The docs no longer frame flight as a tool for a self-hosted Forgejo instance** (#99). The
   User Guide, both READMEs, and the config reference now lead with the backend contract —
   Forgejo/Gitea, GitHub, and GitLab at full parity, Jira for the issues axis — with per-backend

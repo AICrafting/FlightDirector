@@ -114,10 +114,13 @@ For each issue `#N` with slug `<slug>`:
    ```bash
    {dispatcher} issues set-status --number <N> --status to-test
    # Write your finishing record (work summary + model/token note; see working-an-issue
-   # for the format), ensure the normalized model-family label exists, then post it:
-   {dispatcher} labels ensure --name model/<primary> --color "#d97757" \
-     --description "Issue was worked on using <Primary>"
-   {dispatcher} issues label-add --number <N> --label model/<primary>
+   # for the format). The dispatcher owns stable-family derivation; tool/service ids
+   # return non-zero and are skipped:
+   PRIMARY_MODEL=<model-id-from-ledger>
+   if FAMILY="$({dispatcher} labels model-family --id "$PRIMARY_MODEL")"; then
+     {dispatcher} labels ensure --model "$PRIMARY_MODEL"
+     {dispatcher} issues label-add --number <N> --label "model/$FAMILY"
+   fi
    {dispatcher} issues comment --number <N> --body-file "{scratch}/done-<N>.md"
    SHA=$(git -C "$WT" rev-parse --short HEAD)
    echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=complete commit=$SHA" >> {log_path}

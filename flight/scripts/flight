@@ -28,6 +28,61 @@ esac
 
 command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
 
+model_family() {
+	model_id="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+	[ -n "$model_id" ] || die "labels model-family: --id must not be empty"
+
+	# Providers may qualify an otherwise standard model id with a slash or
+	# dotted routing prefix. Strip that transport detail before classifying.
+	model_id="${model_id##*/}"
+	case "$model_id" in
+		*.claude-*) model_id="claude-${model_id##*.claude-}" ;;
+		*.gpt-*) model_id="gpt-${model_id##*.gpt-}" ;;
+	esac
+
+	case "$model_id" in
+		codex-auto-review|*-auto-review)
+			die "model id '$1' is a tool or service, not a worked-by model; skipping label"
+			;;
+	esac
+
+	if printf '%s' "$model_id" | grep -Eq '^gpt-[0-9]+([.][0-9]+)*-[[:alnum:]]+$'; then
+		printf '%s\n' "${model_id##*-}"
+		return
+	fi
+	if printf '%s' "$model_id" | grep -Eq '^gpt-[0-9]+([.][0-9]+)*$'; then
+		printf '%s\n' "$model_id"
+		return
+	fi
+	if printf '%s' "$model_id" | grep -Eq '^claude-[[:alnum:]]+-[0-9]+([.-][0-9]+)*$'; then
+		model_id="${model_id#claude-}"
+		printf '%s\n' "${model_id%%-*}"
+		return
+	fi
+
+	family="$(printf '%s' "$model_id" | tr -cs '[:alnum:]' '-' | sed 's/^-//; s/-$//')"
+	[ -n "$family" ] || die "model id '$1' has no usable family"
+	echo "flight: warning — unrecognised model id '$1'; using family '$family'" >&2
+	printf '%s\n' "$family"
+}
+
+# Model-family derivation is dispatcher-owned and intentionally needs no repo
+# configuration or backend access.
+if [ "$group" = "labels" ] && [ "$verb" = "model-family" ]; then
+	[ "${1:-}" = "--id" ] && [ $# -eq 2 ] || die "usage: flight labels model-family --id <model-id>"
+	model_family "$2"
+	exit 0
+fi
+
+# Sugar for the standard provenance label. Adapters continue to receive only
+# the backend-neutral `ensure --name/--color/--description` contract.
+if [ "$group" = "labels" ] && [ "$verb" = "ensure" ] && [ "${1:-}" = "--model" ]; then
+	[ $# -eq 2 ] || die "usage: flight labels ensure --model <model-id>"
+	family="$(model_family "$2")"
+	display="$(printf '%s' "$family" | awk '{ print toupper(substr($0, 1, 1)) substr($0, 2) }')"
+	set -- --name "model/$family" --color "#d97757" --description "Issue was worked on using $display"
+fi
+
 # Resolve the MAIN repo root — parent of the common git dir — so this works the
 # same from the main checkout and from a linked worktree (whose gitignored
 # .flightdirector/secrets.json does not exist locally). Falls back to cwd outside a repo.

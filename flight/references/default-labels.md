@@ -40,9 +40,9 @@ Conventions (decided for this plugin):
 
 One colour for the whole group — Claude's coral, `#d97757`.
 
-Harnesses normalize a model identifier to a stable family (`gpt-5.6-sol` → `sol`,
-`claude-opus-4.7` → `opus`) and run `labels ensure` before attaching it. Unknown families use a
-lowercase, hyphenated form of the reported identifier rather than being guessed or dropped.
+The dispatcher normalizes a model identifier to a stable family (`gpt-5.6-sol` → `sol`,
+`claude-opus-4.7` → `opus`) through `labels model-family` / `labels ensure --model`. Unknown
+families use a lowercase, hyphenated form of the reported identifier with a warning.
 
 | Label | Color | Description | Treat as already-present if the repo has… |
 |---|---|---|---|
@@ -50,6 +50,10 @@ lowercase, hyphenated form of the reported identifier rather than being guessed 
 | `model/sonnet` | `#d97757` | Issue was worked on using Sonnet | `sonnet` |
 | `model/haiku` | `#d97757` | Issue was worked on using Haiku | `haiku` |
 | `model/fable` | `#d97757` | Issue was worked on using Fable | `fable` |
+| `model/sol` | `#d97757` | Issue was worked on using Sol | `sol` |
+| `model/terra` | `#d97757` | Issue was worked on using Terra | `terra` |
+| `model/luna` | `#d97757` | Issue was worked on using Luna | `luna` |
+| `model/astra` | `#d97757` | Issue was worked on using Astra | `astra` |
 
 ## Area labels (project-dependent — confirm before creating)
 
