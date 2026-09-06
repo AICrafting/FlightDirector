@@ -39,7 +39,18 @@ _api() {
 # Labels are fetched once and cached for the life of the process.
 _LABELS_CACHE=""
 _all_labels() {
-  [ -n "$_LABELS_CACHE" ] || _LABELS_CACHE="$(_api GET "/labels?limit=100")"
+  local page batch count
+  if [ -z "$_LABELS_CACHE" ]; then
+    _LABELS_CACHE='[]'
+    page=1
+    while :; do
+      batch="$(_api GET "/labels?limit=100&page=$page")"
+      _LABELS_CACHE="$(jq -cn --argjson accumulated "$_LABELS_CACHE" --argjson batch "$batch" '$accumulated + $batch')"
+      count="$(printf '%s' "$batch" | jq 'length')"
+      [ "$count" -eq 100 ] || break
+      page=$((page + 1))
+    done
+  fi
   printf '%s' "$_LABELS_CACHE"
 }
 

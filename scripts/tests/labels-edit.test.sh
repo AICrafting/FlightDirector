@@ -23,7 +23,15 @@ while [ $# -gt 0 ]; do
 	esac
 done
 if [ "$method" = GET ]; then
-	printf '%s' '[{"id":7,"name":"model/gpt-5","color":"d97757","description":"old"}]' >"$out"
+	if [ "${FORGEJO_PAGE_TWO:-0}" = 1 ]; then
+		case "$url" in
+			*page=1) jq -n '[range(100) | {id: ., name: ("filler-" + tostring)}]' >"$out" ;;
+			*page=2) printf '%s' '[{"id":7,"name":"model/gpt-5","color":"d97757","description":"old"}]' >"$out" ;;
+			*) printf '%s' '[]' >"$out" ;;
+		esac
+	else
+		printf '%s' '[{"id":7,"name":"model/gpt-5","color":"d97757","description":"old"}]' >"$out"
+	fi
 else
 	printf '%s' '{"id":7}' >"$out"
 	printf '%s\t%s\t%s\n' "$method" "$url" "$payload" >>"${CURL_LOG:?}"
@@ -46,6 +54,10 @@ run_edit() {
 run_edit forgejo
 [ "$(cat "$SANDBOX/forgejo.out")" = 7 ]
 grep -Eq $'^PATCH\thttps://example.invalid/api/repos/acme/widget/labels/7\t' "$CURL_LOG"
+[ "$(cut -f3 "$CURL_LOG" | jq -r .name)" = model/sol ]
+
+FORGEJO_PAGE_TWO=1 run_edit forgejo
+[ "$(cat "$SANDBOX/forgejo.out")" = 7 ]
 [ "$(cut -f3 "$CURL_LOG" | jq -r .name)" = model/sol ]
 
 run_edit github
