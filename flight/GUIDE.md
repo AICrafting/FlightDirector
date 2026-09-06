@@ -243,8 +243,8 @@ batch-promote differs by first-hop strategy — see
 ## Tips
 
 - **Issues elsewhere than code?** `.flightdirector/config.json` has two axes — `code` and `issues` — so you
-  can point issues at a different repo (or, in future, a different backend) while code stays put.
-  By default `issues` inherits `code`.
+  can point issues at a different repo, or a different backend such as Jira, while code stays
+  put. By default `issues` inherits `code`. See [backends.md](references/backends.md).
 - **The merge gate is real.** If you want something merged, say so explicitly — "merge #N" /
   "promote …". Claude will leave work at *ready-to-test* and stop otherwise.
 - **Re-running setup is safe.** `setting-up-a-repo` is idempotent — it only adds what's
