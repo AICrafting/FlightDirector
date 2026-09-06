@@ -15,6 +15,14 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
+- **The reconcile stamp is now scoped per plugin, not just per harness** (#88): schema version 2
+  records `harnesses.<harness>.plugins.<plugin>.reconciledWith` instead of a bare
+  `harnesses.<harness>.reconciledWith`. `.flightdirector/` is shared by every Flight Director
+  plugin, so the old single key would have had future plugins overwriting each other's stamp and
+  comparing their version against another plugin's in the downgrade guard. Existing configs
+  migrate themselves on the next `flight reconcile` (the old key moves to `plugins.flight` and is
+  removed) — no manual step.
+
 - **Reading an issue's comments on pickup is now an explicit requirement** (#82): a red flag in
   `working-an-issue` ("the later comment wins"), a required first step in the `queue-batches`
   worker prompt (workers previously never fetched comments), and `promoting-a-branch` /

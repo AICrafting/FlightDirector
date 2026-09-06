@@ -56,6 +56,13 @@ sec_rel="${sec#"$repo_root"/}"
 # `flight reconcile --harness claude|codex` — cheap, idempotent compatibility
 # preflight. It mutates only metadata, preserves unknown keys, and refuses to
 # stamp an older installed plugin over a newer recorded version.
+#
+# The stamp is scoped per harness AND per plugin — `.flightdirector/` is the
+# family-level folder shared by every Flight Director plugin, so a bare
+# `harnesses.<h>.reconciledWith` would have every plugin stomping on one key and
+# comparing its version against another plugin's. Schema 2 nests it as
+# `harnesses.<h>.plugins.<name>.reconciledWith`; a legacy bare key is flight's by
+# definition and is migrated into `plugins.flight` on the first run.
 if [ "$group" = "reconcile" ]; then
   [ "$verb" = "--harness" ] || die "usage: flight reconcile --harness <claude|codex>"
   harness="${1:-}"
@@ -65,21 +72,34 @@ if [ "$group" = "reconcile" ]; then
   [ -f "$manifest" ] || manifest="$SELF_DIR/../.claude-plugin/plugin.json"
   version="$(jq -r '.version // empty' "$manifest")"
   [ -n "$version" ] || die "cannot determine installed Flight version"
-  recorded="$(jq -r --arg h "$harness" '.harnesses[$h].reconciledWith // empty' "$cfg")"
-  [ "$recorded" = "$version" ] && exit 0
-  if [ -n "$recorded" ] && [ "$(printf '%s\n%s\n' "$version" "$recorded" | sort -V | tail -n1)" = "$recorded" ]; then
-    die "config was reconciled by newer Flight $recorded; refusing downgrade to $version"
+  plugin="$(jq -r '.name // empty' "$manifest")"
+  [ -n "$plugin" ] || plugin="flight"
+  # Legacy (schema 1) bare stamp — always flight's, whatever plugin is running.
+  legacy="$(jq -r --arg h "$harness" '.harnesses[$h].reconciledWith // empty' "$cfg")"
+  recorded="$(jq -r --arg h "$harness" --arg p "$plugin" '.harnesses[$h].plugins[$p].reconciledWith // empty' "$cfg")"
+  if [ -z "$recorded" ] && [ "$plugin" = "flight" ]; then recorded="$legacy"; fi
+  [ "$recorded" = "$version" ] && [ -z "$legacy" ] && exit 0
+  if [ -n "$recorded" ] && [ "$(printf '%s\n%s\n' "$version" "$recorded" | sort -V | tail -n1)" = "$recorded" ] && [ "$recorded" != "$version" ]; then
+    die "config was reconciled by newer $plugin $recorded; refusing downgrade to $version"
   fi
   tmp="$(mktemp "$cfg.tmp.XXXXXX")"
   trap 'rm -f "$tmp"' EXIT
-  jq --arg h "$harness" --arg v "$version" \
-    '.schemaVersion = (.schemaVersion // 1) | .harnesses = (.harnesses // {}) | .harnesses[$h].reconciledWith = $v' \
+  jq --arg h "$harness" --arg p "$plugin" --arg v "$version" '
+      .schemaVersion = ([(.schemaVersion // 0), 2] | max)
+    | .harnesses = (.harnesses // {})
+    | .harnesses[$h] = (.harnesses[$h] // {})
+    | .harnesses[$h] |= (
+          (if has("reconciledWith")
+           then (.plugins.flight.reconciledWith = .reconciledWith) | del(.reconciledWith)
+           else . end)
+        | .plugins[$p].reconciledWith = $v
+      )' \
     "$cfg" >"$tmp"
   jq -e . "$tmp" >/dev/null
   chmod --reference="$cfg" "$tmp" 2>/dev/null || true
   mv "$tmp" "$cfg"
   trap - EXIT
-  printf 'flight: reconciled %s config with plugin %s\n' "$harness" "$version" >&2
+  printf 'flight: reconciled %s config with plugin %s %s\n' "$harness" "$plugin" "$version" >&2
   exit 0
 fi
 
