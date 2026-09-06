@@ -9,16 +9,26 @@
 set -euo pipefail
 
 RIG_DIR="$(cd "$(dirname "$0")" && pwd)"
-# Optional overrides (see .env.example); docker compose reads the same file itself.
-# shellcheck disable=SC1091
-[ -f "$RIG_DIR/.env" ] && . "$RIG_DIR/.env"
-PORT="${RIG_PORT:-3000}"
-API="http://localhost:${PORT}/api/v1"
-USER="rig"
-PASS="rigpass123"
-EMAIL="rig@example.com"
-REPO="widget"
 WORK="$RIG_DIR/.work"
+
+# Optional overrides (see .env.example), resolved from the MAIN repo root (worktree-safe)
+# then the rig dir. Every value has a default because this rig is a disposable local
+# container — nothing here is a real credential or a real repo.
+# Values already exported in the shell (e.g. `RIG_PORT=3100 ./up.sh`) win over the file.
+MAIN="$(cd "$(git -C "$RIG_DIR" rev-parse --git-common-dir)/.." && pwd)"
+_env_port="${RIG_PORT:-}"; _env_image="${FORGEJO_IMAGE:-}"; _env_user="${FLIGHT_FORGEJO_USER:-}"
+_env_pass="${FLIGHT_FORGEJO_PASS:-}"; _env_email="${FLIGHT_FORGEJO_EMAIL:-}"; _env_repo="${FLIGHT_FORGEJO_REPO:-}"
+# shellcheck disable=SC1091  # .env is gitignored; shellcheck can't follow it
+if [ -f "$MAIN/test-rig/forgejo/.env" ]; then . "$MAIN/test-rig/forgejo/.env"
+elif [ -f "$RIG_DIR/.env" ]; then . "$RIG_DIR/.env"; fi
+
+PORT="${_env_port:-${RIG_PORT:-3000}}"
+IMAGE="${_env_image:-${FORGEJO_IMAGE:-code.forgejo.org/forgejo/forgejo:15}}"
+API="http://localhost:${PORT}/api/v1"
+USER="${_env_user:-${FLIGHT_FORGEJO_USER:-rig}}"
+PASS="${_env_pass:-${FLIGHT_FORGEJO_PASS:-rigpass123}}"
+EMAIL="${_env_email:-${FLIGHT_FORGEJO_EMAIL:-rig@example.com}}"
+REPO="${_env_repo:-${FLIGHT_FORGEJO_REPO:-widget}}"
 
 say() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
 die() { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
@@ -27,7 +37,9 @@ command -v docker >/dev/null || die "docker not found"
 command -v jq >/dev/null || die "jq not found"
 
 say "Starting Forgejo (port $PORT)…"
-( cd "$RIG_DIR" && RIG_PORT="$PORT" docker compose up -d )
+# Pass the resolved values explicitly so compose sees the same ones even when the .env
+# lives at the main repo root rather than next to compose.yaml.
+( cd "$RIG_DIR" && RIG_PORT="$PORT" FORGEJO_IMAGE="$IMAGE" docker compose up -d )
 
 say "Waiting for the API to come up…"
 for i in $(seq 1 60); do
