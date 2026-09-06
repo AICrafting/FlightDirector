@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Claude Tools, skills and plugins
+Flight Director — AI Crafting's Claude Code + Codex plugins (marketplace `flightdirector`; `flight` is the first plugin).
 
 ## Code Style
 

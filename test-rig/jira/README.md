@@ -1,4 +1,4 @@
-# flight Jira test rig
+# Flight Jira test rig
 
 Exercises the **Jira** adapter (an **issues-axis-only** backend) against a **real** Jira Cloud
 site. **Dev tooling — not part of the plugin.** Requires `curl` + `jq` and Atlassian
@@ -6,11 +6,7 @@ credentials. A live Jira Cloud site can't be containerized like Forgejo, so — 
 rig — this verifies against the live site.
 
 ```bash
-# put credentials in test-rig/jira/.env (gitignored):
-#   FLIGHT_JIRA_EMAIL=you@example.com
-#   FLIGHT_JIRA_TOKEN=ATATT…            # https://id.atlassian.com/manage-profile/security/api-tokens
-#   FLIGHT_JIRA_SITE=https://you.atlassian.net
-#   FLIGHT_JIRA_PROJECT=KAN             # project key
+cp .env.example .env   # gitignored; fill in FLIGHT_JIRA_SITE / _EMAIL / _TOKEN / _PROJECT
 ./up.sh        # verify Basic auth + project access, write .work/ config
 ./smoke.sh     # exercise issues + labels verbs against the live project (marker-tagged), with assertions
 ./down.sh      # delete only rig-tagged issues; remove .work/

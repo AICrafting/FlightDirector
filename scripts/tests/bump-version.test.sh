@@ -58,7 +58,7 @@ JSON
 
 	cat >"$root/.claude-plugin/marketplace.json" <<'JSON'
 {
-  "name": "cerebralgardens",
+  "name": "flightdirector",
   "plugins": [
     {
       "name": "flight",

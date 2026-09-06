@@ -1,14 +1,12 @@
-# flight GitLab test rig
+# Flight GitLab test rig
 
-Exercises the GitLab adapter against a **real** project (`cerebralgardens/lightspeed-test`).
+Exercises the GitLab adapter against a **real** project — the one named by `FLIGHT_GITLAB_PROJECT` in `.env`.
 **Dev tooling — not part of the plugin.** Requires `curl` + `jq` and a personal/project access
-token (scope: **api**).
+token (scope: **api**), or a fine-grained personal access token with the per-resource permissions
+listed under *GitLab* in [`flight/references/backends.md`](../../flight/references/backends.md).
 
 ```bash
-# put creds in test-rig/gitlab/.env (gitignored):
-#   FLIGHT_GITLAB_TOKEN=glpat-…
-#   FLIGHT_GITLAB_API=https://gitlab.com/api/v4
-#   FLIGHT_GITLAB_PROJECT=group/project
+cp .env.example .env   # gitignored; fill in FLIGHT_GITLAB_TOKEN / _API / _PROJECT
 ./up.sh        # verify token, seed labels + .gitlab-ci.yml, write .work/ config
 ./smoke.sh     # exercise every verb against the live project (marker-tagged), with assertions
 ./down.sh      # close/delete only rig-tagged artifacts; remove .work/

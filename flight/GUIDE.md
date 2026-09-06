@@ -1,4 +1,4 @@
-# flight — User Guide
+# Flight — User Guide
 
 Run your whole issue-and-code workflow — file, triage, work, promote — from inside Claude Code
 or Codex, without tabbing over to your forge's web UI. This guide covers **why** you'd want
@@ -56,7 +56,7 @@ into the session:
 
    ```
    /plugin marketplace add <this-repo> (eg: https://hostname/owner/repo.git [.git is required]) 
-   /plugin install flight@cerebralgardens
+   /plugin install flight@flightdirector
    ```
 
 2. That's it — no server to run. The skills activate automatically when you say things that match

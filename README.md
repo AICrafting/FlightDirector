@@ -1,18 +1,18 @@
-# Cerebral Gardens — Claude Code plugins
+# Flight Director — Claude Code + Codex plugins
 
-A [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins).
-Add it once, then install any plugin below.
+**AI Crafting**'s [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins)
+(marketplace name `flightdirector`). Add it once, then install any plugin below.
 
 ```
 /plugin marketplace add <this-repo> (eg: https://hostname/owner/repo.git [.git is required]) 
-/plugin install flight@cerebralgardens
+/plugin install flight@flightdirector
 ```
 
 ## Plugins
 
 These are the **Flight Director** family of plugins (`flight` is the first; `launchpad`,
 `preflight`, `mission-control`, `telemetry` and friends will follow). `flight` was previously
-published as `lightspeed`.
+called `lightspeed` during initial development/testing.
 
 | Plugin | What it does |
 |---|---|
