@@ -192,17 +192,18 @@ Only after explicit approval:
    ```
    flight issues comment --number N --body-file "$SCRATCH/done.md"
    ```
-2. **Ensure and add the `model/<primary>` label** for the main model used — the one with the most
-   tokens/cost in the log when available, else the model you ran. Normalize to the stable model
-   family (`gpt-5.6-sol` → `sol`, `claude-opus-4.7` → `opus`). For an unknown family, lowercase
-   and replace non-alphanumeric runs with hyphens rather than guessing. Create the label lazily;
-   `labels ensure` preserves an existing label and safely handles parallel creators. Later
-   episodes may add another `model/*`. See `model/*` in
-   [default-labels.md](../../references/default-labels.md):
+2. **Ensure and add the `model/<primary>` label** for the worked-by model with the most
+   tokens/cost in the log when available, else the model you ran. The dispatcher owns the stable
+   family convention (`gpt-5.6-sol` → `sol`, `claude-opus-4.7` → `opus`); do not derive it in
+   prose. A tool/service id exits non-zero so it can be skipped. `labels ensure --model` preserves
+   existing metadata and safely handles parallel creators. Later episodes may add another
+   `model/*`. See `model/*` in [default-labels.md](../../references/default-labels.md):
    ```
-   flight labels ensure --name model/sol --color "#d97757" \
-     --description "Issue was worked on using Sol"
-   flight issues label-add --number N --label model/sol
+   PRIMARY_MODEL=gpt-5.6-sol
+   if FAMILY="$(flight labels model-family --id "$PRIMARY_MODEL")"; then
+     flight labels ensure --model "$PRIMARY_MODEL"
+     flight issues label-add --number N --label "model/$FAMILY"
+   fi
    ```
 3. **Promote the branch** `feature/<N>-<slug>` → `stages[0]` using `promoting-a-branch` (invoke
    the skill in this session). It applies the hop's merge strategy/gate **and** drives the

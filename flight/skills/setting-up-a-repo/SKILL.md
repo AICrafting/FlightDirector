@@ -209,7 +209,9 @@ Write `.flightdirector/config.json` in the `.flightdirector/` folder (created in
                 "blocked": "status/blocked", "deferred": "status/deferred",
                 "review": "status/review", "qa": "status/qa", "done": "status/done" },
     "model": { "opus": "model/opus", "sonnet": "model/sonnet",
-               "haiku": "model/haiku", "fable": "model/fable" }
+               "haiku": "model/haiku", "fable": "model/fable",
+               "sol": "model/sol", "terra": "model/terra",
+               "luna": "model/luna", "astra": "model/astra" }
   }
 }
 ```
@@ -271,7 +273,8 @@ Show one grouped plan and ask once:
 ```
 Label plan for <owner>/<repo>:
 
-  CREATE  model/opus, model/sonnet, feature, tech-debt, security, ux, bug
+  CREATE  model/opus, model/sonnet, model/sol, model/terra, model/luna, model/astra,
+          feature, tech-debt, security, ux, bug
   ADOPT   awaiting-test ← 'status/testing'   (repo already has it; using yours)
   EXISTS  status/blocked
   AREAS   area/app, area/server, area/db   (proposed from repo layout — confirm)
