@@ -138,7 +138,9 @@ LS_LABELS_JSON="$(jq -c '.labels // {}' "$cfg")"
 LS_CI_WATCH_TIMEOUT="${LS_CI_WATCH_TIMEOUT:-$(jq -r '.code.ciWatchTimeout // empty' "$cfg")}"
 
 # Token: env override first, then secrets file (axis, inheriting code → issues).
-LS_TOKEN="${LS_TOKEN:-${FORGEJO_TOKEN:-}}"
+# Env override, backend-neutral: LS_TOKEN (adapter contract) or FLIGHT_TOKEN; FORGEJO_TOKEN is
+# the legacy name from when Forgejo was the only backend and stays honoured.
+LS_TOKEN="${LS_TOKEN:-${FLIGHT_TOKEN:-${FORGEJO_TOKEN:-}}}"
 if [ -z "$LS_TOKEN" ] && [ -f "$sec" ]; then
   LS_TOKEN="$(jq -r --arg a "$axis" '(.[$a].token) // (.code.token) // empty' "$sec")"
 fi
