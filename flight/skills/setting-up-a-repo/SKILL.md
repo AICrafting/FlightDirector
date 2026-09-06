@@ -1,6 +1,6 @@
 ---
 name: setting-up-a-repo
-description: Use when setting up a repo for flight for the first time — "set up this repo", "set up flight", "configure flight", "set up labels", "bootstrap labels", "add the default labels" — when filing/triage reveals the repo has no flight config or few labels, or when retrofitting the CLAUDE.md backend breadcrumb onto an already-configured repo ("add the flight note/breadcrumb"). Writes the flight config + secrets (backend coordinates, stage pipeline, worker model), reconciles a default label taxonomy against existing labels (creating only what's missing, after a preview), and leaves a backend breadcrumb in CLAUDE.md.
+description: Use when setting up a repo for flight for the first time — "set up this repo", "set up flight", "configure flight", "set up labels", "bootstrap labels", "add the default labels" — when filing/triage reveals the repo has no flight config or few labels, or when retrofitting the backend breadcrumb onto an already-configured repo ("add the flight note/breadcrumb", "add it to AGENTS.md"). Writes the flight config + secrets (backend coordinates, stage pipeline, worker model), reconciles a default label taxonomy against existing labels (creating only what's missing, after a preview), and leaves a backend breadcrumb in the repo's agent instructions (AGENTS.md, imported by CLAUDE.md).
 ---
 
 # Setting Up a Repo
@@ -49,8 +49,9 @@ never guess a backend into the config.
 **First, reuse an existing flight config.** If `.flightdirector/config.json` already exists, read
 it and treat it as the source of truth: show its coordinates + stage pipeline back to the user and
 ask whether to reuse it as-is (skip to the label reconcile, Step 5) or revise it. Don't re-ask for
-values it already has. Either way, check `CLAUDE.md` for the backend breadcrumb (Step 9) — repos
-set up before that step existed won't have one, and a re-run is how they retrofit it.
+values it already has. Either way, check the agent instructions (`AGENTS.md` / `CLAUDE.md`) for the backend
+breadcrumb (Step 9) — repos set up before that step existed won't have one, and a re-run is how
+they retrofit it.
 
 **Migrate a legacy `.lightspeed/` folder.** If `.lightspeed/config.json` exists but
 `.flightdirector/config.json` does not, the repo was configured before the plugin was renamed. Offer
@@ -68,7 +69,7 @@ existing config. Until the move happens the dispatcher keeps working off the leg
 one-line notice on stderr — so never block a user on the migration.
 
 **Retrofit-only shortcut:** when the user just wants the breadcrumb added to an
-already-configured repo ("add the flight note/breadcrumb to CLAUDE.md"), read the backend +
+already-configured repo ("add the flight note/breadcrumb", "put it in AGENTS.md"), read the backend +
 host from the existing config and jump straight to Step 9 — no label reconcile needed.
 
 **Detect the CODE backend from the git remote host.** Read the remote URL —
@@ -295,16 +296,30 @@ safe — everything now present becomes EXISTS/ADOPT.
 > label settings, per your preference. Not applicable to GitHub (no such feature); GitLab expresses
 > exclusivity differently (via `scope::value` naming, tier-gated).
 
-## Step 9: Leave a backend breadcrumb in CLAUDE.md
+## Step 9: Leave a backend breadcrumb in the agent instructions (AGENTS.md)
 
 Agents reflexively assume GitHub — "issue #21" pattern-matches to `gh` — and a `.flightdirector/`
 directory alone hasn't proven loud enough to stop that. So finish setup by writing the backend
-into the repo's `CLAUDE.md` (project instructions load every session; a memory directory is
-per-user and doesn't travel with the repo).
+into the repo's agent instructions (they load every session; a memory directory is per-user and
+doesn't travel with the repo).
 
-Append this block — with the *actual* backend, host, and stage names from the config —
-creating `CLAUDE.md` if the repo has none. Show it to the user before writing (it's their
-instructions file):
+**Which file.** flight runs under Claude Code *and* Codex, and they read different files: Codex
+auto-discovers `AGENTS.md` (and never reads `CLAUDE.md` unless a user configures it as a
+fallback); Claude Code reads `CLAUDE.md`, which can import `AGENTS.md` with a bare `@AGENTS.md`
+line. So the block belongs in **`AGENTS.md`**, with `CLAUDE.md` importing it — one source, both
+harnesses. Resolve the target like this, and tell the user which case applied:
+
+| Repo has | Do |
+|---|---|
+| `AGENTS.md` (with or without `CLAUDE.md`) | Put the block in `AGENTS.md`. If `CLAUDE.md` exists and has no `@AGENTS.md` import, offer to add one at its top; if there is no `CLAUDE.md`, offer to create one containing just `@AGENTS.md`. |
+| only `CLAUDE.md` | Recommend the split: create `AGENTS.md` with the block, add `@AGENTS.md` at the top of `CLAUDE.md`. If the user says they don't use Codex and would rather keep a single file, put the block in `CLAUDE.md` instead — their call. |
+| neither | Create `AGENTS.md` with the block and a `CLAUDE.md` containing `@AGENTS.md`. |
+
+Don't suggest a symlink (`CLAUDE.md -> AGENTS.md`): it breaks on Windows without Developer
+Mode and leaves no room for Claude-only notes. The import is the documented pattern.
+
+Append this block — with the *actual* backend, host, and stage names from the config — to the
+resolved file. Show it to the user before writing (it's their instructions file):
 
 ```markdown
 ## Issue tracking — flight
@@ -333,10 +348,11 @@ For a GitHub-backend repo, keep the block but drop the "NOT GitHub" clause and s
 issue actions still go through the dispatcher/skills, not raw `gh`. For a split setup, name both
 axes (e.g. "code on Forgejo at …, issues in Jira project ABC").
 
-**Idempotent:** if `CLAUDE.md` already has an "Issue tracking — flight" section — or the
+**Idempotent:** if either file already has an "Issue tracking — flight" section — or the
 pre-rename "Issue tracking — lightspeed" one — update it in place (the backend may have changed,
-and the old block names the `lightspeed` dispatcher) rather than appending a duplicate. If the project uses
-`AGENTS.md` instead of `CLAUDE.md`, put the block there.
+and the old block names the `lightspeed` dispatcher) rather than appending a duplicate. If the
+existing block lives in `CLAUDE.md` and the repo also has (or is getting) an `AGENTS.md`, offer
+to move it there so there is one copy, not two that drift.
 
 ## Common mistakes
 

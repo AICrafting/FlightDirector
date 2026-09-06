@@ -30,6 +30,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - `setting-up-a-repo` writes the `.flightdirector/` layout, offers to migrate a legacy
   `.lightspeed/` folder, and writes an "Issue tracking — flight" breadcrumb (replacing an older
   "— lightspeed" one in place).
+- **The breadcrumb now targets `AGENTS.md`** (#70): `setting-up-a-repo` Step 9 puts the block in
+  `AGENTS.md` — which Codex discovers natively — and has `CLAUDE.md` import it with `@AGENTS.md`,
+  so both harnesses read one source. Repos with only a `CLAUDE.md` are offered the split (or can
+  keep a single file). Symlinking `CLAUDE.md` to `AGENTS.md` is deliberately not suggested.
 - `references/lightspeed-setup.md` is now `references/flight-setup.md`.
 - Test-rig environment variables are `FLIGHT_*` (the `LIGHTSPEED_*` names still work).
 
