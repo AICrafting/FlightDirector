@@ -24,11 +24,23 @@ reinvent. Manifest state is managed by the `batch-manifest` command.
   is the go-ahead for the whole selection; a `pr` hop still waits for CI before merging each PR.
 - **Continue, don't abort.** A conflicting branch/group is skipped and reported — it must not block
   the clean ones.
+- **Every git command is `git -C "$MAIN" …` (or `-C` the integration/feature worktree). A bare
+  `git` command is a bug, even if you think you're in the right directory.** A batch promote
+  walks through M feature worktrees plus the checkout holding `BASE`, and the shell's working
+  directory persists across tool calls — a bare `git merge` or `git worktree remove` mid-loop
+  acts on whichever directory you last landed in. Bind `$MAIN` once in Step 1 and anchor
+  everything after it; paths passed to an anchored command resolve relative to that `-C`
+  directory, not to your current one.
 
 ## Step 1: Resolve the hop
 
 ```bash
 DISP=flight
+# $MAIN — the main checkout (root of the shared git object store); it usually holds BASE.
+# This `git rev-parse` is the single permitted bare git: it bootstraps the path that every
+# later command anchors to with -C.
+MAIN="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
+
 BASE="$("$DISP" config '.code.stages[0].name')"
 MERGE="$("$DISP" config '.code.stages[0].merge // "direct"')"   # direct | pr
 ```
@@ -45,7 +57,7 @@ Candidates are local `feature/*` branches whose linked issue is at `to-test`:
 TT="$("$DISP" config '.labels.status["to-test"] // "to-test"')"
 "$DISP" issues list --state open --limit 100   # keep rows whose labels column contains "$TT"
 # local feature branches:
-git for-each-ref --format='%(refname:short)' refs/heads/feature
+git -C "$MAIN" for-each-ref --format='%(refname:short)' refs/heads/feature
 ```
 
 Match each `feature/<N>-<slug>` to its issue `<N>`; keep those at `to-test` and whose worktree exists
@@ -75,7 +87,7 @@ Reuse `promoting-a-branch` mechanics per branch/PR. For each group:
 checkout that holds `BASE` (usually the main repo root `MAIN`):
 
 ```bash
-MAIN="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+# $MAIN was bound in Step 1 — reuse it; do not re-derive it from $PWD.
 # MAIN holds stages[0] in the usual case. If stages[0] is NOT checked out in any
 # worktree, use promoting-a-branch Step 4 "Case 2" (a throwaway worktree) instead.
 for each branch feature/<N>-<slug> in the group:
@@ -121,8 +133,8 @@ promoted** `#N`:
 IS="$("$DISP" config '.code.stages[0].issueStatus // empty')"; [ -n "$IS" ] && "$DISP" issues set-status --number <N> --status "$IS"
 LAST=$(( $("$DISP" config '.code.stages | length') - 1 )); CL="$("$DISP" config '.code.stages[0].closesIssues // null')"
 [ "$CL" = "null" ] && { [ 0 -eq "$LAST" ] && CL=true || CL=false; }; [ "$CL" = true ] && "$DISP" issues close --number <N>
-# 4. remove the worktree:
-git worktree remove ".worktrees/<N>-<slug>"
+# 4. remove the worktree (anchored — never bare, you may be standing inside it):
+git -C "$MAIN" worktree remove ".worktrees/<N>-<slug>"
 ```
 
 Then **consume the manifest** for what was promoted:
@@ -145,3 +157,6 @@ manifest for a re-run.
 - Using `Closes #N` when `stages[0]` does not close issues — use `Ready #N`.
 - Aborting the whole run on one conflict. Skip + report; never block the clean branches.
 - Reinventing merge/sign/CI logic instead of reusing `promoting-a-branch`.
+- Running a bare `git merge` / `git push` / `git worktree remove` inside the per-branch loop.
+  You move between worktrees constantly here; anchor every command with `-C "$MAIN"` (or the
+  integration worktree's path) so it can never act on the wrong one.

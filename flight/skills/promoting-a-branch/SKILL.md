@@ -27,11 +27,28 @@ See [flight-setup.md](../../references/flight-setup.md) and
   (Step 5). A `pr` hop uses `Closes #N` only when the target stage closes issues, else `Ready #N`.
 - **Halt if you can't write a test plan** for a resolved issue on a `pr` hop — an unwritable
   plan usually means the feature isn't reachable. Fix that before opening the PR.
+- **Every git command is `git -C "$WT" …` / `git -C "$MAIN" …`. A bare `git` command is a bug,
+  even if you think you're in the right directory.** A promotion juggles *two* checkouts — the
+  feature worktree (`$WT`) and the one holding the target stage (`$MAIN`, or a throwaway) — and
+  the shell's working directory persists across tool calls. An unanchored `git merge` or
+  `git push` at this step lands on the wrong repo or the wrong branch, which is exactly the
+  failure a promotion must never have. Bind both paths in Step 1 and anchor everything after.
+  Paths passed to an anchored command resolve relative to that `-C` directory, not to your
+  current one — always pass repo-relative paths.
 
 ## Step 1: Resolve the hop
 
+Bind the two checkout paths **once**, then anchor every later git command to one of them. The
+`git rev-parse --git-common-dir` below is the single permitted bare `git` — it is the bootstrap
+that discovers the paths; everything after it uses `-C`.
+
 ```
-BRANCH="$(git branch --show-current)"
+# $WT — the worktree holding the branch being promoted (where you are working).
+WT="$(cd "$(git rev-parse --show-toplevel)" && pwd)"
+# $MAIN — the main checkout (root of the shared git object store), which usually holds <target>.
+MAIN="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
+
+BRANCH="$(git -C "$WT" branch --show-current)"
 STAGES="$(flight config '.code.stages')"
 ```
 
@@ -48,7 +65,7 @@ Read the target hop's `merge` (`direct`|`pr`) and `gate` (`pre-merge`|`post-merg
 Scan this branch's commits for issue references:
 
 ```
-git log <target>..HEAD --oneline
+git -C "$WT" log <target>..HEAD --oneline
 ```
 
 Record the `#N` that are actually *resolved* by this branch (judgment — a mention isn't a
@@ -79,12 +96,10 @@ Decide which case applies, then merge. (`$SCRATCH` is the session scratchpad dir
 write throwaway files there.)
 
 ```
-# Find the root of the shared git object store (common dir one level up from .git).
-MAIN="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
-
+# $MAIN and $WT were bound in Step 1 — reuse them; do not re-derive from $PWD.
 # Run git worktree list --porcelain and look for a line `branch refs/heads/<target>`.
 # Present → <target> is checked out (Case 1); absent → not checked out anywhere (Case 2).
-git worktree list --porcelain | grep -q "branch refs/heads/<target>"
+git -C "$MAIN" worktree list --porcelain | grep -q "branch refs/heads/<target>"
 ```
 
 **Case 1 — `<target>` is checked out in a worktree** (the usual case for `feature → stages[0]`,
@@ -129,8 +144,8 @@ verify local `$BRANCH` isn't ahead of the remote — otherwise the PR (and the C
 silently omits your latest commit:
 
 ```
-git fetch -q origin "$BRANCH"
-if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$BRANCH")" ]; then
+git -C "$WT" fetch -q origin "$BRANCH"
+if [ "$(git -C "$WT" rev-parse HEAD)" != "$(git -C "$WT" rev-parse "origin/$BRANCH")" ]; then
    # STOP — local is ahead of / diverged from origin/$BRANCH. Push (or reconcile)
    # before promoting, then re-run. Do not open the PR against a stale remote tip.
    echo "local $BRANCH differs from origin/$BRANCH — push first" >&2
@@ -191,3 +206,6 @@ work-ledger comment and delegates the status/close to this step.
   stage, or one with `closesIssues: false`) — that auto-closes before later verification. Use
   `Ready #N`; `Closes #N` is only for a stage whose effective `closesIssues` is true.
 - Hand-merging in `working-an-issue` instead of letting this skill own the hop.
+- Running a bare `git merge` / `git push` / `git switch` here. A promotion always spans two
+  checkouts; anchor every command with `-C "$MAIN"` or `-C "$WT"` so it cannot act on whichever
+  directory the shell happens to be sitting in.

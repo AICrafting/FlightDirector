@@ -19,6 +19,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   `working-an-issue` ("the later comment wins"), a required first step in the `queue-batches`
   worker prompt (workers previously never fetched comments), and `promoting-a-branch` /
   `promoting-branches` read comments before drafting test plans.
+- **`git -C <path>` is now the modelled form for every git command in the skills** (#65):
+  `working-an-issue`, `promoting-a-branch`, `promoting-branches` and the `queue-batches` worker
+  prompt bind the relevant checkout path once (`$WT` / `$ROOT` / `$MAIN`) and anchor every git
+  invocation to it, with a compaction-proof red flag — a bare `git` command is a bug — so an
+  agent that has `cd`'d elsewhere can no longer commit to the wrong repo or branch. The
+  guidance also notes that `git -C "$WT" add <path>` resolves `<path>` relative to `$WT`.
 
 ## [0.11.0] - 2026-09-06
 

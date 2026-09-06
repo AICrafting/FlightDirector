@@ -63,17 +63,27 @@ For each issue `#N` with slug `<slug>`:
    ```
    If the thread materially changes the issue from what the batch plan assumed, use the safety
    valve (below) rather than silently building to the new reading.
-2. **Create the worktree off `stages[0]`** (run from `{repo_root}`):
+2. **Create the worktree off `stages[0]`** (anchored to `{repo_root}`, never to `$PWD`), and
+   bind its path to `$WT` — every git command from here on is `git -C "$WT" …`:
    ```bash
-   git -C "{repo_root}" worktree add -b "feature/<N>-<slug>" \
-     "{repo_root}/.worktrees/<N>-<slug>" "{base_branch}"
+   ROOT="{repo_root}"
+   git -C "$ROOT" worktree add -b "feature/<N>-<slug>" \
+     "$ROOT/.worktrees/<N>-<slug>" "{base_branch}"
+   WT="$ROOT/.worktrees/<N>-<slug>"
    {dispatcher} issues set-status --number <N> --status in-progress
    echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=starting comments=<count>" >> {log_path}
    ```
-3. **Work inside `{repo_root}/.worktrees/<N>-<slug>`.** Re-read the issue's Acceptance section
-   *as amended by the comments*;
+3. **Work inside `$WT`, driving git there by path rather than by `cd`.** Re-read the issue's
+   Acceptance section *as amended by the comments*;
    treat each bullet as a separate must-pass condition. Tests must pass after every commit; one
-   commit per issue (small logical subcommits OK). Midway, optionally:
+   commit per issue (small logical subcommits OK):
+   ```bash
+   git -C "$WT" status
+   git -C "$WT" add <repo-relative path>      # paths resolve relative to $WT, not to your cwd
+   git -C "$WT" commit -m "feat(#<N>): …"
+   git -C "$WT" log --oneline -3
+   ```
+   Midway, optionally:
    ```bash
    echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=working note=\"<short>\"" >> {log_path}
    ```
@@ -89,7 +99,7 @@ For each issue `#N` with slug `<slug>`:
      --description "Issue was worked on using <Primary>"
    {dispatcher} issues label-add --number <N> --label model/<primary>
    {dispatcher} issues comment --number <N> --body-file "{scratch}/done-<N>.md"
-   SHA=$(git -C "{repo_root}/.worktrees/<N>-<slug>" rev-parse --short HEAD)
+   SHA=$(git -C "$WT" rev-parse --short HEAD)
    echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=complete commit=$SHA" >> {log_path}
    ```
    Leave the worktree in place (unmerged) and move to the next issue. The user promotes serially
@@ -111,6 +121,15 @@ answer. Shipping 3 solid issues beats forcing 5 shaky ones.
 ## Universal hard rules (always)
 
 - **No `git push`.** Branches stay local for user review.
+- **Every git command is `git -C "$WT" …` (or `git -C "$ROOT" …` for worktree management). A
+  bare `git` command is a bug, even if you think you're in the right directory.** Your shell's
+  working directory persists across tool calls and you will `cd` around during a task; an
+  unanchored `git commit` can land on the **wrong repository or the wrong branch** — e.g. onto
+  the trunk in the main checkout instead of `feature/<N>-<slug>`. Note that `git -C "$WT" add
+  <path>` resolves `<path>` relative to `$WT`, not to your current directory: that is what you
+  want, but it differs from a bare `git add` from a subdirectory, so pass repo-relative paths.
+  `-C` does not help non-git tools — `cd`-dependent scripts and test runners still need an
+  explicit path of their own.
 - **No promotion / no merge to any stage.** Stop each issue at `to-test`.
 - **Dispatcher only** for backend access (`{dispatcher} issues …`) — never curl or MCP.
 - **Tests green after every commit.**
