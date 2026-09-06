@@ -13,7 +13,11 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- Install docs (README, GUIDE) now use the public marketplace URL
+  `https://github.com/AICrafting/FlightDirector.git` and give Codex the same step-by-step
+  install as Claude Code (`codex plugin marketplace add …`, `codex plugin add flight@flightdirector`) (#74).
 
 ## [0.11.0] - 2026-09-06
 

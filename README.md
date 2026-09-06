@@ -1,12 +1,27 @@
 # Flight Director — Claude Code + Codex plugins
 
-**AI Crafting**'s [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins)
-(marketplace name `flightdirector`). Add it once, then install any plugin below.
+**AI Crafting**'s plugin marketplace for **Claude Code** and **Codex** (marketplace name
+`flightdirector`, hosted at <https://github.com/AICrafting/FlightDirector>). Add it once, then
+install any plugin below.
+
+**Claude Code**
 
 ```
-/plugin marketplace add <this-repo> (eg: https://hostname/owner/repo.git [.git is required]) 
+/plugin marketplace add https://github.com/AICrafting/FlightDirector.git
 /plugin install flight@flightdirector
 ```
+
+(`/plugin marketplace add AICrafting/FlightDirector` — the GitHub shorthand — works too.)
+
+**Codex**
+
+```
+codex plugin marketplace add https://github.com/AICrafting/FlightDirector.git
+codex plugin add flight@flightdirector
+```
+
+Or open `/plugins` inside Codex, pick the `flightdirector` tab and install *Flight* there. Start
+a new session afterwards — bundled skills load at session start.
 
 ## Plugins
 
