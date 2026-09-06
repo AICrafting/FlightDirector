@@ -1,4 +1,4 @@
-# flight Jira test rig
+# Flight Jira test rig
 
 Exercises the **Jira** adapter (an **issues-axis-only** backend) against a **real** Jira Cloud
 site. **Dev tooling — not part of the plugin.** Requires `curl` + `jq` and Atlassian

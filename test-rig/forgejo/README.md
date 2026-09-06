@@ -1,4 +1,4 @@
-# flight test rig
+# Flight Forgejo test rig
 
 A disposable Forgejo instance for exercising the adapters against a real API. **Dev tooling —
 not part of the plugin.** Requires `docker` (+ compose) and `jq`.

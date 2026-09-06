@@ -1,4 +1,4 @@
-# flight GitHub test rig
+# Flight GitHub test rig
 
 Exercises the GitHub adapter against a **real** repo (`DaveWoodCom/FlightTestTarget`).
 **Dev tooling — not part of the plugin.** Requires `curl` + `jq` and a token (scope: **repo +
