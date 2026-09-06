@@ -43,6 +43,23 @@ merge config fields or hand-merge here. Config + verbs:
   `-C "$ROOT"` (below). The shell's working directory persists between commands, so if you are
   still inside the *previous* issue's worktree, a relative `.worktrees/<N>-<slug>` creates the
   new worktree **nested inside that one** — git permits nested worktrees and says nothing.
+- **Every git command is `git -C "$WT" …` (or `git -C "$ROOT" …`). A bare `git` command is a
+  bug, even if you think you're in the right directory.** Bind the issue's worktree path to
+  `$WT` once, right after the worktree is created (Step 1), and pass `-C "$WT"` on *every*
+  invocation — `status`, `add`, `commit`, `diff`, `log`, `stash`, `rev-parse`. Your shell's
+  working directory persists across tool calls and you `cd` around constantly (into a
+  subdirectory, another repo, a script dir); a later bare `git commit` then lands wherever you
+  happen to be. Best case it errors; worst case it succeeds against the **wrong repository or
+  the wrong branch** — committing the issue's work onto the trunk in the main checkout, which is
+  precisely the red line the one-worktree-per-issue model exists to prevent. The only bare `git`
+  allowed is the one-time bootstrap that *discovers* `$ROOT`
+  (`git rev-parse --git-common-dir`); everything after it is anchored.
+- **`git -C "$WT" <cmd> <path>` resolves `<path>` relative to `$WT`, not to your current
+  directory.** That is the behavior you want, but it differs from a bare `git add` run from a
+  subdirectory — so always pass **repo-relative** paths (`flight/skills/foo/SKILL.md`, not
+  `SKILL.md`) to `add`, `checkout`, `diff`, and friends. Note too that `-C` does not protect
+  non-git tools: `cd`-dependent scripts, test runners, and relative paths in editors still need
+  an explicit absolute path or a `cd "$WT" && …` of their own.
 - **Keep the board honest.** Every lifecycle transition updates the status label, so the issue's
   state always matches reality. `issues set-status` is atomic — it adds the new status and
   removes the others in one call, so the board can never show two states. Don't do the work and
@@ -82,10 +99,26 @@ ROOT="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 # stages[0] is the first integration branch; fork the feature worktree from it.
 BASE="$(flight config '.code.stages[0].name')"
 git -C "$ROOT" worktree add -b "feature/<N>-<slug>" ".worktrees/<N>-<slug>" "$BASE"
+
+# Bind the issue's worktree ONCE — every later git command is `git -C "$WT" …`.
+WT="$ROOT/.worktrees/<N>-<slug>"
+
 flight issues set-status --number N --status in-progress
 ```
 
-Do the work inside the `$ROOT/.worktrees/<N>-<slug>` directory.
+Do the work inside `$WT`, and drive git there **by path, not by `cd`**:
+
+```
+git -C "$WT" status
+git -C "$WT" add flight/skills/<skill>/SKILL.md      # paths are relative to $WT
+git -C "$WT" commit -m "feat(#N): …"
+git -C "$WT" log --oneline -3
+git -C "$WT" show --no-patch --format=%G? HEAD       # signature check, still anchored
+```
+
+`$WT` stays valid no matter where the shell has wandered, so a `cd` into a subdirectory or
+another repo mid-task cannot silently redirect a commit. If you ever find yourself typing a bare
+`git`, stop and re-issue it with `-C "$WT"`.
 
 ### 2. Ready for testing
 
@@ -161,3 +194,6 @@ Only after explicit approval:
   label (`issues clear-status --number N`) after removing the worktree so the board doesn't lie.
 - Hand-merging instead of delegating to `promoting-a-branch` — the merge strategy and any gate
   checks live there, not here.
+- Running a bare `git add`/`git commit`/`git status` because "I'm in the worktree." You may not
+  be — the shell's cwd persists between tool calls. Anchor with `git -C "$WT"` every time; the
+  recovery (notice, revert, redo with `-C`) costs far more than the eight characters.
