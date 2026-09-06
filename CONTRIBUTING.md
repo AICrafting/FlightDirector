@@ -68,6 +68,10 @@ Enable the pre-push hook once per clone:
 git config core.hooksPath .githooks
 ```
 
+The hook reads the ref list git passes on stdin and skips the checks when the push
+carries no commits (a `git push --delete <branch>`, or nothing to push) — there is
+nothing to lint or signature-check in that case.
+
 CI runs two workflows on push to `develop` and on PRs: **`lint`** (yamllint +
 shellcheck) and **`tests`** (`runTests.sh`).
 
