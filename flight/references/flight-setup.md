@@ -17,7 +17,7 @@ API with `curl`. There is no MCP server, and no token handling in the skills the
 > `.lightspeed/`. The dispatcher still reads a legacy `.lightspeed/config.json` when
 > `.flightdirector/config.json` is absent (printing a one-line deprecation notice on stderr), and
 > resolves `secrets.json` independently so a half-migrated repo keeps working. Migrate with
-> `git mv .lightspeed .flightdirector` plus a manual `mv` of the gitignored `secrets.json`, or
+> `git mv .lightspeed .flightdirector` plus a manual `mv` of the gitignored `secrets*` files, or
 > re-run `setting-up-a-repo`. `.flightdirector/` is shared by every Flight Director plugin.
 
 ### `.flightdirector/config.json` — committable
@@ -183,8 +183,9 @@ Just the token(s), one per axis, with the same `code → issues` inheritance:
 ```
 
 **This file must be gitignored** — it holds a credential. If flight finds it tracked by
-git, it warns loudly on every run (it does not refuse). Add `.flightdirector/secrets.json` to your
-`.gitignore`.
+git, it warns loudly on every run (it does not refuse). Add the `.flightdirector/secrets*` glob to
+your `.gitignore` — ignoring the whole family (`secrets.local.json`, `secrets.json.bak`,
+`secrets-github.json`, editor swap copies) rather than the one exact filename.
 
 Token precedence: `LS_TOKEN` / `FORGEJO_TOKEN` in the environment override everything; otherwise
 the secrets file (the axis's token, inheriting `code`'s).

@@ -7,8 +7,9 @@
 
 # Secrets and sensitive data
 secret*
-.flightdirector/secrets.json
-.lightspeed/secrets.json   # pre-rename config folder, still honoured
+.flightdirector/secrets*
+# pre-rename config folder, still honoured
+.lightspeed/secrets*
 
 # - Keys
 *.pem

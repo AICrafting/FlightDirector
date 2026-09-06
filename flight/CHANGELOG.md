@@ -20,6 +20,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   worker prompt (workers previously never fetched comments), and `promoting-a-branch` /
   `promoting-branches` read comments before drafting test plans.
 
+### Security
+
+- **`setting-up-a-repo` now gitignores the whole `.flightdirector/secrets*` family** (#80), not just
+  `secrets.json`, so a second token file or a backup made while rotating a token (`secrets.local.json`,
+  `secrets.json.bak`, `secrets-github.json`, editor swap copies) can't be committed either.
+
 ## [0.11.0] - 2026-09-06
 
 ### Changed
