@@ -42,7 +42,7 @@ Backend, coordinates, and preferences, across two independent axes:
     "stages": [
       { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },
       { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa", "issueStatus": "qa" },
-      { "name": "main",    "merge": "pr",     "issueStatus": "done" }
+      { "name": "main",    "merge": "pr",     "strategy": "merge", "issueStatus": "done" }
     ]
   },
   "issues": { "backend": "forgejo", "owner": "acme", "repo": "planning" }, // omit to inherit code
@@ -78,9 +78,22 @@ Backend, coordinates, and preferences, across two independent axes:
   adapters speak roles and names; turning a name into its numeric id happens *inside* the
   adapter, so nothing above the adapter ever deals in label ids.
 - **`stages`** — ordered promotion pipeline. `stages[0]` is the first integration branch;
-  feature branches fork from it. Each hop carries its own `merge` (`direct`|`pr`) and optional
-  `gate` (`pre-merge`|`post-merge-qa`, default `pre-merge`). Consumed by `working-an-issue`
-  (uses `stages[0]`) and `promoting-a-branch` (one hop at a time).
+  feature branches fork from it. Each hop carries its own `merge` (`direct`|`pr`), optional
+  `strategy` (see below) and optional `gate` (`pre-merge`|`post-merge-qa`, default
+  `pre-merge`). Consumed by `working-an-issue` (uses `stages[0]`) and `promoting-a-branch`
+  (one hop at a time).
+- **`strategy`** (per stage, optional) — the merge strategy used when a `pr` hop's PR is merged
+  into this stage: `merge` | `squash` | `rebase`. **Defaults to `merge`.** A true merge is the
+  default because Flight's model is one branch per issue promoted through a chain of stages:
+  the same commits travel `feature → develop → qa → main`, and preserving them keeps each
+  stage's history comparable, keeps `git log <target>..HEAD` (how `promoting-a-branch` finds an
+  issue's commits) meaningful at every hop, and avoids the duplicate-commit churn that squashing
+  or rebasing at one hop causes at the next. Set `"strategy": "squash"` on a stage whose repo
+  convention is a linear one-commit-per-PR history. Read it with:
+  ```
+  flight config '.code.stages[<i>].strategy // "merge"'
+  ```
+  It applies to `pr` hops only — a `direct` hop always merges with `--no-ff`.
 - **`issueStatus`** (per stage, optional) — a **status role name** (a key in `labels.status`).
   On *entering* this stage, `promoting-a-branch` runs the atomic `issues set-status --status
   <role>` (adds the new status, drops the others in one call — the board can never show two
@@ -93,7 +106,8 @@ Backend, coordinates, and preferences, across two independent axes:
   stage (e.g. close at `develop`, treat `main` as a pure release cut). The `gate` field is
   orthogonal — it governs merge policy, not issue lifecycle.
 - Note: `trunkBranch`, `mergeStrategy`, and `gate` (single-value top-level fields) are
-  superseded by `stages`. For backwards compatibility a legacy `trunkBranch` is still read
+  superseded by `stages` — the per-stage `strategy` field replaces a top-level `mergeStrategy`.
+  For backwards compatibility a legacy `trunkBranch` is still read
   **first** if present; otherwise `stages[0].name` is used.
 
 ### queue-batches config (all optional)

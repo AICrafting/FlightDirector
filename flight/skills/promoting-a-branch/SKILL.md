@@ -66,8 +66,15 @@ STAGES="$(flight config '.code.stages')"
 - Otherwise `BRANCH` is a feature branch → target is `stages[0]`.
 - An explicit `--to <stage>` from the user overrides inference (must be the immediate next stage).
 
-Read the target hop's `merge` (`direct`|`pr`) and `gate` (`pre-merge`|`post-merge-qa`, default
-`pre-merge`) from that stage entry.
+Read the target hop's `merge` (`direct`|`pr`), `gate` (`pre-merge`|`post-merge-qa`, default
+`pre-merge`) and `strategy` (`merge`|`squash`|`rebase`, **default `merge`**) from that stage
+entry — never hard-code the strategy:
+
+```
+STRATEGY="$(flight config '.code.stages[<i>].strategy // "merge"')"   # <i> = target stage index
+```
+
+`strategy` applies to `pr` hops (Step 4); a `direct` hop always merges with `--no-ff`.
 
 ## Step 2: Identify resolved issues
 
@@ -215,11 +222,11 @@ flight ci watch --pr "$PR_NUM" \
 
 On failure: `ci log --failed "$BRANCH"`, fix, push, re-watch. On success: tell the user
 **"CI passed — ready to merge #$PR_NUM."** Merge only on the user's go-ahead (`pre-merge` gate) or
-per your `post-merge-qa` policy (`--strategy` may be `merge|squash|rebase` per the project's
-convention):
+per your `post-merge-qa` policy. Use the `$STRATEGY` resolved in Step 1 — the stage's configured
+strategy, defaulting to `merge`:
 
 ```
-flight pr merge --number "$PR_NUM" --strategy squash
+flight pr merge --number "$PR_NUM" --strategy "$STRATEGY"
 ```
 
 ## Step 5: Drive linked-issue lifecycle from the target stage
@@ -260,3 +267,5 @@ work-ledger comment and delegates the status/close to this step.
 - Reaching for `git pull` when the push is rejected. That invents a merge or a rebase nobody
   reviewed, at exactly the moment the user has said "promote" and stopped watching. Stop and
   report; only *behind* is safe to fix, and only with `--ff-only`.
+- Hard-coding `--strategy squash` (or any strategy) instead of reading the target stage's
+  `strategy` field. The default is `merge`, and a repo that wants otherwise says so in config.
