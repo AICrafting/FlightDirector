@@ -128,10 +128,13 @@ Other conventions:
 - **Signed commits are required.** The pre-push `verifyGitLogs.sh` rejects any unpushed
   commit whose signature isn't good (`%G?` of `G`/`U`). Merge commits occasionally sign
   badly (`B`) — re-sign with `git commit --amend --no-edit -S` before pushing.
-- **Commit trailers** — see [CLAUDE.md](CLAUDE.md) for the required `Co-Authored-By` /
-  session trailers.
+- **Agent instructions** — repo-wide rules for coding agents live in [AGENTS.md](AGENTS.md)
+  (Codex reads it directly; [CLAUDE.md](CLAUDE.md) imports it via `@AGENTS.md` and adds only
+  Claude Code-specific notes). Edit `AGENTS.md` for anything both harnesses should know.
+- **Commit trailers** — the required `Co-Authored-By` / session trailers are added by each
+  harness; keep them on agent-authored commits.
 - **Code style** — tabs (width 4); trailing whitespace trimmed on save (except `.md`);
-  leave one final newline. See [CLAUDE.md](CLAUDE.md).
+  leave one final newline. See [AGENTS.md](AGENTS.md).
 
 ## Cutting a release
 
