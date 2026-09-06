@@ -9,6 +9,9 @@
 set -euo pipefail
 
 RIG_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Optional overrides (see .env.example); docker compose reads the same file itself.
+# shellcheck disable=SC1091
+[ -f "$RIG_DIR/.env" ] && . "$RIG_DIR/.env"
 PORT="${RIG_PORT:-3000}"
 API="http://localhost:${PORT}/api/v1"
 USER="rig"
