@@ -35,6 +35,15 @@ See [flight-setup.md](../../references/flight-setup.md) and
   failure a promotion must never have. Bind both paths in Step 1 and anchor everything after.
   Paths passed to an anchored command resolve relative to that `-C` directory, not to your
   current one — always pass repo-relative paths.
+- **Never merge into a target branch you haven't just fetched.** A promotion merges into a
+  *local* copy of `<target>` and then pushes; if `origin/<target>` has moved (another agent,
+  another machine, a batch promote, a hotfix) the merge is computed against a stale base and the
+  push either fails or gets "fixed" by a reflex nobody reviewed. Run the Step 4 freshness check
+  first, on **every** hop — `direct` and `pr` alike.
+- **Never `git pull` a diverged stage branch.** If `<target>` is ahead of or diverged from
+  `origin/<target>`, **STOP and tell the user**. Reconciling a diverged integration branch is a
+  decision the user makes, not a merge or rebase the agent invents. Behind is the only case you
+  may fix yourself, and only by fast-forward.
 
 ## Step 1: Resolve the hop
 
@@ -102,6 +111,33 @@ write throwaway files there.)
 git -C "$MAIN" worktree list --porcelain | grep -q "branch refs/heads/<target>"
 ```
 
+#### Step 4a: Upstream freshness check — before any merge or push
+
+Required on **both** hop types and **both** cases below. The merge must be computed against the
+tip that is actually on the remote, not whatever the local ref happens to point at:
+
+```
+git -C "$MAIN" fetch -q origin "<target>" "$BRANCH"
+LOCAL="$(git -C "$MAIN" rev-parse "<target>")"
+REMOTE="$(git -C "$MAIN" rev-parse "origin/<target>")"
+MB="$(git -C "$MAIN" merge-base "<target>" "origin/<target>")"
+```
+
+| State | Test | Action |
+|---|---|---|
+| **Up to date** | `LOCAL` = `REMOTE` | Proceed. |
+| **Behind** | `LOCAL` = `MB` | Fast-forward and **say so**: `git -C "$MAIN" merge --ff-only "origin/<target>"` (in the checkout holding `<target>`; it must be clean). Then proceed. |
+| **Ahead** | `REMOTE` = `MB` | **STOP.** Unpushed local commits on the target stage — something happened outside the workflow. Report and let the user decide. |
+| **Diverged** | neither | **STOP.** Do **not** auto-reconcile, and do **not** `git pull`. Report both tips and stop. |
+
+The same fetch also re-affirms the **source** branch on a `direct` hop (the `pr` hop's own
+source guard is below): if `$BRANCH` differs from `origin/$BRANCH` in a way you did not expect,
+say so before merging.
+
+If there is no `origin`, or the fetch fails (offline), **warn and continue** from the local refs
+— but state plainly that the target was **unverified**, and remember the push will be the first
+thing to discover any drift.
+
 **Case 1 — `<target>` is checked out in a worktree** (the usual case for `feature → stages[0]`,
 where the main checkout sits on `develop`): merge in that worktree's path (usually `$MAIN`).
 
@@ -114,12 +150,21 @@ git -C "$MAIN" merge --no-ff "$BRANCH" && git -C "$MAIN" push
 that no worktree holds): use a throwaway worktree, then remove it. The `-$$` (PID) suffix keeps
 the path unique so a crashed prior run can't collide.
 
+Fork the throwaway worktree from **`origin/<target>`**, not from the local ref, so a stale local
+`<target>` cannot be the merge base at all — then push explicitly to `<target>`:
+
 ```
-git -C "$MAIN" worktree add "$SCRATCH/promote-<target>-$$" "<target>"
+git -C "$MAIN" fetch -q origin "<target>"
+git -C "$MAIN" worktree add --detach "$SCRATCH/promote-<target>-$$" "origin/<target>"
 git -C "$SCRATCH/promote-<target>-$$" merge --no-ff "$BRANCH" && \
-    git -C "$SCRATCH/promote-<target>-$$" push
+    git -C "$SCRATCH/promote-<target>-$$" push origin "HEAD:<target>"
 git -C "$MAIN" worktree remove "$SCRATCH/promote-<target>-$$"
+# Bring the (unchecked-out) local ref back in line with what you just pushed:
+git -C "$MAIN" fetch -q origin "<target>:<target>"
 ```
+
+Run Step 4a first even here: if the local `<target>` ref is **ahead of** `origin/<target>`,
+forking from the remote would silently drop those commits — STOP and report instead.
 
 > **Red flag:** Never run `git switch <target>` from inside the feature worktree — git will
 > abort with "fatal: '<target>' is already checked out at …".
@@ -209,3 +254,9 @@ work-ledger comment and delegates the status/close to this step.
 - Running a bare `git merge` / `git push` / `git switch` here. A promotion always spans two
   checkouts; anchor every command with `-C "$MAIN"` or `-C "$WT"` so it cannot act on whichever
   directory the shell happens to be sitting in.
+- Merging into `<target>` without fetching it first — the tree you promote isn't the tree the
+  user thinks they promoted, and the push fails (or strands a merge commit on a now-diverged
+  branch).
+- Reaching for `git pull` when the push is rejected. That invents a merge or a rebase nobody
+  reviewed, at exactly the moment the user has said "promote" and stopped watching. Stop and
+  report; only *behind* is safe to fix, and only with `--ff-only`.
