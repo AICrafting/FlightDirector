@@ -64,6 +64,12 @@ merge config fields or hand-merge here. Config + verbs:
   state always matches reality. `issues set-status` is atomic — it adds the new status and
   removes the others in one call, so the board can never show two states. Don't do the work and
   forget the transition.
+- **Never fork a feature branch from a stale base.** `stages[0]` is a *local* ref and it lags
+  origin routinely — another machine, a parallel batch promote, a hotfix, a main checkout parked
+  on a different branch. Fetch and compare **before** `worktree add` (Step 1); if local
+  `stages[0]` is **ahead of or diverged from** `origin/stages[0]`, **STOP and tell the user** —
+  unpushed commits on an integration branch mean something happened outside the workflow, and
+  papering over it buries the problem until promote time.
 - **Never start an issue without reading its comments.** The body is a snapshot; the thread is
   where scope corrections, "actually do X instead", decisions, and prior work-ledger entries
   live. Run `issues comments --number N` *before* creating the worktree, and when a comment
@@ -98,13 +104,47 @@ ROOT="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 
 # stages[0] is the first integration branch; fork the feature worktree from it.
 BASE="$(flight config '.code.stages[0].name')"
-git -C "$ROOT" worktree add -b "feature/<N>-<slug>" ".worktrees/<N>-<slug>" "$BASE"
+```
+
+**Verify the base is current before forking from it.** Fetch `origin/$BASE`, compare, and act on
+one of three cases — the issue must be worked on up-to-date code:
+
+```
+if git -C "$ROOT" remote get-url origin >/dev/null 2>&1 \
+   && git -C "$ROOT" fetch -q origin "$BASE"; then
+    LOCAL="$(git -C "$ROOT" rev-parse "$BASE")"
+    REMOTE="$(git -C "$ROOT" rev-parse "origin/$BASE")"
+    MB="$(git -C "$ROOT" merge-base "$BASE" "origin/$BASE")"
+else
+    LOCAL=offline   # no origin, or the fetch failed — see "Offline" below
+fi
+```
+
+| Case | Test | Action |
+|---|---|---|
+| **Level** | `LOCAL = REMOTE` | Proceed; fork from `$BASE`. Report *"base `$BASE`: fetched, level with origin"*. |
+| **Behind** (fast-forwardable) | `LOCAL = MB` | Never work from the stale ref. If `$BASE` is **not checked out** in any worktree, fast-forward it and fork from it: `git -C "$ROOT" fetch -q origin "$BASE:$BASE"`. If it **is** checked out (the usual case — the main checkout sits on it), either fast-forward there (`git -C "$ROOT" merge --ff-only "origin/$BASE"`, only if that checkout is clean) or simply fork the worktree from `origin/$BASE` instead. Report *"base `$BASE`: fast-forwarded N commits"* / *"forked from `origin/$BASE` (local was N behind)"*. |
+| **Ahead or diverged** | `REMOTE = MB`, or neither | **STOP.** Do not create the worktree, do not `git pull`, do not reconcile. Unpushed local commits on an integration branch mean something happened outside the workflow — report the divergence and let the user decide. |
+
+Then create the worktree from the ref that check selected — `$BASE` when level or
+fast-forwarded, `origin/$BASE` when you chose to fork from the remote tip:
+
+```
+git -C "$ROOT" worktree add -b "feature/<N>-<slug>" ".worktrees/<N>-<slug>" "<the chosen ref>"
 
 # Bind the issue's worktree ONCE — every later git command is `git -C "$WT" …`.
 WT="$ROOT/.worktrees/<N>-<slug>"
 
 flight issues set-status --number N --status in-progress
 ```
+
+**Offline / no remote.** If there is no `origin` or the fetch fails, **warn and continue** from
+the local ref — offline work must not be blocked — but say so plainly, and record it in the
+pickup line as **unverified**: *"base `$BASE`: UNVERIFIED (fetch failed — offline); forked from
+local `$BASE`"*. The ledger must never imply a freshness check that did not happen.
+
+**Say which case applied in the "read #N …" pickup line**, next to the comment count — e.g.
+*"read #N: body + 2 comments; base develop: fetched, level with origin"*.
 
 Do the work inside `$WT`, and drive git there **by path, not by `cd`**:
 
@@ -179,6 +219,11 @@ Only after explicit approval:
 
 ## Common mistakes
 
+- Forking the worktree from a local `stages[0]` that was never fetched — the agent then builds
+  against old code and the mismatch surfaces at promote time as a conflict or a silently
+  outdated merge. Fetch and compare first, every time.
+- Reflexively `git pull`-ing when the base turns out to be diverged. Stop and report; a diverged
+  integration branch is the user's call, not a merge or rebase you invent.
 - Merging because tests passed, without the user's explicit go-ahead. The gate is the user, not
   the test result.
 - Doing the work but leaving the status at `in-progress` (or never setting it) — the board now
