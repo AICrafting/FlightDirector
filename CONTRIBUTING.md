@@ -10,33 +10,37 @@ plugin ever do this?"* If no, it goes here; if yes, it goes in `GUIDE.md`.
 
 ## Repo layout
 
-This is a monorepo of Claude Code tools. Each tool owns its own directory and its
-own docs/changelog; shared tooling lives at the root.
+This is a monorepo of Claude Code + Codex tools. Each tool owns its own directory,
+its own docs/changelog and a manifest for each harness; shared tooling lives at the root.
 
 ```
 .
 ├── flight/                  # the flight plugin
-│   ├── .claude-plugin/plugin.json
+│   ├── .claude-plugin/plugin.json   # Claude Code manifest (version source of truth)
+│   ├── .codex-plugin/plugin.json    # Codex manifest (bump-version.sh keeps it in lockstep)
 │   ├── GUIDE.md                 # user-facing guide
 │   ├── README.md
 │   ├── CHANGELOG.md             # this plugin's changelog
+│   ├── bin/                     # entrypoints: flight, batch-manifest, deprecated lightspeed shim
 │   ├── skills/                  # the skills (filing-issues, working-an-issue, …)
 │   ├── scripts/
 │   │   ├── flight           # the dispatcher (single entrypoint)
-│   │   └── adapters/<backend>/  # per-backend adapters (forgejo, github, …)
+│   │   └── adapters/<backend>/  # per-backend adapters (forgejo, github, gitlab, jira)
 │   └── references/              # adapter-contract.md, flight-setup.md, default-labels.md
-├── .claude-plugin/marketplace.json   # published marketplace manifest (all plugins)
+├── .claude-plugin/marketplace.json   # published marketplace manifest (all plugins, both harnesses)
 ├── scripts/                     # repo-wide tooling (checks, tests, release)
 ├── test-rig/                    # per-backend integration rigs
 ├── docs/                        # repo docs + docs/adr/ (architecture decision records)
+├── AGENTS.md                    # repo-wide agent instructions (CLAUDE.md imports it)
 ├── CHANGELOG.md                 # root index → each tool's changelog
 ├── CONTRIBUTING.md              # this file
 └── README.md
 ```
 
-A **second tool** would slot in as a sibling of `flight/` (its own dir with a
-`plugin.json`), gain an entry in `.claude-plugin/marketplace.json`, its own
-`CHANGELOG.md`, and a line in the root `CHANGELOG.md` index.
+A **second tool** would slot in as a sibling of `flight/` (its own dir with **both** a
+`.claude-plugin/plugin.json` and a `.codex-plugin/plugin.json`), gain an entry in
+`.claude-plugin/marketplace.json` (which Codex reads too), its own `CHANGELOG.md`, and a
+line in the root `CHANGELOG.md` index.
 
 ## Dev setup / dogfooding
 
@@ -157,9 +161,10 @@ scripts/bump-version.sh flight 0.5.0
 It resolves the plugin's directory from its `source` in `.claude-plugin/marketplace.json`,
 then:
 
-- updates the version in **`<plugin>/.claude-plugin/plugin.json`** and that plugin's
-  entry in the published **`.claude-plugin/marketplace.json`** (only that entry — other
-  plugins are left alone);
+- updates the version in **`<plugin>/.claude-plugin/plugin.json`**, in
+  **`<plugin>/.codex-plugin/plugin.json`** (when present, so both harness manifests stay
+  in lockstep), and in that plugin's entry in the published
+  **`.claude-plugin/marketplace.json`** (only that entry — other plugins are left alone);
 - rolls **`<plugin>/CHANGELOG.md`**: the top `## [Unreleased]` becomes
   `## [0.5.0] - <today>`, with a fresh empty `## [Unreleased]` seeded above it. It warns
   (but doesn't stop) if `[Unreleased]` was empty when you rolled it.
