@@ -12,7 +12,7 @@
 
 These are the **Flight Director** family of plugins (`flight` is the first; `launchpad`,
 `preflight`, `mission-control`, `telemetry` and friends will follow). `flight` was previously
-published as `lightspeed`.
+called `lightspeed` during initial development/testing.
 
 | Plugin | What it does |
 |---|---|

@@ -1,4 +1,4 @@
-# flight — User Guide
+# Flight — User Guide
 
 Run your whole issue-and-code workflow — file, triage, work, promote — from inside Claude Code
 or Codex, without tabbing over to your forge's web UI. This guide covers **why** you'd want

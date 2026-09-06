@@ -1,4 +1,4 @@
-# flight setup
+# Flight setup
 
 Shared by all flight skills. Every backend operation goes through the **dispatcher** —
 `flight <group> <verb> …` — which calls the backend's REST

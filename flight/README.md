@@ -1,10 +1,11 @@
-# flight (Claude Code + Codex plugin)
+# Flight (Claude Code + Codex plugin)
 
 > **Flight** is the first plugin of the **Flight Director** family — tools for building and
 > shipping apps from inside an agent session. In NASA mission control everyone addresses the
 > flight director by the callsign *"Flight"*; this plugin is the one that directs the mission
 > (which issue, which branch, when it promotes), so it carries the callsign. It was previously
-> published as `lightspeed` — see the [CHANGELOG](CHANGELOG.md) for the migration notes.
+> called `lightspeed` during initial development/testing — see the [CHANGELOG](CHANGELOG.md)
+> for the migration notes.
 
 Seven skills for running an issue + code workflow from Claude Code or Codex using one shared package.
 Everything goes through the **flight dispatcher** — `flight <group> <verb>` — which calls
