@@ -52,23 +52,39 @@ into the session:
 
 ## Install in Claude Code
 
-1. Add the marketplace that ships flight, then install the plugin:
+1. Add the `flightdirector` marketplace (hosted at <https://github.com/AICrafting/FlightDirector>),
+   then install the plugin:
 
    ```
-   /plugin marketplace add <this-repo> (eg: https://hostname/owner/repo.git [.git is required]) 
+   /plugin marketplace add https://github.com/AICrafting/FlightDirector.git
    /plugin install flight@flightdirector
    ```
+
+   The GitHub shorthand `/plugin marketplace add AICrafting/FlightDirector` is equivalent.
 
 2. That's it — no server to run. The skills activate automatically when you say things that match
    them (see the workflow below).
 
 ## Install in Codex
 
-Add this repository as a local or Git plugin marketplace, open `/plugins`, and install Flight.
-Start a new session before invoking a skill. Codex users can explicitly invoke skills with
-`$filing-issues`, `$working-an-issue`, or `$queue-batches`; the same natural-language triggers work
-in both harnesses. Allow the configured forge hostname when Codex requests network permission.
-Parallel queues require Codex multi-agent support; all other workflows run without it.
+1. Add the same marketplace, then install the plugin — from the shell:
+
+   ```
+   codex plugin marketplace add https://github.com/AICrafting/FlightDirector.git
+   codex plugin add flight@flightdirector
+   ```
+
+   or interactively: open `/plugins` inside Codex, switch to the `flightdirector` marketplace
+   tab, and install *Flight*. (`codex plugin marketplace add AICrafting/FlightDirector` and a
+   local checkout path both work as the source too.)
+
+2. **Start a new session** — bundled skills become available at session start, not mid-session.
+
+3. Invoke skills by name with `$filing-issues`, `$working-an-issue`, `$queue-batches`, …, or just
+   describe what you want — the same natural-language triggers work in both harnesses.
+
+Allow the configured forge hostname when Codex requests network permission. Parallel queues
+(`queue-batches`) require Codex multi-agent support; every other workflow runs without it.
 
 ---
 
