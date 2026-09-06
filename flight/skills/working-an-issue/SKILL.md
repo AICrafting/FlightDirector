@@ -47,18 +47,26 @@ merge config fields or hand-merge here. Config + verbs:
   state always matches reality. `issues set-status` is atomic — it adds the new status and
   removes the others in one call, so the board can never show two states. Don't do the work and
   forget the transition.
+- **Never start an issue without reading its comments.** The body is a snapshot; the thread is
+  where scope corrections, "actually do X instead", decisions, and prior work-ledger entries
+  live. Run `issues comments --number N` *before* creating the worktree, and when a comment
+  contradicts the body, **the later comment wins** — work to it and say so. This is not optional
+  and not a "if there's time" step: skipping it is how an agent builds the wrong thing well.
 
 ## Lifecycle
 
 ### 1. Start work
 
-- **Read the issue *and its comments* first.** The body alone can be stale — clarifications,
-  scope corrections, and decisions often live in the comments. Fetch both before you plan:
+- **Read the issue *and its comments* first — required, not optional** (see the red flag above).
+  The body alone can be stale — clarifications, scope corrections, and decisions often live in
+  the comments. Fetch both before you plan anything:
   ```
   flight issues get      --number N
   flight issues comments --number N
   ```
-  If a comment contradicts the body, the later comment wins — work to that, and say so.
+  Then **state what you read** before moving on — e.g. "read #N: body + 3 comments, latest
+  2026-09-06 by dave" (or "no comments") — so the user can see the thread was consulted. If a
+  comment contradicts the body, the later comment wins — work to that, and say so explicitly.
 - Determine the issue number `N` and derive a short slug from its title (lowercase, hyphens, no
   special characters) — e.g. issue #42 "Add login page" → slug `add-login-page`.
 - Pick `feature` vs `bug` from the issue's type label or content.

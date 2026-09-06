@@ -56,10 +56,13 @@ resolution). These drive the PR's `$KEYWORD #N` lines (see Step 4) and the test-
 
 ## Step 3: Test plans (pr hops) — HALT if missing
 
-For each resolved `#N`, fetch the issue and draft a user-visible test plan:
+For each resolved `#N`, fetch the issue **and its comments** and draft a user-visible test plan.
+Scope corrections and acceptance changes live in the thread, and the work-ledger comments say
+what was actually built — the plan must test *that*, not the original body:
 
 ```
-flight issues get --number N
+flight issues get      --number N
+flight issues comments --number N
 ```
 
 Write one plan per issue (numbered steps + an `Expected:` line; or `- no user surface — verify

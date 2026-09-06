@@ -13,7 +13,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- **Reading an issue's comments on pickup is now an explicit requirement** (#82): a red flag in
+  `working-an-issue` ("the later comment wins"), a required first step in the `queue-batches`
+  worker prompt (workers previously never fetched comments), and `promoting-a-branch` /
+  `promoting-branches` read comments before drafting test plans.
 
 ## [0.11.0] - 2026-09-06
 
