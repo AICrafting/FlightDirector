@@ -33,6 +33,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   invocation to it, with a compaction-proof red flag — a bare `git` command is a bug — so an
   agent that has `cd`'d elsewhere can no longer commit to the wrong repo or branch. The
   guidance also notes that `git -C "$WT" add <path>` resolves `<path>` relative to `$WT`.
+- **Feature worktrees now start from an up-to-date `stages[0]`** (#84): `working-an-issue`
+  Step 1, the `queue-batches` worker prompt, and `promoting-branches`' integration worktree all
+  fetch `origin/<stages[0]>` and compare before `worktree add` — level → proceed, behind →
+  fast-forward or fork from the origin tip (and say so), ahead/diverged → **STOP** rather than
+  `git pull`. Offline or with no remote, work continues from the local ref but the base is
+  reported as **unverified**, and the pickup line states the base's freshness either way.
 
 ### Security
 

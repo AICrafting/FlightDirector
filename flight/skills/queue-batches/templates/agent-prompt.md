@@ -63,15 +63,35 @@ For each issue `#N` with slug `<slug>`:
    ```
    If the thread materially changes the issue from what the batch plan assumed, use the safety
    valve (below) rather than silently building to the new reading.
-2. **Create the worktree off `stages[0]`** (anchored to `{repo_root}`, never to `$PWD`), and
-   bind its path to `$WT` — every git command from here on is `git -C "$WT" …`:
+2. **Verify `{base_branch}` is current, then create the worktree off it** (anchored to
+   `{repo_root}`, never to `$PWD`), and bind its path to `$WT` — every git command from here on is
+   `git -C "$WT" …`. You run in parallel with sibling zones, so the base is the ref most likely to
+   have moved under you — never fork from a stale local ref:
    ```bash
-   ROOT="{repo_root}"
-   git -C "$ROOT" worktree add -b "feature/<N>-<slug>" \
-     "$ROOT/.worktrees/<N>-<slug>" "{base_branch}"
-   WT="$ROOT/.worktrees/<N>-<slug>"
+   if git -C "{repo_root}" remote get-url origin >/dev/null 2>&1 \
+      && git -C "{repo_root}" fetch -q origin "{base_branch}"; then
+       LOCAL="$(git -C "{repo_root}" rev-parse "{base_branch}")"
+       REMOTE="$(git -C "{repo_root}" rev-parse "origin/{base_branch}")"
+       MB="$(git -C "{repo_root}" merge-base "{base_branch}" "origin/{base_branch}")"
+   else
+       LOCAL=offline   # no origin, or the fetch failed
+   fi
+   ```
+   - **Level** (`LOCAL` = `REMOTE`) → fork from `{base_branch}`. Note *"base {base_branch}:
+     level with origin"*.
+   - **Behind** (`LOCAL` = `MB`) → **fork from `origin/{base_branch}`** (simplest and safest
+     while siblings run: don't move a shared local branch under them) and say how far behind it
+     was. Never work from the stale ref.
+   - **Ahead or diverged** (`REMOTE` = `MB`, or neither) → **STOP.** Do not create the worktree,
+     do not `git pull`. Safety-valve with `status=blocked` and report the divergence.
+   - **Offline / no origin** → warn, continue from local `{base_branch}`, and record the base as
+     **UNVERIFIED** in the log line and in your finishing record.
+   ```bash
+   git -C "{repo_root}" worktree add -b "feature/<N>-<slug>" \
+     "{repo_root}/.worktrees/<N>-<slug>" "<the ref the check selected>"
+   WT="{repo_root}/.worktrees/<N>-<slug>"
    {dispatcher} issues set-status --number <N> --status in-progress
-   echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=starting comments=<count>" >> {log_path}
+   echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=starting comments=<count> base=<level|ff-N|unverified>" >> {log_path}
    ```
 3. **Work inside `$WT`, driving git there by path rather than by `cd`.** Re-read the issue's
    Acceptance section *as amended by the comments*;
@@ -134,6 +154,8 @@ answer. Shipping 3 solid issues beats forcing 5 shaky ones.
 - **Dispatcher only** for backend access (`{dispatcher} issues …`) — never curl or MCP.
 - **Tests green after every commit.**
 - **Safety-valve on uncertainty** rather than guessing.
+- **Never fork a feature branch from an unfetched `{base_branch}`**, and never `git pull` to
+  "fix" a diverged one — stop and report.
 
 ## Repo-specific rules
 

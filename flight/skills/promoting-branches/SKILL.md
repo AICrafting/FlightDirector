@@ -31,6 +31,9 @@ reinvent. Manifest state is managed by the `batch-manifest` command.
   acts on whichever directory you last landed in. Bind `$MAIN` once in Step 1 and anchor
   everything after it; paths passed to an anchored command resolve relative to that `-C`
   directory, not to your current one.
+- **Never build an integration worktree on an unfetched `BASE`.** Fetch and compare before every
+  `worktree add` off `stages[0]` (Step 4). Local ahead of / diverged from `origin/$BASE` → STOP
+  and report; never `git pull` to reconcile it.
 
 ## Step 1: Resolve the hop
 
@@ -101,7 +104,14 @@ git -C "$MAIN" push   # once, after the group's merges
 
 ```bash
 INT="batch/<zone-or-run>-<short>"
-git -C "$MAIN" worktree add -b "$INT" "$SCRATCH/int-<zone>" "$BASE"
+# Build the integration branch on the CURRENT tip of BASE, never a stale local ref.
+# Fetch and compare first (same three cases as working-an-issue Step 1):
+#   level    → fork from "$BASE"
+#   behind   → fork from "origin/$BASE" and say how far behind local was
+#   ahead/diverged → STOP; report it, do not pull or reconcile
+#   offline / no origin → warn, fork from local "$BASE", mark the base UNVERIFIED in the report
+git -C "$MAIN" fetch -q origin "$BASE" || echo "base $BASE UNVERIFIED (fetch failed)" >&2
+git -C "$MAIN" worktree add -b "$INT" "$SCRATCH/int-<zone>" "<the ref the check selected>"
 for each branch in the group:
     git -C "$SCRATCH/int-<zone>" merge --no-ff "feature/<N>-<slug>" \
       || { git -C "$SCRATCH/int-<zone>" merge --abort; record SKIPPED(<N>, conflict); }
@@ -160,3 +170,5 @@ manifest for a re-run.
 - Running a bare `git merge` / `git push` / `git worktree remove` inside the per-branch loop.
   You move between worktrees constantly here; anchor every command with `-C "$MAIN"` (or the
   integration worktree's path) so it can never act on the wrong one.
+- Creating the integration worktree off a `BASE` nobody fetched — the whole batch is then built
+  on stale code and every PR carries the drift.
