@@ -54,23 +54,33 @@ If you hit a decision not covered here, use the **safety valve** — don't guess
 
 For each issue `#N` with slug `<slug>`:
 
-1. **Create the worktree off `stages[0]`** (run from `{repo_root}`):
+1. **Read the issue AND its comments — before anything else.** The plan you were handed was
+   built from the issue *body*; the comment thread may have since changed the scope, the
+   acceptance, or the decision. When a comment contradicts the body, **the later comment wins**.
+   ```bash
+   {dispatcher} issues get      --number <N>
+   {dispatcher} issues comments --number <N>
+   ```
+   If the thread materially changes the issue from what the batch plan assumed, use the safety
+   valve (below) rather than silently building to the new reading.
+2. **Create the worktree off `stages[0]`** (run from `{repo_root}`):
    ```bash
    git -C "{repo_root}" worktree add -b "feature/<N>-<slug>" \
      "{repo_root}/.worktrees/<N>-<slug>" "{base_branch}"
    {dispatcher} issues set-status --number <N> --status in-progress
-   echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=starting" >> {log_path}
+   echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=starting comments=<count>" >> {log_path}
    ```
-2. **Work inside `{repo_root}/.worktrees/<N>-<slug>`.** Re-read the issue's Acceptance section;
+3. **Work inside `{repo_root}/.worktrees/<N>-<slug>`.** Re-read the issue's Acceptance section
+   *as amended by the comments*;
    treat each bullet as a separate must-pass condition. Tests must pass after every commit; one
    commit per issue (small logical subcommits OK). Midway, optionally:
    ```bash
    echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=working note=\"<short>\"" >> {log_path}
    ```
-3. **Before declaring done — walk the user-visible surface.** Don't satisfy only the literal
+4. **Before declaring done — walk the user-visible surface.** Don't satisfy only the literal
    acceptance phrase; trace every related field/element a reporter would see. If the real scope
    is materially larger than the issue's framing, safety-valve instead of shipping a narrow read.
-4. **Hand to the merge gate (do NOT promote):**
+5. **Hand to the merge gate (do NOT promote):**
    ```bash
    {dispatcher} issues set-status --number <N> --status to-test
    # Write your finishing record (work summary + model/token note; see working-an-issue
