@@ -5,7 +5,7 @@
 # integration smoke). Run on demand, and in CI via .forgejo/workflows/tests.yml.
 set -euo pipefail
 
-TEST_DIR="$(cd "$(dirname "$0")/tests" && pwd)"
+TEST_DIR="$(cd "$(dirname "$0")" && pwd)/tests"
 fail=0
 ran=0
 
