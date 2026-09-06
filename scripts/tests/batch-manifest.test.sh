@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Unit tests for lightspeed/scripts/batch-manifest.
+# Unit tests for flight/scripts/batch-manifest.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-BM="$REPO_ROOT/lightspeed/scripts/batch-manifest"
+BM="$REPO_ROOT/flight/scripts/batch-manifest"
 
 pass=0; fail=0
 check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=$((pass+1));
@@ -11,13 +11,13 @@ check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=
 
 SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
 export BATCH_MANIFEST_ROOT="$SANDBOX"
-DIR="$SANDBOX/.lightspeed/batches"
+DIR="$SANDBOX/.flightdirector/batches"
 
 # --- write ---
-"$BM" write --run-id RUN1 --zone lightspeed --issues "18 93 12" --zone docs --issues "40 41"
+"$BM" write --run-id RUN1 --zone flight --issues "18 93 12" --zone docs --issues "40 41"
 check "write creates the manifest file" "$([ -f "$DIR/RUN1.json" ] && echo 1 || echo 0)"
-check "write records zone lightspeed issues" \
-	"$([ "$(jq -c '.zones.lightspeed' "$DIR/RUN1.json")" = "[18,93,12]" ] && echo 1 || echo 0)"
+check "write records zone flight issues" \
+	"$([ "$(jq -c '.zones.flight' "$DIR/RUN1.json")" = "[18,93,12]" ] && echo 1 || echo 0)"
 check "write records zone docs issues" \
 	"$([ "$(jq -c '.zones.docs' "$DIR/RUN1.json")" = "[40,41]" ] && echo 1 || echo 0)"
 check "write records runId" \
@@ -42,7 +42,7 @@ else
 	check "errors on path-traversal --run-id" 1
 fi
 check "path-traversal --run-id wrote no file outside batches dir" \
-	"$([ ! -e "$SANDBOX/.lightspeed/evil.json" ] && echo 1 || echo 0)"
+	"$([ ! -e "$SANDBOX/.flightdirector/evil.json" ] && echo 1 || echo 0)"
 
 if "$BM" write --run-id 2>/dev/null; then
 	check "errors on trailing flag with no value" 0
@@ -57,25 +57,25 @@ else
 fi
 
 # --- groups: merges same-named zones across manifests, unions + sorts ---
-"$BM" write --run-id RUN2 --zone lightspeed --issues "12 7" --zone rig --issues "50"
+"$BM" write --run-id RUN2 --zone flight --issues "12 7" --zone rig --issues "50"
 groups_out="$("$BM" groups | sort)"
-check "groups lists lightspeed union sorted (7,12,18,93)" \
-	"$(printf '%s\n' "$groups_out" | grep -qxF "$(printf 'lightspeed\t7,12,18,93')" && echo 1 || echo 0)"
+check "groups lists flight union sorted (7,12,18,93)" \
+	"$(printf '%s\n' "$groups_out" | grep -qxF "$(printf 'flight\t7,12,18,93')" && echo 1 || echo 0)"
 check "groups lists docs (40,41)" \
 	"$(printf '%s\n' "$groups_out" | grep -qxF "$(printf 'docs\t40,41')" && echo 1 || echo 0)"
 check "groups lists rig (50)" \
 	"$(printf '%s\n' "$groups_out" | grep -qxF "$(printf 'rig\t50')" && echo 1 || echo 0)"
 
 # --- heal: keep only live issues; drop empty zones; delete empty manifests ---
-# Live set keeps only docs's 40,41. RUN1 loses lightspeed but keeps docs;
-# RUN2 loses both lightspeed and rig → deleted.
+# Live set keeps only docs's 40,41. RUN1 loses flight but keeps docs;
+# RUN2 loses both flight and rig → deleted.
 "$BM" heal --live "40 41"
 check "heal deletes a manifest with no zones left (RUN2)" \
 	"$([ ! -f "$DIR/RUN2.json" ] && echo 1 || echo 0)"
 check "heal keeps RUN1 (docs survives)" \
 	"$([ -f "$DIR/RUN1.json" ] && echo 1 || echo 0)"
-check "heal drops emptied zone lightspeed from RUN1" \
-	"$([ "$(jq -c '.zones.lightspeed // "gone"' "$DIR/RUN1.json")" = '"gone"' ] && echo 1 || echo 0)"
+check "heal drops emptied zone flight from RUN1" \
+	"$([ "$(jq -c '.zones.flight // "gone"' "$DIR/RUN1.json")" = '"gone"' ] && echo 1 || echo 0)"
 check "heal keeps docs in RUN1" \
 	"$([ "$(jq -c '.zones.docs' "$DIR/RUN1.json")" = "[40,41]" ] && echo 1 || echo 0)"
 

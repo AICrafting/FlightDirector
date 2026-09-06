@@ -1,25 +1,29 @@
-# Cerebral Gardens — Claude Code plugins
+# Flight Director — Claude Code + Codex plugins
 
-A [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins).
-Add it once, then install any plugin below.
+**AI Crafting**'s [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins)
+(marketplace name `flightdirector`). Add it once, then install any plugin below.
 
 ```
 /plugin marketplace add <this-repo> (eg: https://hostname/owner/repo.git [.git is required]) 
-/plugin install lightspeed@cerebralgardens
+/plugin install flight@flightdirector
 ```
 
 ## Plugins
 
+These are the **Flight Director** family of plugins (`flight` is the first; `launchpad`,
+`preflight`, `mission-control`, `telemetry` and friends will follow). `flight` was previously
+called `lightspeed` during initial development/testing.
+
 | Plugin | What it does |
 |---|---|
-| [`lightspeed`](lightspeed/) | Opinionated issue + code workflow for a repo from a session — filing, triaging, and working issues through their lifecycle, plus label bootstrapping — over the backend's REST API (Forgejo today), no MCP server required. |
+| [`flight`](flight/) | Opinionated issue + code workflow for a repo from a session — filing, triaging, and working issues through their lifecycle, plus label bootstrapping — over the backend's REST API (Forgejo today), no MCP server required. |
 
 ## Layout
 
 ```
 .
 ├── .claude-plugin/marketplace.json   # lists every plugin in this repo
-├── lightspeed/                       # one plugin (its own .claude-plugin/plugin.json)
+├── flight/                       # one plugin (its own .claude-plugin/plugin.json)
 │   ├── .claude-plugin/plugin.json
 │   ├── references/
 │   └── skills/

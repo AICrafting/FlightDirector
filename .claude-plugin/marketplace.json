@@ -1,18 +1,19 @@
 {
-  "name": "cerebralgardens",
+  "name": "flightdirector",
   "owner": {
-    "name": "Cerebral Gardens",
+    "name": "AI Crafting",
     "email": "dave@cerebralgardens.com"
   },
   "metadata": {
-    "description": "Cerebral Gardens' Claude Code plugins."
+    "description": "The Flight Director family of Claude Code plugins, by AI Crafting."
   },
   "plugins": [
     {
-      "name": "lightspeed",
-      "source": "./lightspeed",
+      "name": "flight",
+      "source": "./flight",
       "description": "Opinionated issue + code workflow for a repo from within a session — first-run setup, filing, triaging, and working issues through their lifecycle — over the backend's REST API (Forgejo or GitHub), no MCP server required.",
-      "version": "0.9.0",
+      "version": "0.11.0",
+      "license": "MIT",
       "keywords": ["forgejo", "github", "issues", "pull-requests", "workflow", "setup", "triage", "labels"]
     }
   ]

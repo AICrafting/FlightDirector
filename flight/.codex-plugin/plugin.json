@@ -1,0 +1,11 @@
+{
+  "name": "flight",
+  "version": "0.11.0",
+  "license": "MIT",
+  "description": "Opinionated issue and code workflow for Forgejo, GitHub, GitLab, and Jira.",
+  "author": {
+    "name": "AI Crafting"
+  },
+  "keywords": ["forgejo", "github", "gitlab", "jira", "issues", "pull-requests", "workflow"],
+  "skills": "./skills/"
+}

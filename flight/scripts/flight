@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+#
+# flight dispatcher — the single entrypoint skills call.
+#
+#   flight <group> <verb> [--flag value …]
+#
+# Owns ALL config/secrets/axis logic, then execs the right backend adapter with
+# the resolved coordinates + token in the environment. Adapters stay pure: they
+# read LS_* and never parse config or know which axis they serve. See
+# ../references/adapter-contract.md and docs/adr/0001-*.
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+ADAPTERS_DIR="$SELF_DIR/adapters"
+
+die() { echo "flight: $*" >&2; exit 1; }
+
+[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci config reconcile)"
+group="$1"; verb="$2"; shift 2
+
+# Which config axis backs this group.
+case "$group" in
+  issues|labels) axis="issues" ;;
+  pr|ci)         axis="code" ;;
+  config|reconcile) axis="" ;;   # handled below; no adapter needed
+  *) die "unknown group '$group' (expected: issues labels pr ci config reconcile)" ;;
+esac
+
+command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
+
+# Resolve the MAIN repo root — parent of the common git dir — so this works the
+# same from the main checkout and from a linked worktree (whose gitignored
+# .flightdirector/secrets.json does not exist locally). Falls back to cwd outside a repo.
+if cdir="$(git rev-parse --git-common-dir 2>/dev/null)"; then
+  cdir="$(cd "$cdir" && pwd)" || die "cannot resolve git common dir: $cdir"   # absolutize (valid relative to cwd)
+  repo_root="$(dirname "$cdir")"
+else
+  repo_root="$(pwd)"
+fi
+# Config home: `.flightdirector/` (family-level, shared by every Flight Director
+# plugin). The pre-rename `.lightspeed/` folder is still honoured as a fallback so
+# already-configured repos keep working; it is deprecated and setting-up-a-repo
+# offers the move. Config and secrets resolve independently so a half-migrated
+# repo (config moved, gitignored secrets not yet) still runs.
+cfg_dir="$repo_root/.flightdirector"
+if [ ! -f "$cfg_dir/config.json" ] && [ -f "$repo_root/.lightspeed/config.json" ]; then
+  cfg_dir="$repo_root/.lightspeed"
+  echo "flight: notice — reading legacy .lightspeed/config.json; the config folder is now .flightdirector/ (deprecated fallback: run setting-up-a-repo, or \`git mv .lightspeed .flightdirector\`)." >&2
+fi
+cfg="$cfg_dir/config.json"
+sec="$cfg_dir/secrets.json"
+[ -f "$sec" ] || { [ -f "$repo_root/.lightspeed/secrets.json" ] && sec="$repo_root/.lightspeed/secrets.json"; } || true
+cfg_rel="${cfg#"$repo_root"/}"
+sec_rel="${sec#"$repo_root"/}"
+
+# `flight reconcile --harness claude|codex` — cheap, idempotent compatibility
+# preflight. It mutates only metadata, preserves unknown keys, and refuses to
+# stamp an older installed plugin over a newer recorded version.
+if [ "$group" = "reconcile" ]; then
+  [ "$verb" = "--harness" ] || die "usage: flight reconcile --harness <claude|codex>"
+  harness="${1:-}"
+  case "$harness" in claude|codex) ;; *) die "unsupported harness '$harness' (expected claude or codex)" ;; esac
+  [ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
+  manifest="$SELF_DIR/../.codex-plugin/plugin.json"
+  [ -f "$manifest" ] || manifest="$SELF_DIR/../.claude-plugin/plugin.json"
+  version="$(jq -r '.version // empty' "$manifest")"
+  [ -n "$version" ] || die "cannot determine installed Flight version"
+  recorded="$(jq -r --arg h "$harness" '.harnesses[$h].reconciledWith // empty' "$cfg")"
+  [ "$recorded" = "$version" ] && exit 0
+  if [ -n "$recorded" ] && [ "$(printf '%s\n%s\n' "$version" "$recorded" | sort -V | tail -n1)" = "$recorded" ]; then
+    die "config was reconciled by newer Flight $recorded; refusing downgrade to $version"
+  fi
+  tmp="$(mktemp "$cfg.tmp.XXXXXX")"
+  trap 'rm -f "$tmp"' EXIT
+  jq --arg h "$harness" --arg v "$version" \
+    '.schemaVersion = (.schemaVersion // 1) | .harnesses = (.harnesses // {}) | .harnesses[$h].reconciledWith = $v' \
+    "$cfg" >"$tmp"
+  jq -e . "$tmp" >/dev/null
+  chmod --reference="$cfg" "$tmp" 2>/dev/null || true
+  mv "$tmp" "$cfg"
+  trap - EXIT
+  printf 'flight: reconciled %s config with plugin %s\n' "$harness" "$version" >&2
+  exit 0
+fi
+
+# `flight config <jq-filter>` — read the resolved config from anywhere (incl. a worktree).
+if [ "$group" = "config" ]; then
+  [ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
+  jq -r "$verb" "$cfg"
+  exit 0
+fi
+
+[ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
+
+# Loud, every-run warning if the secrets file is tracked by git (it holds a token).
+if [ -f "$sec" ] && git -C "$repo_root" ls-files --error-unmatch "$sec_rel" >/dev/null 2>&1; then
+  echo "flight: WARNING — $sec_rel is tracked by git; it must be gitignored (it contains a token)." >&2
+fi
+
+# Resolve a config field for the axis, inheriting code → issues when absent.
+cfg_get() { jq -r --arg a "$axis" --arg f "$1" '(.[$a][$f]) // (.code[$f]) // empty' "$cfg"; }
+
+backend="$(cfg_get backend)"
+[ -n "$backend" ] || die "no backend configured for axis '$axis' (set code.backend or ${axis}.backend in $cfg_rel)"
+
+LS_API="$(cfg_get api)"
+LS_OWNER="$(cfg_get owner)"
+LS_REPO="$(cfg_get repo)"
+# Generic passthroughs (backend-agnostic; empty unless the config sets them).
+# `project` is a first-class coordinate for backends like Jira (the project key);
+# `email` is needed by backends that use email:token HTTP Basic auth (Jira).
+LS_PROJECT="$(cfg_get project)"
+LS_TRUNK="$(jq -r '(.code.trunkBranch) // (.code.stages[0].name) // empty' "$cfg")"
+LS_LABELS_JSON="$(jq -c '.labels // {}' "$cfg")"
+# CI-watch hang-guard timeout (seconds). Precedence: env override → config
+# code.ciWatchTimeout → adapter default (900). Empty stays empty so the adapter
+# falls back to its own default.
+LS_CI_WATCH_TIMEOUT="${LS_CI_WATCH_TIMEOUT:-$(jq -r '.code.ciWatchTimeout // empty' "$cfg")}"
+
+# Token: env override first, then secrets file (axis, inheriting code → issues).
+LS_TOKEN="${LS_TOKEN:-${FORGEJO_TOKEN:-}}"
+if [ -z "$LS_TOKEN" ] && [ -f "$sec" ]; then
+  LS_TOKEN="$(jq -r --arg a "$axis" '(.[$a].token) // (.code.token) // empty' "$sec")"
+fi
+# Email (for email:token Basic auth): env override, then config, then secrets.
+LS_EMAIL="${LS_EMAIL:-$(cfg_get email)}"
+if [ -z "$LS_EMAIL" ] && [ -f "$sec" ]; then
+  LS_EMAIL="$(jq -r --arg a "$axis" '(.[$a].email) // (.code.email) // empty' "$sec")"
+fi
+
+adapter="$ADAPTERS_DIR/$backend/$group"
+[ -x "$adapter" ] || die "no '$group' adapter for backend '$backend' (expected $adapter)"
+
+export LS_API LS_OWNER LS_REPO LS_PROJECT LS_EMAIL LS_TRUNK LS_TOKEN LS_LABELS_JSON LS_CI_WATCH_TIMEOUT LS_BACKEND="$backend"
+exec "$adapter" "$verb" "$@"

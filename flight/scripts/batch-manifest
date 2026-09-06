@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Manage per-run queue-batches manifests under .flightdirector/batches/.
+# A manifest records a run's issue→zone grouping so batch-promote can honor
+# "promote each zone" even when queue-batches inferred the zones. Local,
+# transient, gitignored state.
+set -euo pipefail
+
+ROOT="${BATCH_MANIFEST_ROOT:-$(cd "$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")" && pwd)}"
+# Same config-home resolution as the dispatcher: `.flightdirector/`, falling back
+# to the deprecated pre-rename `.lightspeed/` when only that one is configured.
+CFG_DIR="$ROOT/.flightdirector"
+[ -f "$CFG_DIR/config.json" ] || { [ -f "$ROOT/.lightspeed/config.json" ] && CFG_DIR="$ROOT/.lightspeed"; } || true
+DIR="$CFG_DIR/batches"
+
+die() { printf 'batch-manifest: %s\n' "$1" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || die "jq is required"
+
+cmd="${1:-}"; shift 2>/dev/null || true
+
+case "$cmd" in
+write)
+	run_id=""; zones='{}'; cur=""
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--run-id) [ $# -ge 2 ] || die "missing value for $1"; run_id="$2"; shift 2;;
+			--zone)   [ $# -ge 2 ] || die "missing value for $1"; cur="$2"; shift 2;;
+			--issues)
+				[ $# -ge 2 ] || die "missing value for $1"
+				[ -n "$cur" ] || die "--issues given before --zone"
+				# shellcheck disable=SC2086
+				arr="$(printf '%s\n' $2 | jq -R 'select(length>0)|tonumber' | jq -s '.')"
+				zones="$(printf '%s' "$zones" | jq --arg z "$cur" --argjson a "$arr" '.[$z]=$a')"
+				cur=""; shift 2;;
+			*) die "unknown argument: $1";;
+		esac
+	done
+	[ -n "$run_id" ] || die "--run-id is required"
+	[[ "$run_id" =~ ^[A-Za-z0-9_-]+$ ]] || die "invalid --run-id: '$run_id'"
+	mkdir -p "$DIR"
+	jq -n --arg r "$run_id" --argjson z "$zones" '{runId:$r, zones:$z}' > "$DIR/$run_id.json"
+	;;
+groups)
+	[ -d "$DIR" ] || exit 0
+	set -- "$DIR"/*.json
+	[ -e "$1" ] || exit 0
+	jq -rs '
+		(map(.zones // {})
+		 | reduce .[] as $z ({};
+		     reduce ($z | keys_unsorted[]) as $k (.;
+		       .[$k] = ((.[$k] // []) + $z[$k] | unique))))
+		| to_entries[]
+		| "\(.key)\t\(.value | map(tostring) | join(","))"
+	' "$@"
+	;;
+heal)
+	live=""
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--live) [ $# -ge 2 ] || die "missing value for $1"; live="$2"; shift 2;;
+			*) die "unknown argument: $1";;
+		esac
+	done
+	[ -d "$DIR" ] || exit 0
+	# shellcheck disable=SC2086
+	live_json="$(printf '%s\n' $live | jq -R 'select(length>0)|tonumber' | jq -s '.')"
+	for f in "$DIR"/*.json; do
+		[ -e "$f" ] || continue
+		new="$(jq --argjson live "$live_json" '
+			.zones = ( (.zones // {})
+			           | with_entries(.value |= ( (if type == "array" then . else [] end)
+			                                       | map(select(IN($live[]))) ))
+			           | with_entries(select(.value | length > 0)) )
+		' "$f")"
+		if [ "$(printf '%s' "$new" | jq '.zones | length')" -eq 0 ]; then
+			rm -f "$f"
+		else
+			printf '%s\n' "$new" > "$f"
+		fi
+	done
+	;;
+*)
+	die "unknown command: '$cmd' (expected: write|groups|heal)"
+	;;
+esac

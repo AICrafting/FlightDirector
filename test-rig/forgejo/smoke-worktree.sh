@@ -4,8 +4,8 @@
 set -uo pipefail
 RIG_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$RIG_DIR/.work"
-DISP="$RIG_DIR/../../lightspeed/scripts/lightspeed"
-[ -f "$WORK/.lightspeed/config.json" ] || { echo "run ./up.sh first" >&2; exit 1; }
+DISP="$RIG_DIR/../../flight/scripts/flight"
+[ -f "$WORK/.flightdirector/config.json" ] || { echo "run ./up.sh first" >&2; exit 1; }
 
 # Make WORK a real commit so we can add a worktree.
 git -C "$WORK" add -A >/dev/null 2>&1 || true
