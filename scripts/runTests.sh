@@ -2,7 +2,7 @@
 # Runs all script unit tests in scripts/tests/ (*.test.sh) and exits non-zero
 # if any fail. These are unit tests for the repo's own scripts — distinct from
 # scripts/checks/ (pre-push working-tree cleanliness) and test-rig/ (per-backend
-# integration smoke). Run on demand, and in CI via .forgejo/workflows/tests.yml.
+# integration smoke). Run on demand, and in CI via .github/workflows/tests.yml.
 set -euo pipefail
 
 TEST_DIR="$(cd "$(dirname "$0")" && pwd)/tests"

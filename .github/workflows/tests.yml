@@ -10,7 +10,7 @@ on:
 jobs:
   script-tests:
     name: script tests
-    runs-on: docker
+    runs-on: ubuntu-latest
     container:
       image: alpine:latest
     steps:
@@ -19,7 +19,7 @@ jobs:
           apk add --update npm bash gawk git coreutils jq
 
       - name: Checkout
-        uses: https://code.forgejo.org/actions/checkout@v6
+        uses: actions/checkout@v6
 
       - name: Run script tests
         run: |
