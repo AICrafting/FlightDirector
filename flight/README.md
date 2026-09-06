@@ -11,8 +11,9 @@ Seven skills for running an issue + code workflow from Claude Code or Codex usin
 Everything goes through the **flight dispatcher** — `flight <group> <verb>` — which calls
 the backend's REST API with `curl`. Skills resolve its installed path rather than requiring Codex
 to inject the plugin's `bin/` directory into `PATH`.
-Backend-agnostic by design (Forgejo today;
-GitHub/GitLab/etc. behind the same contract later); no MCP server to install.
+Backend-agnostic by design — Forgejo/Gitea, GitHub, and GitLab at full parity, Jira for the issues
+axis, all behind the same adapter contract (see [backends.md](references/backends.md)); no MCP
+server to install.
 
 > **New here?** The **[User Guide](GUIDE.md)** covers why you'd want this, how to install it,
 > first-time setup, and a full worked example (file → triage → work → promote).

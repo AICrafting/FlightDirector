@@ -31,7 +31,7 @@ called `lightspeed` during initial development/testing.
 
 | Plugin | What it does |
 |---|---|
-| [`flight`](flight/) | Opinionated issue + code workflow for a repo from a session — filing, triaging, and working issues through their lifecycle, plus label bootstrapping — over the backend's REST API (Forgejo today), no MCP server required. |
+| [`flight`](flight/) | Opinionated issue + code workflow for a repo from a session — filing, triaging, and working issues through their lifecycle, plus label bootstrapping — over the forge's REST API (Forgejo/Gitea, GitHub, GitLab; Jira for issues), no MCP server required. |
 
 ## Layout
 

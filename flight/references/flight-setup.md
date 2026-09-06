@@ -72,8 +72,11 @@ Backend, coordinates, and preferences, across two independent axes:
   older plugin never downgrades a newer stamp *of the same plugin*. Model discovery is not a
   migration: missing `model/*` labels are created lazily when work-ledger entries are finalized.
 
-- **`api`** — the instance API base (`…/api/v1`), *not* repo-scoped; the dispatcher appends
-  `/repos/<owner>/<repo>`.
+- **`api`** — the backend's API base, *not* repo-scoped; the adapter appends the repo path. Its
+  shape is per backend: Forgejo/Gitea `https://<host>/api/v1`, GitHub `https://api.github.com`,
+  GitLab `https://<host>/api/v4`, Jira the site base. The example above is a Forgejo repo; the
+  same file pointed at GitHub or GitLab differs **only** in `backend` and `api` — see the
+  per-backend sections below and [backends.md](backends.md).
 - **`labels`** — maps each **role** to the **actual label name this repo uses**. Skills and
   adapters speak roles and names; turning a name into its numeric id happens *inside* the
   adapter, so nothing above the adapter ever deals in label ids.
@@ -142,14 +145,16 @@ Point an axis at GitHub by setting its `backend` + `api` in `.flightdirector/con
   "backend": "github",
   "owner": "your-org-or-user",
   "repo": "your-repo",
-  "api": "https://api.github.com",          // note: no /api/v1 (that's Forgejo)
+  "api": "https://api.github.com",          // the API host itself — no version path
   "stages": [ { "name": "main", "merge": "pr" } ]
 }
 ```
 
-The token goes in the gitignored `.flightdirector/secrets.json` (`code.token`), a GitHub PAT with
-**repo** scope (+ **workflow** if you use `ci`). `setting-up-a-repo` does not yet offer GitHub
-as a backend choice — configure GitHub repos by hand-editing `.flightdirector/config.json` for now.
+The token goes in the gitignored `.flightdirector/secrets.json` (`code.token`): a fine-grained PAT
+scoped to the repo with Contents, Issues, and Pull requests read/write (plus Actions read if you
+use `ci`), or a classic PAT with **repo** (+ **workflow**). `setting-up-a-repo` detects a
+`github.com` remote and proposes this config for you. Full permission table in
+[backends.md](backends.md#github-full-parity).
 
 ### GitLab backend
 
@@ -208,17 +213,25 @@ git, it warns loudly on every run (it does not refuse). Add the `.flightdirector
 your `.gitignore` — ignoring the whole family (`secrets.local.json`, `secrets.json.bak`,
 `secrets-github.json`, editor swap copies) rather than the one exact filename.
 
-Token precedence: `LS_TOKEN` / `FORGEJO_TOKEN` in the environment override everything; otherwise
-the secrets file (the axis's token, inheriting `code`'s).
+Token precedence: `LS_TOKEN` or `FLIGHT_TOKEN` in the environment override everything
+(`FORGEJO_TOKEN` is still honoured as the legacy name); otherwise the secrets file (the axis's
+token, inheriting `code`'s).
 
 ## Least-privilege tokens
 
 The point of a per-repo token is blast radius: one scoped to a single repo can't touch another,
-so a misfire fails with `403` instead of writing to the wrong place. On Forgejo, create a token
-with only the two scopes the skills need — `write:repository` (PRs, CI) and `write:issue` (issues
-**and labels**) — not an all-orgs admin token. These two are compatible with a token *restricted
-to a single repository*; do **not** add `write:misc` — the skills don't use it, and Forgejo won't
-let you combine `write:misc` with a single-repo restriction.
+so a misfire fails with `403` instead of writing to the wrong place. Scope the token to the one
+repository or project wherever the backend allows it, and grant only what the skills call:
+
+| Backend | Minimum |
+|---|---|
+| Forgejo/Gitea | `write:repository` (PRs, CI) + `write:issue` (issues **and** labels), restricted to the repo; no `write:misc` |
+| GitHub | fine-grained PAT: Contents, Issues, Pull requests read/write; Actions read for `ci` |
+| GitLab | project access token with the `api` scope (or a fine-grained per-project token) |
+| Jira | unscoped API token — least privilege comes from the account's project role |
+
+Where to create each token and the reasoning behind each minimum is in
+[backends.md](backends.md).
 
 ## How resolution works
 

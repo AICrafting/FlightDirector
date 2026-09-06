@@ -15,6 +15,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
+- **The docs no longer frame flight as a tool for a self-hosted Forgejo instance** (#99). The
+  User Guide, both READMEs, and the config reference now lead with the backend contract —
+  Forgejo/Gitea, GitHub, and GitLab at full parity, Jira for the issues axis — with per-backend
+  prerequisites and least-privilege token tables that link to `references/backends.md` as the
+  single maintained list. The config reference's GitHub section no longer claims
+  `setting-up-a-repo` can't offer GitHub (it detects a `github.com` remote). The dispatcher also
+  accepts a backend-neutral **`FLIGHT_TOKEN`** environment override alongside `LS_TOKEN`;
+  `FORGEJO_TOKEN` keeps working as the legacy name.
+
 - **The reconcile stamp is now scoped per plugin, not just per harness** (#88): schema version 2
   records `harnesses.<harness>.plugins.<plugin>.reconciledWith` instead of a bare
   `harnesses.<harness>.reconciledWith`. `.flightdirector/` is shared by every Flight Director
