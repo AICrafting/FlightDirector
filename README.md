@@ -37,18 +37,29 @@ called `lightspeed` during initial development/testing.
 
 ```
 .
-├── .claude-plugin/marketplace.json   # lists every plugin in this repo
-├── flight/                       # one plugin (its own .claude-plugin/plugin.json)
-│   ├── .claude-plugin/plugin.json
-│   ├── references/
-│   └── skills/
+├── .claude-plugin/marketplace.json   # marketplace manifest — lists every plugin (read by Claude Code AND Codex)
+├── flight/                           # one plugin
+│   ├── .claude-plugin/plugin.json    # Claude Code manifest (version source of truth)
+│   ├── .codex-plugin/plugin.json     # Codex manifest (kept in lockstep by scripts/bump-version.sh)
+│   ├── bin/                          # entrypoints: `flight` (dispatcher), `batch-manifest`, deprecated `lightspeed` shim
+│   ├── scripts/                      # dispatcher + adapters/<backend>/ (forgejo, github, gitlab, jira)
+│   ├── skills/                       # the skills, shared by both harnesses
+│   ├── references/                   # setup, adapter contract, backends, labels
+│   └── GUIDE.md · README.md · CHANGELOG.md
+├── scripts/                          # repo tooling: bump-version.sh, runTests.sh, runChecks.sh, checks/, tests/
+├── test-rig/                         # live adapter rigs per backend (dev tooling, not shipped)
+├── docs/                             # ADRs, dogfooding notes
+├── AGENTS.md · CLAUDE.md             # agent instructions (CLAUDE.md imports AGENTS.md)
 └── README.md
 ```
 
 Each plugin lives in its own top-level directory and carries its own `plugin.json` with an
 independent `version`, so plugins release on their own cadence — the marketplace just
-indexes them. To add a new plugin: create its directory with a `.claude-plugin/plugin.json`,
-then add an entry to `.claude-plugin/marketplace.json`.
+indexes them. To add a new plugin: create its directory with **both** a
+`.claude-plugin/plugin.json` and a `.codex-plugin/plugin.json` (same `name`/`version`;
+`scripts/bump-version.sh` keeps them in lockstep), then add an entry to
+`.claude-plugin/marketplace.json` — Codex reads that same marketplace file, so no
+`.agents/plugins/marketplace.json` is needed.
 
 Working on the tools in this repo? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
