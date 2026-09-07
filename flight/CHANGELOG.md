@@ -13,6 +13,17 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Fixed
+
+- **Batch manifests now drain after a promote** (#98). `promoting-branches` consumed the run
+  manifest with `batch-manifest heal --live "<issues still at to-test>"`, but in a pipeline whose
+  `stages[0].issueStatus` is itself `to-test` (the default multi-stage preset) a promoted issue
+  is *still* labelled to-test, so nothing was ever removed and "promote each zone" kept offering
+  finished runs. New `batch-manifest consume --issues "<promoted>"` removes exactly the promoted
+  issues; `heal --live` stays for the self-heal case (branches/worktrees that vanished). The
+  `queue-batches` preflight now treats a manifest whose issues have no worktrees as stale rather
+  than in-flight.
+
 ### Changed
 
 - **The AGENTS.md breadcrumb no longer names the backend host** (#101). `setting-up-a-repo` Step 9

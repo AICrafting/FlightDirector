@@ -52,25 +52,35 @@ groups)
 		| "\(.key)\t\(.value | map(tostring) | join(","))"
 	' "$@"
 	;;
-heal)
-	live=""
+heal|consume)
+	# heal    --live   "n n …" : KEEP only these issues (self-heal: drop entries whose
+	#                            branches/worktrees vanished outside the workflow).
+	# consume --issues "n n …" : REMOVE exactly these issues (they were just promoted).
+	# Both drop emptied zones and delete emptied manifests. `consume` exists because
+	# "still at to-test" cannot identify promoted issues when stages[0].issueStatus is
+	# itself to-test — the promoted set is known explicitly, so remove it explicitly.
+	nums=""; flag="--live"; [ "$cmd" = "consume" ] && flag="--issues"
 	while [ $# -gt 0 ]; do
 		case "$1" in
-			--live) [ $# -ge 2 ] || die "missing value for $1"; live="$2"; shift 2;;
-			*) die "unknown argument: $1";;
+			"$flag") [ $# -ge 2 ] || die "missing value for $1"; nums="$2"; shift 2;;
+			*) die "unknown argument: $1 (expected $flag)";;
 		esac
 	done
+	[ "$cmd" = "heal" ] || [ -n "$nums" ] || die "consume: --issues is required and must not be empty"
 	[ -d "$DIR" ] || exit 0
 	# shellcheck disable=SC2086
-	live_json="$(printf '%s\n' $live | jq -R 'select(length>0)|tonumber' | jq -s '.')"
+	nums_json="$(printf '%s\n' $nums | jq -R 'select(length>0)|tonumber' | jq -s '.')"
+	# jq filter text — `$n` is a jq variable, not a shell one (hence single quotes).
+	# shellcheck disable=SC2016
+	if [ "$cmd" = "heal" ]; then filter='map(select(IN($n[])))'; else filter='map(select(IN($n[]) | not))'; fi
 	for f in "$DIR"/*.json; do
 		[ -e "$f" ] || continue
-		new="$(jq --argjson live "$live_json" '
+		new="$(jq --argjson n "$nums_json" "
 			.zones = ( (.zones // {})
-			           | with_entries(.value |= ( (if type == "array" then . else [] end)
-			                                       | map(select(IN($live[]))) ))
+			           | with_entries(.value |= ( (if type == \"array\" then . else [] end)
+			                                       | $filter ))
 			           | with_entries(select(.value | length > 0)) )
-		' "$f")"
+		" "$f")"
 		if [ "$(printf '%s' "$new" | jq '.zones | length')" -eq 0 ]; then
 			rm -f "$f"
 		else
@@ -79,6 +89,6 @@ heal)
 	done
 	;;
 *)
-	die "unknown command: '$cmd' (expected: write|groups|heal)"
+	die "unknown command: '$cmd' (expected: write|groups|heal|consume)"
 	;;
 esac

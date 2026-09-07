@@ -56,6 +56,13 @@ ls "$SCRATCH"/queue-status/*.log 2>/dev/null || true
 
 For each leftover, classify from the log's last line: no `ticket=all status=done` → **agent still
 working**; `status=done` but worktrees still present → **done, awaiting serial ship/cleanup**.
+
+A lingering **run manifest** (`batch-manifest groups` prints zones) is *not* by itself a block:
+a manifest whose issues have **no** `.worktrees/<N>-*` worktree left is **stale** — its run was
+promoted but never consumed (or was cleaned up by hand). Drop it with
+`batch-manifest consume --issues "<those numbers>"` and carry on; only a manifest whose issues
+still have worktrees is an in-flight run.
+
 Render the current board (Display format below) and push back:
 
 > 🛑 **Ey — I'm workin' here!** There's still a queue in flight: `auth ◐○○` · `core ✓✓ ⇥ ready`.

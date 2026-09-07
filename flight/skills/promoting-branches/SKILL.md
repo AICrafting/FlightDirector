@@ -176,12 +176,17 @@ LAST=$(( $("$DISP" config '.code.stages | length') - 1 )); CL="$("$DISP" config 
 git -C "$MAIN" worktree remove ".worktrees/<N>-<slug>"
 ```
 
-Then **consume the manifest** for what was promoted:
+Then **consume the manifest** for exactly what was promoted — by number, not by label:
 
 ```bash
-LIVE_AFTER="<issue numbers still at to-test>"
-batch-manifest heal --live "$LIVE_AFTER"
+batch-manifest consume --issues "<the issue numbers promoted in this run>"
 ```
+
+Don't derive this from "issues still at to-test": when `stages[0].issueStatus` is itself
+`to-test` (the default multi-stage preset) a just-promoted issue is *still* labelled to-test, so
+a label-based `heal --live` keeps everything and the manifest never drains. `heal --live` is for
+the self-heal case in Step 3 (entries whose branches/worktrees vanished outside the workflow);
+`consume --issues` is for the issues you just merged.
 
 ## Step 6: Report
 
