@@ -26,6 +26,11 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
+- **Fresh configs spell out each `pr` hop's merge strategy** (#96). `setting-up-a-repo` now writes
+  `"strategy": "merge"` on every `pr` stage in the pipeline presets it offers (and explains the
+  field alongside `merge` and `gate`), so a new repo's `.flightdirector/config.json` is
+  self-describing instead of relying on the documented default. Behaviour is unchanged — `merge`
+  was already the default, and the field applies to `pr` hops only.
 - **The AGENTS.md breadcrumb no longer names the backend host** (#101). `setting-up-a-repo` Step 9
   writes the backend *name* and points at `.flightdirector/config.json` for the host and
   coordinates, so a repo with a public mirror doesn't publish a private forge's hostname; the host

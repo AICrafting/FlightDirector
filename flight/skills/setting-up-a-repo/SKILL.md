@@ -158,7 +158,7 @@ Feature branches fork from `develop`, integrate there directly, then promote to 
 ```json
 "stages": [
   { "name": "develop", "merge": "direct", "gate": "pre-merge" },
-  { "name": "main",    "merge": "pr",     "issueStatus": "done" }
+  { "name": "main",    "merge": "pr",     "strategy": "merge", "issueStatus": "done" }
 ]
 ```
 
@@ -169,8 +169,8 @@ terminal stage (`main`), where they close:
 ```json
 "stages": [
   { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },
-  { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa", "issueStatus": "qa" },
-  { "name": "main",    "merge": "pr",     "issueStatus": "done" }
+  { "name": "qa",      "merge": "pr",     "strategy": "merge", "gate": "post-merge-qa", "issueStatus": "qa" },
+  { "name": "main",    "merge": "pr",     "strategy": "merge", "issueStatus": "done" }
 ]
 ```
 
@@ -181,6 +181,9 @@ afterward per [flight-setup.md](../../references/flight-setup.md).
 **Defaults explained briefly:**
 - Feature branches fork from `stages[0]` (the first integration branch).
 - `merge: "direct"` integrates by merging locally; `merge: "pr"` opens a pull request for the hop.
+- `strategy` (per stage, optional) is how a `pr` hop's PR is merged into that stage: `merge` |
+  `squash` | `rebase`, default `merge`. It applies to `pr` hops only — a `direct` hop always
+  merges with `--no-ff`. See [flight-setup.md](../../references/flight-setup.md).
 - `gate: "pre-merge"` runs checks before merging; `gate: "post-merge-qa"` merges then verifies in
   that environment. The gate governs *merging only*.
 - `issueStatus` (per stage, optional) sets the issue's status label on entering that stage;
@@ -201,8 +204,8 @@ Write `.flightdirector/config.json` in the `.flightdirector/` folder (created in
   "code": { "backend": "forgejo", "owner": "…", "repo": "…", "api": "https://…/api/v1",
     "stages": [
       { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },
-      { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa", "issueStatus": "qa" },
-      { "name": "main",    "merge": "pr",     "issueStatus": "done" }
+      { "name": "qa",      "merge": "pr",     "strategy": "merge", "gate": "post-merge-qa", "issueStatus": "qa" },
+      { "name": "main",    "merge": "pr",     "strategy": "merge", "issueStatus": "done" }
     ],
     "queueBatches": { "defaultModel": "sonnet" } },
   "labels": {
