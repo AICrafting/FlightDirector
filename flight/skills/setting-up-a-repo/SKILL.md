@@ -333,15 +333,21 @@ harnesses. Resolve the target like this, and tell the user which case applied:
 Don't suggest a symlink (`CLAUDE.md -> AGENTS.md`): it breaks on Windows without Developer
 Mode and leaves no room for Claude-only notes. The import is the documented pattern.
 
-Append this block — with the *actual* backend, host, and stage names from the config — to the
-resolved file. Show it to the user before writing (it's their instructions file):
+Append this block — with the *actual* backend and stage names from the config — to the
+resolved file. Show it to the user before writing (it's their instructions file).
+
+**Do not write the host into the block by default.** Agent-instruction files are committed and
+travel with every clone and public mirror; a private forge's hostname doesn't belong there, and
+the breadcrumb doesn't need it — its job is to stop agents reaching for `gh` and to point them at
+the dispatcher, which reads the host from `.flightdirector/config.json`. Name the host only if
+the user says the repo is private and asks for it spelled out.
 
 ```markdown
 ## Issue tracking — flight
 
 This repo manages issues/PRs/CI with the **flight** plugin. The backend is
-**<backend>** at `<host>` — NOT GitHub — so never reach for `gh` here.
-Coordinates, stage pipeline, and label names live in `.flightdirector/config.json`
+**<backend>** — NOT GitHub — so never reach for `gh` here. Its host,
+coordinates, stage pipeline, and label names live in `.flightdirector/config.json`
 (token in `.flightdirector/secrets.json`, git-ignored). Act through the flight
 skills (working-an-issue, promoting-a-branch, filing-issues, …) or the
 dispatcher: `flight <group> <verb>`.
@@ -361,7 +367,28 @@ earlier instructions were summarized away or the model changed mid-session:
 
 For a GitHub-backend repo, keep the block but drop the "NOT GitHub" clause and say plainly that
 issue actions still go through the dispatcher/skills, not raw `gh`. For a split setup, name both
-axes (e.g. "code on Forgejo at …, issues in Jira project ABC").
+axes (e.g. "code on Forgejo, issues in Jira project ABC").
+
+**Offer a local-notes file for anything private.** Notes that must not be published — the real
+host of a self-hosted forge, homelab caveats, personal conventions — go in a **gitignored
+`AGENTS.local.md`** next to `AGENTS.md`, and `AGENTS.md` gets a short section that pulls it in
+for both harnesses:
+
+```markdown
+## Additional local notes
+
+Claude:
+@AGENTS.local.md
+
+Codex:
+Please read the file AGENTS.local.md if it exists and treat its contents as if
+it were in this file directly.
+```
+
+Claude Code resolves the nested `@AGENTS.local.md` import (a missing import is silently skipped,
+so public clones lose nothing); Codex has no import mechanism, so the plain-prose instruction
+does the same job. If the user wants this, add `AGENTS.local.md` to `.gitignore` **before**
+creating the file, then create it with a heading and the notes they dictate.
 
 **Idempotent:** if either file already has an "Issue tracking — flight" section — or the
 pre-rename "Issue tracking — lightspeed" one — update it in place (the backend may have changed,

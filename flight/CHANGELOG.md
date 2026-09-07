@@ -13,6 +13,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Changed
+
+- **The AGENTS.md breadcrumb no longer names the backend host** (#101). `setting-up-a-repo` Step 9
+  writes the backend *name* and points at `.flightdirector/config.json` for the host and
+  coordinates, so a repo with a public mirror doesn't publish a private forge's hostname; the host
+  is spelled out only if the user asks. Setup also offers a gitignored **`AGENTS.local.md`** for
+  private notes, pulled in by a nested `@AGENTS.local.md` import for Claude Code and a one-line
+  read-this-file instruction for Codex, so both harnesses see it and public clones lose nothing.
+
 ### Added
 
 - **A bundled, harness-neutral prompt ledger** (#46; Codex producer in #83). Opt in with
