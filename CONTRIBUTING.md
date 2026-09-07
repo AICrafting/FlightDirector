@@ -164,7 +164,8 @@ Blank issues are disabled; pick one of the forms:
 Pull requests are pre-filled from
 [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md), which mirrors what the
 `promoting-a-branch` skill produces: a summary, a `## Test plans` block (numbered steps ending
-in `Expected:`), the `Ready #N` / `Closes #N` lines, and the signed-commit checklist.
+in `Expected:`), the `Ready #N` / `Closes #N` lines, and the signed-commit checklist —
+review is routed to the owners listed in [`.github/CODEOWNERS`](.github/CODEOWNERS).
 
 ## Cutting a release
 
