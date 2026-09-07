@@ -1,0 +1,6 @@
+{"timestamp":"2026-09-06T12:30:00Z","type":"session_meta","payload":{"id":"thread-subagent","session_id":"session-parent","model_provider":"openai","cli_version":"0.153.4","source":{"subagent":{"thread_spawn":{"parent_thread_id":"session-parent","depth":1,"agent_path":"/root/worker"}}}}}
+{"timestamp":"2026-09-06T12:30:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-subagent","started_at":1788697801}}
+{"timestamp":"2026-09-06T12:30:01Z","type":"turn_context","payload":{"turn_id":"turn-subagent","root_turn_id":"turn-parent","model":"gpt-5.6-luna"}}
+{"timestamp":"2026-09-06T12:30:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"delegated work"}]}}
+{"timestamp":"2026-09-06T12:30:02Z","type":"token_usage_record","payload":{"turn_id":"turn-subagent","root_turn_id":"turn-parent","session_id":"session-parent","thread_id":"thread-subagent","turn_token_usage":{"input_tokens":1800,"cached_input_tokens":1400,"cache_write_input_tokens":0,"output_tokens":210,"reasoning_output_tokens":80,"total_tokens":2010}}}
+{"timestamp":"2026-09-06T12:30:03Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-subagent","started_at":1788697801,"completed_at":1788697803,"duration_ms":2000}}

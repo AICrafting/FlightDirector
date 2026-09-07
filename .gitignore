@@ -1,6 +1,7 @@
 # Miscellaneous
 *.log
 .DS_Store
+__pycache__/
 
 # VS Code
 **/.vscode/

@@ -7,5 +7,6 @@
     "name": "AI Crafting"
   },
   "keywords": ["forgejo", "github", "gitlab", "jira", "issues", "pull-requests", "workflow"],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "hooks": "./hooks/codex-hooks.json"
 }
