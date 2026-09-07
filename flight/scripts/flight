@@ -15,15 +15,15 @@ ADAPTERS_DIR="$SELF_DIR/adapters"
 
 die() { echo "flight: $*" >&2; exit 1; }
 
-[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci config reconcile)"
+[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci config reconcile prompt-log)"
 group="$1"; verb="$2"; shift 2
 
 # Which config axis backs this group.
 case "$group" in
   issues|labels) axis="issues" ;;
   pr|ci)         axis="code" ;;
-  config|reconcile) axis="" ;;   # handled below; no adapter needed
-  *) die "unknown group '$group' (expected: issues labels pr ci config reconcile)" ;;
+  config|reconcile|prompt-log) axis="" ;;   # handled below; no adapter needed
+  *) die "unknown group '$group' (expected: issues labels pr ci config reconcile prompt-log)" ;;
 esac
 
 command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
@@ -107,6 +107,27 @@ sec="$cfg_dir/secrets.json"
 [ -f "$sec" ] || { [ -f "$repo_root/.lightspeed/secrets.json" ] && sec="$repo_root/.lightspeed/secrets.json"; } || true
 cfg_rel="${cfg#"$repo_root"/}"
 sec_rel="${sec#"$repo_root"/}"
+
+# Prompt logging is opt-in per repository. Hook processes must be silent when
+# the switch or config is absent because bundled hooks run in every project.
+if [ "$group" = "prompt-log" ]; then
+	case "$verb" in prompt|stop|interrupt|subagent-stop|summary) ;; *) die "usage: flight prompt-log <prompt|stop|interrupt|subagent-stop|summary>" ;; esac
+	# `summary` is the consumer side (work-ledger totals for a session); it needs
+	# no harness and ignores the opt-in switch — it only reads what producers wrote.
+	if [ "$verb" = "summary" ]; then
+		export FLIGHT_REPO_ROOT="$repo_root"
+		exec python3 "$SELF_DIR/prompt-logger/summary.py" "$@"
+	fi
+	harness="${LS_HARNESS:-}"
+	if [ -z "$harness" ] && [ "${1:-}" = "--harness" ] && [ $# -eq 2 ]; then harness="$2"; fi
+	case "$harness" in claude|codex) ;; *) die "prompt-log: set LS_HARNESS to claude or codex" ;; esac
+	[ -f "$cfg" ] || exit 0
+	jq -e '.code.promptLog.enabled == true' "$cfg" >/dev/null 2>&1 || exit 0
+	producer="$SELF_DIR/prompt-logger/$harness.py"
+	[ -f "$producer" ] || die "prompt-log: $harness producer is not installed"
+	export FLIGHT_REPO_ROOT="$repo_root" FLIGHT_CONFIG_DIR="$cfg_dir"
+	exec python3 "$producer" "$verb"
+fi
 
 # `flight reconcile --harness claude|codex` — cheap, idempotent compatibility
 # preflight. It mutates only metadata, preserves unknown keys, and refuses to

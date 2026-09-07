@@ -138,6 +138,23 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
   `.flightdirector/agent-rules.md`; if that file is absent, workers run with the skill's built-in
   safety rules only (no project-specific rules).
 
+### Prompt ledger (optional, off by default)
+
+```jsonc
+"code": {
+  "promptLog": { "enabled": true }
+}
+```
+
+- `code.promptLog.enabled` — turns on the bundled prompt/cost logger for this repo. The plugin
+  ships hooks for both harnesses; they run `flight prompt-log <mode>`, which exits silently unless
+  this is `true`, so the switch is the only producer control. When on, every turn appends one
+  record to `prompt_log.jsonl` at the main worktree root (gitignore it — records contain prompt
+  text) and `working-an-issue` sums them per session for the work-ledger comment via
+  `flight prompt-log summary`. Schema, pricing, and semantics: [prompt-log.md](prompt-log.md).
+- `.flightdirector/pricing.json` — optional per-repo pricing override/extension, merged on top of
+  the bundled `flight/scripts/prompt-logger/pricing.json` (same shape).
+
 ### GitHub backend
 
 Point an axis at GitHub by setting its `backend` + `api` in `.flightdirector/config.json`:
