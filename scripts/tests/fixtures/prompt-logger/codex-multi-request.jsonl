@@ -1,0 +1,7 @@
+{"timestamp":"2026-09-06T12:10:00Z","type":"session_meta","payload":{"id":"thread-multi","session_id":"session-multi","model_provider":"openai","cli_version":"0.153.4"}}
+{"timestamp":"2026-09-06T12:10:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-multi","started_at":1788696601}}
+{"timestamp":"2026-09-06T12:10:01Z","type":"turn_context","payload":{"turn_id":"turn-multi","model":"gpt-6-astra"}}
+{"timestamp":"2026-09-06T12:10:02Z","type":"token_usage_record","payload":{"turn_id":"turn-multi","turn_token_usage":{"input_tokens":1000,"cached_input_tokens":500,"cache_write_input_tokens":0,"output_tokens":100,"reasoning_output_tokens":20,"total_tokens":1100}}}
+{"timestamp":"2026-09-06T12:10:03Z","type":"token_usage_record","payload":{"turn_id":"turn-multi","turn_token_usage":{"input_tokens":3500,"cached_input_tokens":2000,"cache_write_input_tokens":0,"output_tokens":450,"reasoning_output_tokens":120,"total_tokens":3950}}}
+{"timestamp":"2026-09-06T12:10:04Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-multi","started_at":1788696601,"completed_at":1788696604,"duration_ms":3000}}
+{"timestamp":"2026-09-06T12:10:05Z","type":"token_usage_record","payload":{"turn_id":"other-turn","turn_token_usage":{"input_tokens":999999,"cached_input_tokens":999999,"cache_write_input_tokens":9,"output_tokens":999999,"reasoning_output_tokens":999999,"total_tokens":1999998}}}

@@ -13,7 +13,53 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.12.0] - 2026-09-07
+
+### Added
+
+- **A bundled, harness-neutral prompt ledger** (#46; Codex producer in #83). Opt in with
+  `code.promptLog.enabled: true` and the plugin's bundled hooks append one record per agent turn
+  — prompt, model, tokens, estimated cost, cost basis — to a gitignored `prompt_log.jsonl` at
+  the main worktree root, from **Claude Code and Codex alike, into the same file with the same
+  schema** (`references/prompt-log.md`). The Claude producer sums a turn's requests once each
+  (Claude Code writes one transcript entry per content block), logs subagent turns under the
+  parent session, and prices per model from one shared `pricing.json` that a repo can extend
+  with `.flightdirector/pricing.json`. New dispatcher route `flight prompt-log
+  <prompt|stop|interrupt|subagent-stop|summary>`; `summary --session <id>` renders the
+  per-harness × model totals the work-ledger comment pastes in, saying "estimate only" only
+  when a session has no rows. Missing usage or an unknown model is `null` plus a stderr warning,
+  never a silent zero. `working-an-issue`, the `queue-batches` worker prompt, and
+  `setting-up-a-repo` (which now offers the switch) are updated. Absorbs #60 and #61.
+
+- **Codex can now write measured per-turn and delegated usage to the shared prompt ledger**
+  (#83). Plugin-bundled hooks capture prompts, completed or interrupted turn usage, and
+  subagent usage through the shared `flight prompt-log` route. Records are scoped to the exact
+  Codex turn and distinguish API-key cost from ChatGPT subscription API-equivalent cost. The
+  shared table includes official Standard short-context prices for current Codex model families;
+  missing pricing remains explicit as null fields with a visible warning.
+
 ### Changed
+
+- **Fresh configs spell out each `pr` hop's merge strategy** (#96). `setting-up-a-repo` now writes
+  `"strategy": "merge"` on every `pr` stage in the pipeline presets it offers (and explains the
+  field alongside `merge` and `gate`), so a new repo's `.flightdirector/config.json` is
+  self-describing instead of relying on the documented default. Behaviour is unchanged — `merge`
+  was already the default, and the field applies to `pr` hops only.
+- **The AGENTS.md breadcrumb no longer names the backend host** (#101). `setting-up-a-repo` Step 9
+  writes the backend *name* and points at `.flightdirector/config.json` for the host and
+  coordinates, so a repo with a public mirror doesn't publish a private forge's hostname; the host
+  is spelled out only if the user asks. Setup also offers a gitignored **`AGENTS.local.md`** for
+  private notes, pulled in by a nested `@AGENTS.local.md` import for Claude Code and a one-line
+  read-this-file instruction for Codex, so both harnesses see it and public clones lose nothing.
+
+- **Model provenance labels are now derived deterministically by the dispatcher** (#85).
+  `flight labels model-family --id <id>` recognizes GPT/Claude codenames and vendor prefixes,
+  while `labels ensure --model <id>` creates the standard `model/<family>` label metadata.
+  Common OpenAI families (Sol, Terra, Luna, Astra) are seeded during setup, finishing skills call
+  the helper instead of interpreting model ids in prose, and `labels edit` provides an
+  association-preserving rename path on Forgejo, GitHub, and GitLab (Jira labels remain free text).
 
 - **The docs no longer frame flight as a tool for a self-hosted Forgejo instance** (#99). The
   User Guide, both READMEs, and the config reference now lead with the backend contract —
@@ -63,6 +109,24 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   `promoting-a-branch` Step 1 now resolves `$STRATEGY` from the target stage and Step 4 merges
   with it; its worked example changed from `--strategy squash` to the resolved value. The knob
   applies to `pr` hops only — a `direct` hop always merges `--no-ff`.
+
+### Fixed
+
+- **`flight prompt-log summary` now names models it couldn't price and says how to fix it** (#60).
+  Rows for a model missing from the pricing table were already kept (tokens recorded, cost
+  `null`) and marked `(+N unpriced)`, but the note that lands in the work-ledger comment now
+  names the model(s) and points at `.flightdirector/pricing.json`; the JSON aggregate gains
+  `unpriced_models`. Hook-time stderr warnings aren't reliably visible in a session, so the
+  summary is where the user actually learns about the gap.
+
+- **Batch manifests now drain after a promote** (#98). `promoting-branches` consumed the run
+  manifest with `batch-manifest heal --live "<issues still at to-test>"`, but in a pipeline whose
+  `stages[0].issueStatus` is itself `to-test` (the default multi-stage preset) a promoted issue
+  is *still* labelled to-test, so nothing was ever removed and "promote each zone" kept offering
+  finished runs. New `batch-manifest consume --issues "<promoted>"` removes exactly the promoted
+  issues; `heal --live` stays for the self-heal case (branches/worktrees that vanished). The
+  `queue-batches` preflight now treats a manifest whose issues have no worktrees as stale rather
+  than in-flight.
 
 ### Security
 

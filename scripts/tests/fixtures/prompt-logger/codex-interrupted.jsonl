@@ -1,0 +1,4 @@
+{"timestamp":"2026-09-06T12:20:00Z","type":"session_meta","payload":{"id":"thread-interrupt","session_id":"session-interrupt","model_provider":"openai","cli_version":"0.153.4"}}
+{"timestamp":"2026-09-06T12:20:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-interrupt","started_at":1788697201}}
+{"timestamp":"2026-09-06T12:20:01Z","type":"turn_context","payload":{"turn_id":"turn-interrupt","model":"gpt-5.6-terra"}}
+{"timestamp":"2026-09-06T12:20:02Z","type":"token_usage_record","payload":{"turn_id":"turn-interrupt","turn_token_usage":{"input_tokens":700,"cached_input_tokens":300,"cache_write_input_tokens":0,"output_tokens":40,"reasoning_output_tokens":15,"total_tokens":740}}}

@@ -93,6 +93,39 @@ check "heal survives a manifest with no .zones (others still healed)" \
 check "heal deletes the malformed zero-zone manifest" \
 	"$([ ! -f "$DIR/BAD.json" ] && echo 1 || echo 0)"
 
+# --- consume: remove exactly the promoted issues, regardless of their status label ---
+rm -f "$DIR"/*.json
+"$BM" write --run-id RUN4 --zone skills --issues "64 65 66 84" --zone docs --issues "78 79 87" --zone config --issues "80 88"
+"$BM" consume --issues "80 88"
+check "consume removes an entire zone when all its issues were promoted (config)" \
+	"$([ "$(jq -c '.zones.config // "gone"' "$DIR/RUN4.json")" = '"gone"' ] && echo 1 || echo 0)"
+check "consume leaves the other zones untouched" \
+	"$([ "$(jq -c '.zones.skills' "$DIR/RUN4.json")" = "[64,65,66,84]" ] && [ "$(jq -c '.zones.docs' "$DIR/RUN4.json")" = "[78,79,87]" ] && echo 1 || echo 0)"
+"$BM" consume --issues "65 84"
+check "consume removes a subset within a zone" \
+	"$([ "$(jq -c '.zones.skills' "$DIR/RUN4.json")" = "[64,66]" ] && echo 1 || echo 0)"
+"$BM" consume --issues "999"
+check "consume with an unknown issue is a no-op" \
+	"$([ "$(jq -c '.zones.skills' "$DIR/RUN4.json")" = "[64,66]" ] && echo 1 || echo 0)"
+"$BM" consume --issues "64 66 78 79 87"
+check "consume deletes the manifest once every zone is emptied" \
+	"$([ ! -f "$DIR/RUN4.json" ] && echo 1 || echo 0)"
+if "$BM" consume --issues "" 2>/dev/null; then
+	check "consume errors on an empty --issues (would silently do nothing)" 0
+else
+	check "consume errors on an empty --issues (would silently do nothing)" 1
+fi
+if "$BM" consume --live "1" 2>/dev/null; then
+	check "consume rejects --live (heal's flag)" 0
+else
+	check "consume rejects --live (heal's flag)" 1
+fi
+# heal still works unchanged after the refactor
+"$BM" write --run-id RUN5 --zone a --issues "1 2" --zone b --issues "3"
+"$BM" heal --live "2 3"
+check "heal after refactor keeps only the live issues" \
+	"$([ "$(jq -c '.zones' "$DIR/RUN5.json")" = '{"a":[2],"b":[3]}' ] && echo 1 || echo 0)"
+
 printf '\033[1m────────────────────────────\033[0m\n'
 printf 'Passed: %d  Failed: %d\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

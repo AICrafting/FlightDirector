@@ -1,0 +1,5 @@
+{"timestamp":"2026-09-06T12:00:00Z","type":"session_meta","payload":{"id":"thread-main","session_id":"session-main","model_provider":"openai","cli_version":"0.153.4"}}
+{"timestamp":"2026-09-06T12:00:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-main","started_at":1788696001}}
+{"timestamp":"2026-09-06T12:00:01Z","type":"turn_context","payload":{"turn_id":"turn-main","model":"gpt-5.6-sol"}}
+{"timestamp":"2026-09-06T12:00:02Z","type":"token_usage_record","payload":{"turn_id":"turn-main","turn_token_usage":{"input_tokens":1200,"cached_input_tokens":800,"cache_write_input_tokens":0,"output_tokens":90,"reasoning_output_tokens":30,"total_tokens":1290}}}
+{"timestamp":"2026-09-06T12:00:03Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-main","started_at":1788696001,"completed_at":1788696003,"duration_ms":2000}}

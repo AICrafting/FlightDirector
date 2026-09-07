@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# GitHub labels adapter — verbs: list resolve create.
+# GitHub labels adapter — verbs: list resolve create ensure edit.
 # See ../../../references/adapter-contract.md.
 set -euo pipefail
 ADAPTER_NAME="github/labels"
@@ -56,5 +56,16 @@ case "$verb" in
     else _LABELS_CACHE=""; id="$(label_id "$name")"; [ -n "$id" ] || exit 1; printf '%s\n' "$id"; fi
     ;;
 
-  *) die "unknown verb '${verb}' (labels: list resolve create ensure)" ;;
+  edit)
+    name=""; new_name=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --name) name="$2"; shift 2 ;; --new-name) new_name="$2"; shift 2 ;;
+      *) die "labels edit: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$name" ] || die "labels edit: --name required"; [ -n "$new_name" ] || die "labels edit: --new-name required"
+    payload="$(jq -n --arg n "$new_name" '{new_name:$n}')"
+    _api PATCH "/labels/$(urlenc "$name")" "$payload" | jq -r '.id'
+    ;;
+
+  *) die "unknown verb '${verb}' (labels: list resolve create ensure edit)" ;;
 esac

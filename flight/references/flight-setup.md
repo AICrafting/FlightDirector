@@ -9,6 +9,8 @@ API with `curl`. There is no MCP server, and no token handling in the skills the
 ## Prerequisites
 
 - `curl` and `jq` on `PATH`.
+- `python3` (standard library only) — **only** if you turn on the prompt ledger
+  (`code.promptLog.enabled`); nothing else in flight needs it.
 - A per-repo API token (least privilege — see below). Nothing to install or run.
 
 ## Two config files in the `.flightdirector/` folder
@@ -54,7 +56,9 @@ Backend, coordinates, and preferences, across two independent axes:
       "deferred":    "status/deferred"
     },
     "model": { "opus": "model/opus", "sonnet": "model/sonnet",
-               "haiku": "model/haiku", "fable": "model/fable" }
+               "haiku": "model/haiku", "fable": "model/fable",
+               "sol": "model/sol", "terra": "model/terra",
+               "luna": "model/luna", "astra": "model/astra" }
   }
 }
 ```
@@ -135,6 +139,23 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
   agent hard-rules / CI gotchas, injected verbatim into each worker prompt. Defaults to
   `.flightdirector/agent-rules.md`; if that file is absent, workers run with the skill's built-in
   safety rules only (no project-specific rules).
+
+### Prompt ledger (optional, off by default)
+
+```jsonc
+"code": {
+  "promptLog": { "enabled": true }
+}
+```
+
+- `code.promptLog.enabled` — turns on the bundled prompt/cost logger for this repo. The plugin
+  ships hooks for both harnesses; they run `flight prompt-log <mode>`, which exits silently unless
+  this is `true`, so the switch is the only producer control. When on, every turn appends one
+  record to `prompt_log.jsonl` at the main worktree root (gitignore it — records contain prompt
+  text) and `working-an-issue` sums them per session for the work-ledger comment via
+  `flight prompt-log summary`. Schema, pricing, and semantics: [prompt-log.md](prompt-log.md).
+- `.flightdirector/pricing.json` — optional per-repo pricing override/extension, merged on top of
+  the bundled `flight/scripts/prompt-logger/pricing.json` (same shape).
 
 ### GitHub backend
 

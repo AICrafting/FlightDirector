@@ -1,0 +1,49 @@
+{
+	"description": "Optional Codex prompt and token ledger for Flight Director projects.",
+	"hooks": {
+		"UserPromptSubmit": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "LS_HARNESS=codex \"$PLUGIN_ROOT/bin/flight\" prompt-log prompt",
+						"timeout": 30
+					}
+				]
+			}
+		],
+		"Stop": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "LS_HARNESS=codex \"$PLUGIN_ROOT/bin/flight\" prompt-log stop",
+						"timeout": 30
+					}
+				]
+			}
+		],
+		"Interrupt": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "LS_HARNESS=codex \"$PLUGIN_ROOT/bin/flight\" prompt-log interrupt",
+						"timeout": 3
+					}
+				]
+			}
+		],
+		"SubagentStop": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "LS_HARNESS=codex \"$PLUGIN_ROOT/bin/flight\" prompt-log subagent-stop",
+						"timeout": 30
+					}
+				]
+			}
+		]
+	}
+}

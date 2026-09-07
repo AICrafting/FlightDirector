@@ -164,7 +164,8 @@ Blank issues are disabled; pick one of the forms:
 Pull requests are pre-filled from
 [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md), which mirrors what the
 `promoting-a-branch` skill produces: a summary, a `## Test plans` block (numbered steps ending
-in `Expected:`), the `Ready #N` / `Closes #N` lines, and the signed-commit checklist.
+in `Expected:`), the `Ready #N` / `Closes #N` lines, and the signed-commit checklist —
+review is routed to the owners listed in [`.github/CODEOWNERS`](.github/CODEOWNERS).
 
 ## Cutting a release
 
@@ -189,6 +190,22 @@ then:
 
 The **dev-marketplace cache refresh** stays a manual step — it lives outside the repo;
 see [docs/plugin-marketplace-dogfooding.md](docs/plugin-marketplace-dogfooding.md).
+
+**Tagging.** The bump happens on a `release/<plugin>-<version>` branch merged into `develop`;
+the *tag* happens once that version has been promoted all the way to `main`. Then run:
+
+```bash
+scripts/tag-release.sh flight            # add --dry-run first to see the plan
+```
+
+It reads the version from `flight/.claude-plugin/plugin.json` at `origin/main`, refuses if the
+tag `flight-<version>` already exists anywhere (tags are immutable — bump and ship the next
+version instead), takes that version's `flight/CHANGELOG.md` section as the notes (and refuses if
+it is missing), creates a signed annotated tag on the `main` commit, pushes it to `origin`
+(`--push-to github` as well if you want the mirror tagged), and creates the matching Forgejo
+Release with the same notes using the coordinates in `.flightdirector/config.json` and the token
+in `.flightdirector/secrets.json` (`--no-release` to skip). `scripts/release-notes.sh` is the
+changelog-section extractor it uses; both are repo tooling, not part of the plugin.
 
 ## Writing skills
 

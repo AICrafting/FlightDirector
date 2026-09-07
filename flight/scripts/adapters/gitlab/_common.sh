@@ -19,6 +19,9 @@ PROJECT_API="${LS_API%/}/projects/${PROJECT_ENC}"
 
 die() { echo "${ADAPTER_NAME:-gitlab}: $*" >&2; exit 1; }
 
+# Percent-encode one URL path segment. Label names commonly contain '/'.
+urlenc() { printf '%s' "$1" | jq -sRr @uri; }
+
 # GitLab auth header applied to every request (personal/project access token).
 GL_HEADERS=(-H "PRIVATE-TOKEN: ${LS_TOKEN}")
 

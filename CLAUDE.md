@@ -8,21 +8,16 @@ belong below.
 
 ## Claude Code specifics
 
-### Prompt logging
+### Prompt logging (the cost ledger)
 
-Every prompt is automatically logged to `prompt_log.jsonl` (git-ignored) via hooks in `.claude/settings.local.json` (personal/local — the hooks shell out to scripts in `~/.claude-shared`, so they don't travel with the repo). Each line is a JSON record:
+Each agent turn is logged — prompt, model, tokens, estimated cost — to a git-ignored
+`prompt_log.jsonl` at the repo root, by the **flight plugin's bundled hooks**. Claude Code and
+Codex write the same file with the same schema, so the work-ledger comment on a finished issue
+is measured with `flight prompt-log summary --session <id>` rather than guessed. The switch is
+`code.promptLog.enabled` in `.flightdirector/config.json`; the record format, pricing, and
+semantics are documented once in `flight/references/prompt-log.md` — don't duplicate them here.
 
-```json
-{
-  "timestamp": "2026-04-10T12:00:00.000000+00:00",
-  "session_id": "abc123",
-  "prompt": "...",
-  "model": "claude-sonnet-4-6-20251001",
-  "input_tokens": 1234,
-  "output_tokens": 567,
-  "cache_creation_tokens": 0,
-  "cache_read_tokens": 0,
-  "cost_usd": 0.012345,
-  "duration_seconds": 4.2
-}
-```
+Switchover note for this repo: the older personal logger (`~/.claude-shared/hooks/prompt_logger.py`,
+wired in `.claude/settings.local.json`) must be removed when the bundled ledger is enabled, or
+every turn is logged twice. The bundled hooks take effect only once the dogfood plugin cache is
+refreshed to a build that contains them.

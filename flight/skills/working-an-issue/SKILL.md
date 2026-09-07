@@ -184,25 +184,34 @@ Only after explicit approval:
    issue's comment thread is a running ledger (initial code, later follow-up code, and QA each
    append their own entry). Write it to a scratchpad file and pass `--body-file`:
    - A summary of the work done in **this** episode.
-   - **Token cost, token counts, and model(s).** Preferred source: a `prompt_log.jsonl` in the
-     repo root, if maintained (each line has `session_id`, `model`, token counts, `cost_usd`).
-     Filter to this work's `session_id`(s), sum `cost_usd`/tokens, read `model`. If no such log
-     exists, fall back to a rough estimate and the model you know you're running. (The log is
-     optional and personal — gitignored, not shipped by this plugin.)
+   - **Token cost, token counts, and model(s).** Preferred source: the repo's prompt ledger
+     (`prompt_log.jsonl`, written by the plugin's bundled hooks when `code.promptLog.enabled` is
+     on — both Claude Code and Codex write the same file). Don't hand-sum it; let the dispatcher
+     render the block and paste it into the ledger file:
+     ```
+     flight prompt-log summary --session "$SESSION_ID" [--session <another id>] >> "$SCRATCH/done.md"
+     ```
+     It totals per harness × model (subagent rows included), prints the cost basis
+     (`actual-api` vs `api-equivalent`), flags rows with no usage as a lower bound, and — only
+     when the session truly has no rows — says "estimate only", in which case add your own
+     rough estimate and the model you know you're running. Your `session_id` is in the hook
+     payloads / transcript path; if you can't determine it, pass every session id that worked
+     this issue. Schema and semantics: [prompt-log.md](../../references/prompt-log.md).
    ```
    flight issues comment --number N --body-file "$SCRATCH/done.md"
    ```
-2. **Ensure and add the `model/<primary>` label** for the main model used — the one with the most
-   tokens/cost in the log when available, else the model you ran. Normalize to the stable model
-   family (`gpt-5.6-sol` → `sol`, `claude-opus-4.7` → `opus`). For an unknown family, lowercase
-   and replace non-alphanumeric runs with hyphens rather than guessing. Create the label lazily;
-   `labels ensure` preserves an existing label and safely handles parallel creators. Later
-   episodes may add another `model/*`. See `model/*` in
-   [default-labels.md](../../references/default-labels.md):
+2. **Ensure and add the `model/<primary>` label** for the worked-by model with the most
+   tokens/cost in the log when available, else the model you ran. The dispatcher owns the stable
+   family convention (`gpt-5.6-sol` → `sol`, `claude-opus-4.7` → `opus`); do not derive it in
+   prose. A tool/service id exits non-zero so it can be skipped. `labels ensure --model` preserves
+   existing metadata and safely handles parallel creators. Later episodes may add another
+   `model/*`. See `model/*` in [default-labels.md](../../references/default-labels.md):
    ```
-   flight labels ensure --name model/sol --color "#d97757" \
-     --description "Issue was worked on using Sol"
-   flight issues label-add --number N --label model/sol
+   PRIMARY_MODEL=gpt-5.6-sol
+   if FAMILY="$(flight labels model-family --id "$PRIMARY_MODEL")"; then
+     flight labels ensure --model "$PRIMARY_MODEL"
+     flight issues label-add --number N --label "model/$FAMILY"
+   fi
    ```
 3. **Promote the branch** `feature/<N>-<slug>` → `stages[0]` using `promoting-a-branch` (invoke
    the skill in this session). It applies the hop's merge strategy/gate **and** drives the

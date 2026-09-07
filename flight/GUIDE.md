@@ -41,7 +41,8 @@ the whole lifecycle into the session:
 ## What you need
 
 - **Claude Code or Codex** (the same package supplies skills to both harnesses).
-- **`curl`** and **`jq`** on your `PATH`.
+- **`curl`** and **`jq`** on your `PATH` (plus **`python3`**, standard library only, if you turn
+  on the optional [cost ledger](#cost-ledger-optional)).
 - A repo you can push to on a **supported backend** — Forgejo/Gitea (self-hosted), GitHub, or
   GitLab (gitlab.com or self-managed). Issues can optionally live in Jira instead.
 - A **per-repo, least-privilege API token** for that backend. Scope it to the one repository and
@@ -237,6 +238,28 @@ stage between `develop` and `main`. The skills pick it up immediately. For worke
 and 4 hops — with contrasting `direct`/`pr`, merge-strategy, and issue-status configs, plus how
 batch-promote differs by first-hop strategy — see
 [example-flows.md](references/example-flows.md).
+
+---
+
+## Cost ledger (optional)
+
+Every finished issue gets a **work-ledger comment**: what was done, on which model, and what it
+cost. Turn on the **prompt ledger** and those numbers are measured instead of guessed:
+
+```jsonc
+// .flightdirector/config.json
+"code": { "promptLog": { "enabled": true } }
+```
+
+The plugin's bundled hooks then append one record per agent turn — prompt, model, tokens,
+estimated cost — to a gitignored `prompt_log.jsonl` at the repo root. **Claude Code and Codex
+write the same file with the same schema**, so a project worked from both (even at once) has one
+ledger, and `flight prompt-log summary --session <id>` renders the per-model totals the
+ledger comment pastes in. Cost is priced from a bundled table you can extend per repo
+(`.flightdirector/pricing.json`); under a subscription login it is labelled `api-equivalent` —
+what the tokens *would* cost via the API, good for comparing issues, not a bill. Unknown models
+and unreadable transcripts show up as `null` with a warning, never as a silent zero. Full schema
+and semantics: [prompt-log.md](references/prompt-log.md).
 
 ---
 

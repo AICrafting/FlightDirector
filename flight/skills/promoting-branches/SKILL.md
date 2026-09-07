@@ -161,10 +161,13 @@ promoted** `#N`:
 # 1. Ensure a work-ledger comment exists (queue-batches branches already have one from done-<N>.md;
 #    otherwise write a short finishing record and post it):
 "$DISP" issues comment --number <N> --body-file "$SCRATCH/done-<N>.md"
-# 2. lazily ensure + add the normalized model-family label:
-"$DISP" labels ensure --name model/<primary> --color "#d97757" \
-  --description "Issue was worked on using <Primary>"
-"$DISP" issues label-add --number <N> --label model/<primary>
+# 2. Ask the dispatcher for the stable family, then lazily ensure + add it.
+#    A tool/service id returns non-zero and is skipped:
+PRIMARY_MODEL=<model-id-from-ledger>
+if FAMILY="$("$DISP" labels model-family --id "$PRIMARY_MODEL")"; then
+  "$DISP" labels ensure --model "$PRIMARY_MODEL"
+  "$DISP" issues label-add --number <N> --label "model/$FAMILY"
+fi
 # 3. Stage-driven status/close (do NOT hard-code):
 IS="$("$DISP" config '.code.stages[0].issueStatus // empty')"; [ -n "$IS" ] && "$DISP" issues set-status --number <N> --status "$IS"
 LAST=$(( $("$DISP" config '.code.stages | length') - 1 )); CL="$("$DISP" config '.code.stages[0].closesIssues // null')"
@@ -173,12 +176,17 @@ LAST=$(( $("$DISP" config '.code.stages | length') - 1 )); CL="$("$DISP" config 
 git -C "$MAIN" worktree remove ".worktrees/<N>-<slug>"
 ```
 
-Then **consume the manifest** for what was promoted:
+Then **consume the manifest** for exactly what was promoted — by number, not by label:
 
 ```bash
-LIVE_AFTER="<issue numbers still at to-test>"
-batch-manifest heal --live "$LIVE_AFTER"
+batch-manifest consume --issues "<the issue numbers promoted in this run>"
 ```
+
+Don't derive this from "issues still at to-test": when `stages[0].issueStatus` is itself
+`to-test` (the default multi-stage preset) a just-promoted issue is *still* labelled to-test, so
+a label-based `heal --live` keeps everything and the manifest never drains. `heal --live` is for
+the self-heal case in Step 3 (entries whose branches/worktrees vanished outside the workflow);
+`consume --issues` is for the issues you just merged.
 
 ## Step 6: Report
 
