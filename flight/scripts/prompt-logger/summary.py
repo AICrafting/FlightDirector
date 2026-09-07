@@ -94,12 +94,19 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 		else:
 			group["unpriced_rows"] += 1
 	total_cost = sum(g["cost_usd"] for g in groups.values())
+	# Models that had measured usage but no price: the one thing the user can fix
+	# (add the model to .flightdirector/pricing.json), so name them explicitly.
+	unpriced_models = [
+		{"model": g["model"], "provider": g["provider"], "harness": g["harness"], "rows": g["unpriced_rows"]}
+		for g in groups.values() if g["unpriced_rows"]
+	]
 	return {
 		"rows": len(rows),
 		"unmeasured_rows": unmeasured,
 		"subagent_rows": subagent_rows,
 		"cost_usd": round(total_cost, 6),
 		"cost_basis": sorted(bases),
+		"unpriced_models": sorted(unpriced_models, key=lambda m: (-m["rows"], m["model"])),
 		"groups": sorted(groups.values(), key=lambda g: (-g["cost_usd"], -g["output_tokens"])),
 	}
 
@@ -138,6 +145,14 @@ def render_markdown(summary: dict[str, Any], sessions: list[str]) -> str:
 	if notes:
 		lines.append("")
 		lines.append("_" + "; ".join(notes) + "._")
+	if summary["unpriced_models"]:
+		named = ", ".join(f"**{m['model']}** ({m['provider']}, {m['rows']} row{'s' if m['rows'] != 1 else ''})" for m in summary["unpriced_models"])
+		lines.append("")
+		lines.append(
+			f"_No pricing for {named} — tokens were recorded but excluded from the cost total. "
+			f"Add the model under `families` or `models` in `.flightdirector/pricing.json` "
+			f"(merged over the bundled `flight/scripts/prompt-logger/pricing.json`) and rerun the summary._"
+		)
 	return "\n".join(lines)
 
 

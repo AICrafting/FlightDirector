@@ -146,5 +146,20 @@ check "no rows → explicit 'estimate only' line" "$(grep -q 'estimate only' <<<
 J3="$(cd "$R" && "$DISP" prompt-log summary --session S2 --json)"
 check "legacy rows without provider/harness default to claude/anthropic" "$(jq -e '.groups[0].harness=="claude" and .groups[0].provider=="anthropic"' <<<"$J3" >/dev/null && echo 1 || echo 0)"
 
+# --- unpriced models are named, with the fix (#60) ---
+cat >>"$R/prompt_log.jsonl" <<'EOF'
+{"timestamp":"2026-09-06T12:05:00+00:00","provider":"openai","harness":"codex","session_id":"S3","turn_id":"u1","prompt":"x","model":"gpt-7-nova","input_tokens":100,"output_tokens":10,"reasoning_output_tokens":0,"cache_creation_tokens":0,"cache_read_tokens":0,"cost_usd":null,"cost_basis":null,"duration_seconds":1}
+{"timestamp":"2026-09-06T12:06:00+00:00","provider":"openai","harness":"codex","session_id":"S3","turn_id":"u2","prompt":"y","model":"gpt-7-nova","input_tokens":100,"output_tokens":10,"reasoning_output_tokens":0,"cache_creation_tokens":0,"cache_read_tokens":0,"cost_usd":null,"cost_basis":null,"duration_seconds":1}
+{"timestamp":"2026-09-06T12:07:00+00:00","provider":"anthropic","harness":"claude","session_id":"S3","turn_id":"u3","prompt":"z","model":"claude-fable-5-1","input_tokens":100,"output_tokens":10,"reasoning_output_tokens":0,"cache_creation_tokens":0,"cache_read_tokens":0,"cost_usd":0.01,"cost_basis":"api-equivalent","duration_seconds":1}
+EOF
+MD4="$(cd "$R" && "$DISP" prompt-log summary --session S3)"
+check "unpriced model is named in the summary note" "$(grep -q 'No pricing for \*\*gpt-7-nova\*\* (openai, 2 rows)' <<<"$MD4" && echo 1 || echo 0)"
+check "the note says how to fix it (pricing.json override)" "$(grep -q '\.flightdirector/pricing\.json' <<<"$MD4" && echo 1 || echo 0)"
+check "priced models do not appear in the note" "$(grep 'No pricing for' <<<"$MD4" | grep -qv 'claude-fable-5-1' && echo 1 || echo 0)"
+J4="$(cd "$R" && "$DISP" prompt-log summary --session S3 --json)"
+check "json aggregate lists unpriced_models with row counts" "$(jq -e '.unpriced_models==[{"model":"gpt-7-nova","provider":"openai","harness":"codex","rows":2}]' <<<"$J4" >/dev/null && echo 1 || echo 0)"
+MD5="$(cd "$R" && "$DISP" prompt-log summary --session S1)"
+check "no unpriced note when every measured row is priced" "$(grep -q 'No pricing for' <<<"$MD5" && echo 0 || echo 1)"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

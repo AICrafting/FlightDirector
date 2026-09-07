@@ -15,6 +15,13 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Fixed
 
+- **`flight prompt-log summary` now names models it couldn't price and says how to fix it** (#60).
+  Rows for a model missing from the pricing table were already kept (tokens recorded, cost
+  `null`) and marked `(+N unpriced)`, but the note that lands in the work-ledger comment now
+  names the model(s) and points at `.flightdirector/pricing.json`; the JSON aggregate gains
+  `unpriced_models`. Hook-time stderr warnings aren't reliably visible in a session, so the
+  summary is where the user actually learns about the gap.
+
 - **Batch manifests now drain after a promote** (#98). `promoting-branches` consumed the run
   manifest with `batch-manifest heal --live "<issues still at to-test>"`, but in a pipeline whose
   `stages[0].issueStatus` is itself `to-test` (the default multi-stage preset) a promoted issue
