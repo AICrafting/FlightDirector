@@ -9,8 +9,6 @@ __pycache__/
 # Secrets and sensitive data
 secret*
 .flightdirector/secrets*
-# pre-rename config folder, still honoured
-.lightspeed/secrets*
 
 # - Keys
 *.pem
@@ -19,20 +17,20 @@ secret*
 .claude/settings.local.json
 # Prompt usage log (may contain sensitive prompt content)
 prompt_log.jsonl
+AGENTS.local.md
+.superpowers/
 
 # Git worktrees
 .worktrees/
 
 # flight queue-batches run manifests (transient local state)
 .flightdirector/batches/
-.lightspeed/batches/
 
 # Environment files
 .env
 .env.*
 # Specifically allow .env.example
 !.env.example
-.superpowers/
 
 # External references
 external/
