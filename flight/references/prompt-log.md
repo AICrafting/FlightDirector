@@ -115,6 +115,10 @@ for scripting. `working-an-issue` Step 4 and the `queue-batches` worker prompt c
 
 ## Producers
 
+Both producers and `summary.py` are Python 3, standard library only — `python3` on `PATH` is the
+ledger's one extra prerequisite (the rest of flight is `bash` + `curl` + `jq`). A repo that never
+enables `code.promptLog` never invokes them.
+
 | Harness | Hook file | Events | Producer |
 |---|---|---|---|
 | Claude Code | `flight/hooks/hooks.json` | `UserPromptSubmit`, `Stop`, `SubagentStop` | `flight/scripts/prompt-logger/claude.py` |

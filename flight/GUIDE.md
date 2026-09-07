@@ -41,7 +41,8 @@ the whole lifecycle into the session:
 ## What you need
 
 - **Claude Code or Codex** (the same package supplies skills to both harnesses).
-- **`curl`** and **`jq`** on your `PATH`.
+- **`curl`** and **`jq`** on your `PATH` (plus **`python3`**, standard library only, if you turn
+  on the optional [cost ledger](#cost-ledger-optional)).
 - A repo you can push to on a **supported backend** — Forgejo/Gitea (self-hosted), GitHub, or
   GitLab (gitlab.com or self-managed). Issues can optionally live in Jira instead.
 - A **per-repo, least-privilege API token** for that backend. Scope it to the one repository and

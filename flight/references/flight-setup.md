@@ -9,6 +9,8 @@ API with `curl`. There is no MCP server, and no token handling in the skills the
 ## Prerequisites
 
 - `curl` and `jq` on `PATH`.
+- `python3` (standard library only) — **only** if you turn on the prompt ledger
+  (`code.promptLog.enabled`); nothing else in flight needs it.
 - A per-repo API token (least privilege — see below). Nothing to install or run.
 
 ## Two config files in the `.flightdirector/` folder
