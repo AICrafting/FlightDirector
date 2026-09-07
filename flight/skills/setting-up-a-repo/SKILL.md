@@ -36,8 +36,9 @@ must be proposed from the actual project, not seeded from a table.
 - **Never create `area/*` labels without project input.** They're project-dependent — propose,
   then wait for the user to confirm/edit.
 - **One confirmation gate before creating anything.** Show the full plan first.
-- **Never commit `.flightdirector/secrets.json`.** It holds the token — add it to `.gitignore`
-  before writing it.
+- **Never commit `.flightdirector/secrets.json`.** It holds the token — add the
+  `.flightdirector/secrets*` glob to `.gitignore` before writing it, so backups and
+  per-backend variants (`secrets.local.json`, `secrets.json.bak`, …) can't leak either.
 
 ## Step 0: Detect existing backends — offer, then confirm
 
@@ -59,11 +60,11 @@ the move (show the commands, wait for a yes), then run:
 
 ```
 git mv .lightspeed/config.json .flightdirector/config.json   # tracked → keeps history
-mv .lightspeed/secrets.json .flightdirector/secrets.json     # gitignored → plain mv
+mv .lightspeed/secrets* .flightdirector/                     # gitignored → plain mv (any secrets file)
 rmdir .lightspeed 2>/dev/null || true                        # leave it if anything else is inside
 ```
 
-Then add `.flightdirector/secrets.json` and `.flightdirector/batches/` to `.gitignore` (keep the
+Then add `.flightdirector/secrets*` and `.flightdirector/batches/` to `.gitignore` (keep the
 old `.lightspeed/…` lines if other branches still use them) and continue as a re-run over the
 existing config. Until the move happens the dispatcher keeps working off the legacy folder with a
 one-line notice on stderr — so never block a user on the migration.
@@ -135,11 +136,14 @@ token-creation steps differ per backend (GitHub, GitLab, Forgejo, Jira) — see
 [flight-setup.md](../../references/flight-setup.md) for the config schema. Then:
 
 1. Create the config folder: `mkdir -p .flightdirector`.
-2. Add `.flightdirector/secrets.json`, `.worktrees/`, **and** `.flightdirector/batches/` to `.gitignore`
-   **first** (create `.gitignore` if needed). `.worktrees/` is where `working-an-issue` creates
+2. Add `.flightdirector/secrets*`, `.worktrees/`, **and** `.flightdirector/batches/` to `.gitignore`
+   **first** (create `.gitignore` if needed). Ignore the whole `secrets*` family, not just
+   `secrets.json` — a second token file or a backup made while rotating a token is otherwise one
+   `git add -A` from being committed. `.worktrees/` is where `working-an-issue` creates
    per-issue git worktrees, and `.flightdirector/batches/` is where `queue-batches` writes per-run
    batch manifests — both are per-run local state (not secrets) that must be ignored so they
-   don't appear as untracked content in the repo.
+   don't appear as untracked content in the repo. Add `prompt_log.jsonl` too if the user opts
+   into the prompt ledger in Step 4 (it holds prompt text).
 3. Write `.flightdirector/secrets.json`:
    ```json
    { "code": { "token": "<the token>" } }
@@ -154,7 +158,7 @@ Feature branches fork from `develop`, integrate there directly, then promote to 
 ```json
 "stages": [
   { "name": "develop", "merge": "direct", "gate": "pre-merge" },
-  { "name": "main",    "merge": "pr",     "issueStatus": "done" }
+  { "name": "main",    "merge": "pr",     "strategy": "merge", "issueStatus": "done" }
 ]
 ```
 
@@ -165,8 +169,8 @@ terminal stage (`main`), where they close:
 ```json
 "stages": [
   { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },
-  { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa", "issueStatus": "qa" },
-  { "name": "main",    "merge": "pr",     "issueStatus": "done" }
+  { "name": "qa",      "merge": "pr",     "strategy": "merge", "gate": "post-merge-qa", "issueStatus": "qa" },
+  { "name": "main",    "merge": "pr",     "strategy": "merge", "issueStatus": "done" }
 ]
 ```
 
@@ -177,6 +181,9 @@ afterward per [flight-setup.md](../../references/flight-setup.md).
 **Defaults explained briefly:**
 - Feature branches fork from `stages[0]` (the first integration branch).
 - `merge: "direct"` integrates by merging locally; `merge: "pr"` opens a pull request for the hop.
+- `strategy` (per stage, optional) is how a `pr` hop's PR is merged into that stage: `merge` |
+  `squash` | `rebase`, default `merge`. It applies to `pr` hops only — a `direct` hop always
+  merges with `--no-ff`. See [flight-setup.md](../../references/flight-setup.md).
 - `gate: "pre-merge"` runs checks before merging; `gate: "post-merge-qa"` merges then verifies in
   that environment. The gate governs *merging only*.
 - `issueStatus` (per stage, optional) sets the issue's status label on entering that stage;
@@ -192,13 +199,13 @@ Write `.flightdirector/config.json` in the `.flightdirector/` folder (created in
 
 ```json
 {
-  "schemaVersion": 1,
-  "harnesses": { "claude": { "reconciledWith": "<installed-version>" } },
+  "schemaVersion": 2,
+  "harnesses": { "claude": { "plugins": { "flight": { "reconciledWith": "<installed-version>" } } } },
   "code": { "backend": "forgejo", "owner": "…", "repo": "…", "api": "https://…/api/v1",
     "stages": [
       { "name": "develop", "merge": "direct", "gate": "pre-merge", "issueStatus": "to-test" },
-      { "name": "qa",      "merge": "pr",     "gate": "post-merge-qa", "issueStatus": "qa" },
-      { "name": "main",    "merge": "pr",     "issueStatus": "done" }
+      { "name": "qa",      "merge": "pr",     "strategy": "merge", "gate": "post-merge-qa", "issueStatus": "qa" },
+      { "name": "main",    "merge": "pr",     "strategy": "merge", "issueStatus": "done" }
     ],
     "queueBatches": { "defaultModel": "sonnet" } },
   "labels": {
@@ -206,7 +213,9 @@ Write `.flightdirector/config.json` in the `.flightdirector/` folder (created in
                 "blocked": "status/blocked", "deferred": "status/deferred",
                 "review": "status/review", "qa": "status/qa", "done": "status/done" },
     "model": { "opus": "model/opus", "sonnet": "model/sonnet",
-               "haiku": "model/haiku", "fable": "model/fable" }
+               "haiku": "model/haiku", "fable": "model/fable",
+               "sol": "model/sol", "terra": "model/terra",
+               "luna": "model/luna", "astra": "model/astra" }
   }
 }
 ```
@@ -217,6 +226,14 @@ work; change it here to retarget all future parallel runs (e.g. to a newer model
 the skill. You can also add an optional `code.zones` array later — see
 [flight-setup.md](../../references/flight-setup.md) — to make `queue-batches` schedule
 deterministically instead of inferring zones.
+
+**Offer the prompt ledger (opt-in).** Ask: *"Log each agent turn's prompt, tokens, and estimated
+cost to `prompt_log.jsonl` so issue ledgers are measured rather than estimated? (Both Claude Code
+and Codex write the same file; it stays local and gitignored.)"* If yes, add
+`"promptLog": { "enabled": true }` under `code` and make sure `prompt_log.jsonl` is in
+`.gitignore` (Step 2). The plugin's bundled hooks do the rest — nothing else to install. If the
+user already runs a personal prompt-logger hook (e.g. in `.claude/settings.local.json`), tell them
+to remove it or every turn is logged twice. Details: [prompt-log.md](../../references/prompt-log.md).
 
 Use the `stages` array from the chosen preset (a), (b), or the user's custom pipeline. All six
 status roles (`in-progress`, `to-test`, `blocked`, `deferred`, `review`, `qa`, `done`) are seeded so the
@@ -268,7 +285,8 @@ Show one grouped plan and ask once:
 ```
 Label plan for <owner>/<repo>:
 
-  CREATE  model/opus, model/sonnet, feature, tech-debt, security, ux, bug
+  CREATE  model/opus, model/sonnet, model/sol, model/terra, model/luna, model/astra,
+          feature, tech-debt, security, ux, bug
   ADOPT   awaiting-test ← 'status/testing'   (repo already has it; using yours)
   EXISTS  status/blocked
   AREAS   area/app, area/server, area/db   (proposed from repo layout — confirm)
@@ -318,15 +336,21 @@ harnesses. Resolve the target like this, and tell the user which case applied:
 Don't suggest a symlink (`CLAUDE.md -> AGENTS.md`): it breaks on Windows without Developer
 Mode and leaves no room for Claude-only notes. The import is the documented pattern.
 
-Append this block — with the *actual* backend, host, and stage names from the config — to the
-resolved file. Show it to the user before writing (it's their instructions file):
+Append this block — with the *actual* backend and stage names from the config — to the
+resolved file. Show it to the user before writing (it's their instructions file).
+
+**Do not write the host into the block by default.** Agent-instruction files are committed and
+travel with every clone and public mirror; a private forge's hostname doesn't belong there, and
+the breadcrumb doesn't need it — its job is to stop agents reaching for `gh` and to point them at
+the dispatcher, which reads the host from `.flightdirector/config.json`. Name the host only if
+the user says the repo is private and asks for it spelled out.
 
 ```markdown
 ## Issue tracking — flight
 
 This repo manages issues/PRs/CI with the **flight** plugin. The backend is
-**<backend>** at `<host>` — NOT GitHub — so never reach for `gh` here.
-Coordinates, stage pipeline, and label names live in `.flightdirector/config.json`
+**<backend>** — NOT GitHub — so never reach for `gh` here. Its host,
+coordinates, stage pipeline, and label names live in `.flightdirector/config.json`
 (token in `.flightdirector/secrets.json`, git-ignored). Act through the flight
 skills (working-an-issue, promoting-a-branch, filing-issues, …) or the
 dispatcher: `flight <group> <verb>`.
@@ -346,7 +370,28 @@ earlier instructions were summarized away or the model changed mid-session:
 
 For a GitHub-backend repo, keep the block but drop the "NOT GitHub" clause and say plainly that
 issue actions still go through the dispatcher/skills, not raw `gh`. For a split setup, name both
-axes (e.g. "code on Forgejo at …, issues in Jira project ABC").
+axes (e.g. "code on Forgejo, issues in Jira project ABC").
+
+**Offer a local-notes file for anything private.** Notes that must not be published — the real
+host of a self-hosted forge, homelab caveats, personal conventions — go in a **gitignored
+`AGENTS.local.md`** next to `AGENTS.md`, and `AGENTS.md` gets a short section that pulls it in
+for both harnesses:
+
+```markdown
+## Additional local notes
+
+Claude:
+@AGENTS.local.md
+
+Codex:
+Please read the file AGENTS.local.md if it exists and treat its contents as if
+it were in this file directly.
+```
+
+Claude Code resolves the nested `@AGENTS.local.md` import (a missing import is silently skipped,
+so public clones lose nothing); Codex has no import mechanism, so the plain-prose instruction
+does the same job. If the user wants this, add `AGENTS.local.md` to `.gitignore` **before**
+creating the file, then create it with a heading and the notes they dictate.
 
 **Idempotent:** if either file already has an "Issue tracking — flight" section — or the
 pre-rename "Issue tracking — lightspeed" one — update it in place (the backend may have changed,
@@ -360,6 +405,7 @@ to move it there so there is one copy, not two that drift.
   `enhancement` as the role's name and record it in the config.
 - Creating labels but forgetting to finalize the `labels` map in `.flightdirector/config.json` — then the
   other skills use plugin defaults and ignore the names you adopted.
-- Writing `.flightdirector/secrets.json` without gitignoring it first — that leaks the token.
+- Writing `.flightdirector/secrets.json` without gitignoring `.flightdirector/secrets*` first — that
+  leaks the token.
 - Seeding `area/*` from the table without checking the project.
 - Recoloring or renaming an existing label to match the default. Only add what's missing.

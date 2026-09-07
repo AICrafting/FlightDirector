@@ -10,16 +10,17 @@ on:
 jobs:
   script-tests:
     name: script tests
-    runs-on: docker
+    runs-on: ubuntu-latest
     container:
       image: alpine:latest
     steps:
       - name: Setup tools
         run: |
-          apk add --update npm bash gawk git coreutils jq
+          # python3: the prompt-logger producers/summary (stdlib only) and their tests
+          apk add --update npm bash gawk git coreutils jq python3
 
       - name: Checkout
-        uses: https://code.forgejo.org/actions/checkout@v6
+        uses: actions/checkout@v6
 
       - name: Run script tests
         run: |

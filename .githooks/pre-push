@@ -1,6 +1,41 @@
 #!/usr/bin/env bash
-# Pre-push hook — runs all check scripts before allowing a push.
-# Install with: git config core.hooksPath .githooks
+# Pre-push hook: verify that every commit about to leave the machine is
+# signed, then run the repo checks - the same gates as CI.
+# One-time wiring per clone:
+#   git config core.hooksPath .githooks
+# Bypass in an emergency with: git push --no-verify
+set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-exec "$REPO_ROOT/scripts/runChecks.sh"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# core.hooksPath lives in the shared .git/config, so this hook also fires from
+# sibling worktrees on branches that predate scripts/. Nothing to check there.
+[ -x "$REPO_ROOT/scripts/runChecks.sh" ] || exit 0
+
+remote="${1:-origin}"
+zero="$(git hash-object --stdin </dev/null | tr '0-9a-f' '0')"
+
+# Git feeds one line per ref on stdin:
+#   <local ref> <local sha> <remote ref> <remote sha>
+# Verify exactly the commits each ref will push. For a brand-new remote
+# branch (remote sha all zeros) that's everything not already on the remote.
+# A ref deletion has an all-zero local sha and pushes no commits.
+pushing_commits=0
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+	[ -n "$local_sha" ] || continue
+	[ "$local_sha" != "$zero" ] || continue # ref deletion: nothing to verify
+	pushing_commits=1
+	if [ "$remote_sha" = "$zero" ]; then
+		"$REPO_ROOT/scripts/checks/verifyGitLogs.sh" "$local_sha" --not --remotes="$remote"
+	else
+		"$REPO_ROOT/scripts/checks/verifyGitLogs.sh" "${remote_sha}..${local_sha}"
+	fi
+done
+
+# Delete-only push (or nothing to push): no commits leave the machine, so there
+# is nothing to lint either (#91).
+[ "$pushing_commits" -eq 1 ] || exit 0
+
+# Signatures were just verified on the exact push range above, so skip the
+# generic (upstream-guessing) pass runChecks would otherwise repeat.
+RUNCHECKS_SKIP="verifyGitLogs.sh" "$REPO_ROOT/scripts/runChecks.sh"

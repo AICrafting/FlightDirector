@@ -13,9 +13,9 @@ it, **how to install** it, and **how to use** it, with a full worked example.
 
 ## Why flight?
 
-If you develop with Claude Code against a self-hosted **Forgejo** repo, your issues and your
-code already live in two places you keep switching between. flight pulls the whole lifecycle
-into the session:
+If you develop with Claude Code or Codex against a repo on **Forgejo/Gitea, GitHub, or GitLab**,
+your issues and your code already live in two places you keep switching between. flight pulls
+the whole lifecycle into the session:
 
 - **File issues without leaving your work.** `/issue the export button doesn't disable mid-download`
   becomes a well-formed, **de-duplicated**, labeled issue — drafted from what you actually
@@ -31,22 +31,34 @@ into the session:
   (`feature → develop → qa → main`), and the same "promote" command advances a branch one hop —
   direct-merging where you want speed, opening a PR + watching CI where you want a gate.
 - **No MCP server, no vendor lock-in.** Everything runs through a small `curl` + `jq` adapter
-  behind a backend-agnostic contract (Forgejo today; other backends can slot in later). Your
-  only secret is a **per-repo, least-privilege** API token.
+  behind a backend-agnostic contract — the backend is one field in your config. Forgejo/Gitea,
+  GitHub, and GitLab have full parity (issues, labels, PRs/MRs, CI); Jira can serve the issues
+  axis alongside a git host. See [backends.md](references/backends.md) for the current list.
+  Your only secret is a **per-repo, least-privilege** API token.
 
 ---
 
 ## What you need
 
 - **Claude Code or Codex** (the same package supplies skills to both harnesses).
-- **`curl`** and **`jq`** on your `PATH`.
-- A **Forgejo** instance and a repo you can push to.
-- A **per-repo API token** with just the two scopes the skills use: `write:repository` and
-  `write:issue` (`write:issue` also covers labels). Create one in Forgejo under
-  *Settings → Applications → Generate New Token* — scope it to what you need, not an all-orgs
-  admin token. These two work with a token restricted to a single repository; don't add
-  `write:misc` (the skills don't use it, and Forgejo won't allow it on a single-repo token).
-  (Why per-repo? A misfire then fails with a hard `403` instead of writing to the wrong place.)
+- **`curl`** and **`jq`** on your `PATH` (plus **`python3`**, standard library only, if you turn
+  on the optional [cost ledger](#cost-ledger-optional)).
+- A repo you can push to on a **supported backend** — Forgejo/Gitea (self-hosted), GitHub, or
+  GitLab (gitlab.com or self-managed). Issues can optionally live in Jira instead.
+- A **per-repo, least-privilege API token** for that backend. Scope it to the one repository and
+  to just what the skills call — never an all-orgs admin token. (Why per-repo? A misfire then
+  fails with a hard `403` instead of writing to the wrong place.) Where to create it and the
+  minimum scopes, per backend:
+
+  | Backend | Create the token at | Minimum |
+  |---|---|---|
+  | Forgejo/Gitea | *Settings → Applications → Generate New Token*, restricted to the repo | `write:repository` + `write:issue` (no `write:misc`) |
+  | GitHub | a fine-grained PAT scoped to the repo | Contents, Issues, Pull requests: read/write; Actions: read (for `ci`) |
+  | GitLab | a project access token | `api` scope |
+  | Jira (issues only) | an Atlassian API token | least privilege via the account's project role |
+
+  Full details, including classic-token equivalents and fine-grained GitLab permissions, are in
+  [backends.md](references/backends.md).
 
 ---
 
@@ -96,9 +108,9 @@ From inside the repo, tell Claude:
 
 That triggers **`setting-up-a-repo`**, which walks you through setup:
 
-1. **Coordinates** — it reads your git remote to propose the `owner/repo` and the API base, and
-   asks you to confirm.
-2. **Token** — it asks for the per-repo token, adds `.flightdirector/secrets.json` **and**
+1. **Coordinates** — it reads your git remote to detect the backend (Forgejo/Gitea, GitHub, or
+   GitLab), propose the `owner/repo` and the API base, and asks you to confirm.
+2. **Token** — it asks for the per-repo token, adds `.flightdirector/secrets*` **and**
    `.worktrees/` to your `.gitignore`, and writes the token to the gitignored secrets file.
 3. **Pipeline preset** — it asks which stage pipeline you want:
    - **(a) Simple** — `develop → main`
@@ -229,11 +241,33 @@ batch-promote differs by first-hop strategy — see
 
 ---
 
+## Cost ledger (optional)
+
+Every finished issue gets a **work-ledger comment**: what was done, on which model, and what it
+cost. Turn on the **prompt ledger** and those numbers are measured instead of guessed:
+
+```jsonc
+// .flightdirector/config.json
+"code": { "promptLog": { "enabled": true } }
+```
+
+The plugin's bundled hooks then append one record per agent turn — prompt, model, tokens,
+estimated cost — to a gitignored `prompt_log.jsonl` at the repo root. **Claude Code and Codex
+write the same file with the same schema**, so a project worked from both (even at once) has one
+ledger, and `flight prompt-log summary --session <id>` renders the per-model totals the
+ledger comment pastes in. Cost is priced from a bundled table you can extend per repo
+(`.flightdirector/pricing.json`); under a subscription login it is labelled `api-equivalent` —
+what the tokens *would* cost via the API, good for comparing issues, not a bill. Unknown models
+and unreadable transcripts show up as `null` with a warning, never as a silent zero. Full schema
+and semantics: [prompt-log.md](references/prompt-log.md).
+
+---
+
 ## Tips
 
 - **Issues elsewhere than code?** `.flightdirector/config.json` has two axes — `code` and `issues` — so you
-  can point issues at a different repo (or, in future, a different backend) while code stays put.
-  By default `issues` inherits `code`.
+  can point issues at a different repo, or a different backend such as Jira, while code stays
+  put. By default `issues` inherits `code`. See [backends.md](references/backends.md).
 - **The merge gate is real.** If you want something merged, say so explicitly — "merge #N" /
   "promote …". Claude will leave work at *ready-to-test* and stop otherwise.
 - **Re-running setup is safe.** `setting-up-a-repo` is idempotent — it only adds what's

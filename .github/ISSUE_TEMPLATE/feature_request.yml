@@ -1,0 +1,61 @@
+---
+name: Feature request
+description: Suggest a new capability or a change to how a Flight Director plugin behaves
+labels: [feature]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem before the solution — the workflow you are trying to run
+        matters more than the specific mechanism you have in mind.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and where does the current behaviour get in the way?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What should happen instead? Sketch the skill prompt, the dispatcher verb, or the output you would expect.
+    validations:
+      required: true
+
+  - type: input
+    id: surface
+    attributes:
+      label: What it touches
+      description: The skill, dispatcher group/verb, or backend adapter this would land in, if you know.
+      placeholder: "promoting-a-branch, or: flight ci watch, or: the GitLab adapter"
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend
+      description: Whether this is specific to one forge.
+      options:
+        - Forgejo / Gitea
+        - GitHub
+        - GitLab
+        - Jira
+        - Backend-agnostic
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Workarounds you are using today, or approaches you rejected and why.

@@ -41,7 +41,8 @@ The dispatcher:
 3. Exports the resolved coordinates + token into the adapter's environment: `LS_API`,
    `LS_OWNER`, `LS_REPO`, `LS_TOKEN`, `LS_TRUNK` (code's trunk branch), `LS_LABELS_JSON`
    (the `labels` map, for role→name resolution), and `LS_BACKEND`. Token precedence:
-   `LS_TOKEN`/`FORGEJO_TOKEN` env override, else the secrets file (axis, `code → issues`).
+   `LS_TOKEN` / `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a legacy
+   name), else the secrets file (axis, `code → issues`).
 4. Execs `adapters/<backend>/<group> <verb> [args…]`.
 
 So adapters are pure: they read coordinates/token from `LS_*` env, never parse config, never
@@ -88,6 +89,9 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 | `resolve` | `--name NAME` (repeatable)               | one row per input: `name⇥id` (empty id = not found) |
 | `create`  | `--name NAME` `--color #RRGGBB` `[--description D]` | the new label's `id` |
 | `ensure`  | `--name NAME` `--color #RRGGBB` `[--description D]` | existing or new label `id`; preserves existing metadata and tolerates concurrent creation |
+| `ensure`  | `--model MODEL_ID`                       | derives the stable family in the dispatcher, then ensures the standard `model/<family>` label |
+| `model-family` | `--id MODEL_ID`                      | stable family on stdout; non-zero for tool/service ids; warns when using the sanitized fallback |
+| `edit`    | `--name NAME --new-name NAME`            | renamed label's `id`; preserves issue associations where the backend supports global labels |
 
 ### `pr` (pull request — "MR" on GitLab)
 
@@ -111,6 +115,9 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 - Label **name→id** resolution lives entirely inside the adapter (`set-status`, and `labels
   resolve` for skills that need ids directly). Skills speak role/label *names*, never ids —
   the per-instance id problem stops at the adapter boundary.
+- Model-family derivation lives in the dispatcher, before adapter execution. Skills pass the raw
+  model id to `labels model-family` / `labels ensure --model` rather than interpreting vendor
+  naming conventions themselves.
 - `ci watch`/`ci log` are the existing shared scripts adapted to this signature, not new code.
 - `⇥` above denotes a literal TAB.
 - **GitHub backend specifics:** GitHub label endpoints use label **names**, not numeric ids — the
@@ -162,7 +169,9 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
   - **Labels are thin.** Jira labels are bare strings with no colour/description and no id distinct
     from the name. `labels list` emits `name⇥⇥` (empty colour + description); `labels resolve`
     returns the **name as its own id** (`name⇥name`); `labels create` is a **no-op** that succeeds
-    idempotently (labels spring into existence on first use). `issues attach` is **not supported**.
+    idempotently (labels spring into existence on first use). Jira has no global rename operation,
+    so `labels edit` exits non-zero; move issue associations from the old free-text value to the
+    new one instead. `issues attach` is **not supported**.
   - **`list` via JQL.** Uses the enhanced-JQL search endpoint `POST /rest/api/3/search/jql` (the
     legacy `POST /rest/api/3/search` was decommissioned by Atlassian). `--state` maps to
     `statusCategory` (open = `!= Done`, closed = `= Done`, all = unfiltered); `--label` adds a

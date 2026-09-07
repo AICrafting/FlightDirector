@@ -4,6 +4,9 @@
 #   verifyGitLogs.sh        — check the unpushed commits (vs the upstream),
 #                             or the last 10 if there are none / no upstream
 #   verifyGitLogs.sh N      — check the most recent N commits
+#   verifyGitLogs.sh <rev-list args>
+#                           — check exactly the commits git rev-list selects,
+#                             e.g. `origin/main..HEAD` or `HEAD --not --remotes`
 #
 # A commit passes when `git` reports its signature as good (`%G?` = G or U,
 # i.e. cryptographically valid; U = valid but the signing key isn't trusted).
@@ -22,8 +25,19 @@ reset=$'\033[0m'
 # Determine how many commits to verify.
 # ---------------------------------------------------------------------------
 count="${1:-}"
+revs=()
 
-if [ -z "$count" ]; then
+# A repo with no commits yet has nothing to verify (and no HEAD to count).
+if ! git rev-parse --verify -q HEAD >/dev/null; then
+	printf '%sNo commits yet — nothing to verify.%s\n' "$green" "$reset"
+	exit 0
+fi
+
+if [ -n "$count" ] && ! [[ "$count" =~ ^[0-9]+$ ]]; then
+	# Not a count: treat all arguments as a git rev-list selection.
+	revs=("$@")
+	count=""
+elif [ -z "$count" ]; then
 	unpushed=0
 	if upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null)"; then
 		unpushed="$(git rev-list --count "${upstream}..HEAD" 2>/dev/null || echo 0)"
@@ -39,15 +53,24 @@ if [ -z "$count" ]; then
 	fi
 fi
 
-if ! [[ "$count" =~ ^[0-9]+$ ]] || [ "$count" -eq 0 ]; then
-	echo "${red}error: commit count must be a positive integer (got '${count}')${reset}" >&2
-	exit 2
+if [ ${#revs[@]} -eq 0 ]; then
+	if ! [[ "$count" =~ ^[0-9]+$ ]] || [ "$count" -eq 0 ]; then
+		echo "${red}error: commit count must be a positive integer (got '${count}')${reset}" >&2
+		exit 2
+	fi
+	# Don't ask for more commits than exist.
+	total="$(git rev-list --count HEAD)"
+	if [ "$count" -gt "$total" ]; then
+		count="$total"
+	fi
+	revs=(-n "$count" HEAD)
 fi
 
-# Don't ask for more commits than exist.
-total="$(git rev-list --count HEAD)"
-if [ "$count" -gt "$total" ]; then
-	count="$total"
+mapfile -t shas < <(git rev-list "${revs[@]}")
+count=${#shas[@]}
+if [ "$count" -eq 0 ]; then
+	printf '%sNo commits to verify.%s\n' "$green" "$reset"
+	exit 0
 fi
 
 # ---------------------------------------------------------------------------
@@ -69,7 +92,7 @@ while read -r sha; do
 		fail=$((fail + 1))
 		;;
 	esac
-done < <(git rev-list -n "$count" HEAD)
+done < <(printf '%s\n' "${shas[@]}")
 
 echo
 if [ "$fail" -gt 0 ]; then

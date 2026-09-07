@@ -10,33 +10,37 @@ plugin ever do this?"* If no, it goes here; if yes, it goes in `GUIDE.md`.
 
 ## Repo layout
 
-This is a monorepo of Claude Code tools. Each tool owns its own directory and its
-own docs/changelog; shared tooling lives at the root.
+This is a monorepo of Claude Code + Codex tools. Each tool owns its own directory,
+its own docs/changelog and a manifest for each harness; shared tooling lives at the root.
 
 ```
 .
 ├── flight/                  # the flight plugin
-│   ├── .claude-plugin/plugin.json
+│   ├── .claude-plugin/plugin.json   # Claude Code manifest (version source of truth)
+│   ├── .codex-plugin/plugin.json    # Codex manifest (bump-version.sh keeps it in lockstep)
 │   ├── GUIDE.md                 # user-facing guide
 │   ├── README.md
 │   ├── CHANGELOG.md             # this plugin's changelog
+│   ├── bin/                     # entrypoints: flight, batch-manifest, deprecated lightspeed shim
 │   ├── skills/                  # the skills (filing-issues, working-an-issue, …)
 │   ├── scripts/
 │   │   ├── flight           # the dispatcher (single entrypoint)
-│   │   └── adapters/<backend>/  # per-backend adapters (forgejo, github, …)
+│   │   └── adapters/<backend>/  # per-backend adapters (forgejo, github, gitlab, jira)
 │   └── references/              # adapter-contract.md, flight-setup.md, default-labels.md
-├── .claude-plugin/marketplace.json   # published marketplace manifest (all plugins)
+├── .claude-plugin/marketplace.json   # published marketplace manifest (all plugins, both harnesses)
 ├── scripts/                     # repo-wide tooling (checks, tests, release)
 ├── test-rig/                    # per-backend integration rigs
 ├── docs/                        # repo docs + docs/adr/ (architecture decision records)
+├── AGENTS.md                    # repo-wide agent instructions (CLAUDE.md imports it)
 ├── CHANGELOG.md                 # root index → each tool's changelog
 ├── CONTRIBUTING.md              # this file
 └── README.md
 ```
 
-A **second tool** would slot in as a sibling of `flight/` (its own dir with a
-`plugin.json`), gain an entry in `.claude-plugin/marketplace.json`, its own
-`CHANGELOG.md`, and a line in the root `CHANGELOG.md` index.
+A **second tool** would slot in as a sibling of `flight/` (its own dir with **both** a
+`.claude-plugin/plugin.json` and a `.codex-plugin/plugin.json`), gain an entry in
+`.claude-plugin/marketplace.json` (which Codex reads too), its own `CHANGELOG.md`, and a
+line in the root `CHANGELOG.md` index.
 
 ## Dev setup / dogfooding
 
@@ -54,7 +58,7 @@ There are three distinct layers — keep them straight:
 | What | Where | Runs | Purpose |
 |---|---|---|---|
 | **Pre-push checks** | `scripts/checks/*.sh` via `scripts/runChecks.sh` | `.githooks/pre-push` (local), on demand | Working-tree cleanliness: `lint.sh` (yamllint + shellcheck), `verifyGitLogs.sh` (commit signatures) |
-| **Script unit tests** | `scripts/tests/*.test.sh` via `scripts/runTests.sh` | CI (`.forgejo/workflows/tests.yml`), on demand | Unit tests for the repo's own scripts (e.g. `bump-version.test.sh`) |
+| **Script unit tests** | `scripts/tests/*.test.sh` via `scripts/runTests.sh` | CI (`.github/workflows/tests.yml`), on demand | Unit tests for the repo's own scripts (e.g. `bump-version.test.sh`) |
 | **Integration rigs** | `test-rig/<backend>/` | on demand | Per-backend adapter smoke tests (see below) |
 
 ```bash
@@ -67,6 +71,14 @@ Enable the pre-push hook once per clone:
 ```bash
 git config core.hooksPath .githooks
 ```
+
+The hook reads the ref list git passes on stdin and verifies signatures on exactly
+the commits each ref will push (`<remote>..<local>`, or everything not yet on the
+remote for a new branch), then runs the remaining checks with the signature pass
+skipped (`RUNCHECKS_SKIP`). A push that carries no commits (a `git push --delete
+<branch>`, or nothing to push) runs nothing at all. `verifyGitLogs.sh` can also be
+run by hand with a count or any `git rev-list` selection, e.g.
+`scripts/checks/verifyGitLogs.sh origin/develop..HEAD`.
 
 CI runs two workflows on push to `develop` and on PRs: **`lint`** (yamllint +
 shellcheck) and **`tests`** (`runTests.sh`).
@@ -136,6 +148,25 @@ Other conventions:
 - **Code style** — tabs (width 4); trailing whitespace trimmed on save (except `.md`);
   leave one final newline. See [AGENTS.md](AGENTS.md).
 
+## Filing issues and opening PRs on GitHub
+
+Public issues live on **GitHub** (`AICrafting/FlightDirector`) — the tracker this repo's
+flight config points at is private, so GitHub is where outside reports land and get triaged.
+Blank issues are disabled; pick one of the forms:
+
+- [`.github/ISSUE_TEMPLATE/bug_report.yml`](.github/ISSUE_TEMPLATE/bug_report.yml) — harness,
+  plugin version, backend, the skill or dispatcher command, expected vs actual, and a
+  **redacted** `.flightdirector/config.json`. Never attach `secrets.json` or a token.
+- [`.github/ISSUE_TEMPLATE/feature_request.yml`](.github/ISSUE_TEMPLATE/feature_request.yml) —
+  the problem first, then the proposed behaviour and what it touches.
+- Security problems go to [SECURITY.md](SECURITY.md) by email, **not** to an issue.
+
+Pull requests are pre-filled from
+[`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md), which mirrors what the
+`promoting-a-branch` skill produces: a summary, a `## Test plans` block (numbered steps ending
+in `Expected:`), the `Ready #N` / `Closes #N` lines, and the signed-commit checklist —
+review is routed to the owners listed in [`.github/CODEOWNERS`](.github/CODEOWNERS).
+
 ## Cutting a release
 
 When you bump a plugin's version, three things must move together and its changelog
@@ -149,15 +180,32 @@ scripts/bump-version.sh flight 0.5.0
 It resolves the plugin's directory from its `source` in `.claude-plugin/marketplace.json`,
 then:
 
-- updates the version in **`<plugin>/.claude-plugin/plugin.json`** and that plugin's
-  entry in the published **`.claude-plugin/marketplace.json`** (only that entry — other
-  plugins are left alone);
+- updates the version in **`<plugin>/.claude-plugin/plugin.json`**, in
+  **`<plugin>/.codex-plugin/plugin.json`** (when present, so both harness manifests stay
+  in lockstep), and in that plugin's entry in the published
+  **`.claude-plugin/marketplace.json`** (only that entry — other plugins are left alone);
 - rolls **`<plugin>/CHANGELOG.md`**: the top `## [Unreleased]` becomes
   `## [0.5.0] - <today>`, with a fresh empty `## [Unreleased]` seeded above it. It warns
   (but doesn't stop) if `[Unreleased]` was empty when you rolled it.
 
 The **dev-marketplace cache refresh** stays a manual step — it lives outside the repo;
 see [docs/plugin-marketplace-dogfooding.md](docs/plugin-marketplace-dogfooding.md).
+
+**Tagging.** The bump happens on a `release/<plugin>-<version>` branch merged into `develop`;
+the *tag* happens once that version has been promoted all the way to `main`. Then run:
+
+```bash
+scripts/tag-release.sh flight            # add --dry-run first to see the plan
+```
+
+It reads the version from `flight/.claude-plugin/plugin.json` at `origin/main`, refuses if the
+tag `flight-<version>` already exists anywhere (tags are immutable — bump and ship the next
+version instead), takes that version's `flight/CHANGELOG.md` section as the notes (and refuses if
+it is missing), creates a signed annotated tag on the `main` commit, pushes it to `origin`
+(`--push-to github` as well if you want the mirror tagged), and creates the matching Forgejo
+Release with the same notes using the coordinates in `.flightdirector/config.json` and the token
+in `.flightdirector/secrets.json` (`--no-release` to skip). `scripts/release-notes.sh` is the
+changelog-section extractor it uses; both are repo tooling, not part of the plugin.
 
 ## Writing skills
 

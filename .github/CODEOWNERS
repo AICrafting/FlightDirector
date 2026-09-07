@@ -1,0 +1,11 @@
+# CODEOWNERS — who GitHub asks to review a pull request.
+#
+# GitHub matches each changed file against the patterns below (last match wins)
+# and automatically requests a review from that pattern's owners. Owners also
+# gate any branch protection rule that requires code-owner review.
+#
+# The maintainer team is small enough that a single catch-all rule covers the
+# whole repository; per-area rules (adapters, skills, scripts) can be added if
+# and when the team grows.
+
+* @DaveWoodCom @SilicaGel
