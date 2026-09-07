@@ -13,6 +13,22 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+
+- **A bundled, harness-neutral prompt ledger** (#46; Codex producer in #83). Opt in with
+  `code.promptLog.enabled: true` and the plugin's bundled hooks append one record per agent turn
+  — prompt, model, tokens, estimated cost, cost basis — to a gitignored `prompt_log.jsonl` at
+  the main worktree root, from **Claude Code and Codex alike, into the same file with the same
+  schema** (`references/prompt-log.md`). The Claude producer sums a turn's requests once each
+  (Claude Code writes one transcript entry per content block), logs subagent turns under the
+  parent session, and prices per model from one shared `pricing.json` that a repo can extend
+  with `.flightdirector/pricing.json`. New dispatcher route `flight prompt-log
+  <prompt|stop|interrupt|subagent-stop|summary>`; `summary --session <id>` renders the
+  per-harness × model totals the work-ledger comment pastes in, saying "estimate only" only
+  when a session has no rows. Missing usage or an unknown model is `null` plus a stderr warning,
+  never a silent zero. `working-an-issue`, the `queue-batches` worker prompt, and
+  `setting-up-a-repo` (which now offers the switch) are updated. Absorbs #60 and #61.
+
 ### Changed
 
 - **Model provenance labels are now derived deterministically by the dispatcher** (#85).

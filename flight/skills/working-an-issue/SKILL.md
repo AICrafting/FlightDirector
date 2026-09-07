@@ -184,11 +184,19 @@ Only after explicit approval:
    issue's comment thread is a running ledger (initial code, later follow-up code, and QA each
    append their own entry). Write it to a scratchpad file and pass `--body-file`:
    - A summary of the work done in **this** episode.
-   - **Token cost, token counts, and model(s).** Preferred source: a `prompt_log.jsonl` in the
-     repo root, if maintained (each line has `session_id`, `model`, token counts, `cost_usd`).
-     Filter to this work's `session_id`(s), sum `cost_usd`/tokens, read `model`. If no such log
-     exists, fall back to a rough estimate and the model you know you're running. (The log is
-     optional and personal — gitignored, not shipped by this plugin.)
+   - **Token cost, token counts, and model(s).** Preferred source: the repo's prompt ledger
+     (`prompt_log.jsonl`, written by the plugin's bundled hooks when `code.promptLog.enabled` is
+     on — both Claude Code and Codex write the same file). Don't hand-sum it; let the dispatcher
+     render the block and paste it into the ledger file:
+     ```
+     flight prompt-log summary --session "$SESSION_ID" [--session <another id>] >> "$SCRATCH/done.md"
+     ```
+     It totals per harness × model (subagent rows included), prints the cost basis
+     (`actual-api` vs `api-equivalent`), flags rows with no usage as a lower bound, and — only
+     when the session truly has no rows — says "estimate only", in which case add your own
+     rough estimate and the model you know you're running. Your `session_id` is in the hook
+     payloads / transcript path; if you can't determine it, pass every session id that worked
+     this issue. Schema and semantics: [prompt-log.md](../../references/prompt-log.md).
    ```
    flight issues comment --number N --body-file "$SCRATCH/done.md"
    ```

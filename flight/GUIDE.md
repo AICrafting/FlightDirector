@@ -240,6 +240,28 @@ batch-promote differs by first-hop strategy — see
 
 ---
 
+## Cost ledger (optional)
+
+Every finished issue gets a **work-ledger comment**: what was done, on which model, and what it
+cost. Turn on the **prompt ledger** and those numbers are measured instead of guessed:
+
+```jsonc
+// .flightdirector/config.json
+"code": { "promptLog": { "enabled": true } }
+```
+
+The plugin's bundled hooks then append one record per agent turn — prompt, model, tokens,
+estimated cost — to a gitignored `prompt_log.jsonl` at the repo root. **Claude Code and Codex
+write the same file with the same schema**, so a project worked from both (even at once) has one
+ledger, and `flight prompt-log summary --session <id>` renders the per-model totals the
+ledger comment pastes in. Cost is priced from a bundled table you can extend per repo
+(`.flightdirector/pricing.json`); under a subscription login it is labelled `api-equivalent` —
+what the tokens *would* cost via the API, good for comparing issues, not a bill. Unknown models
+and unreadable transcripts show up as `null` with a warning, never as a silent zero. Full schema
+and semantics: [prompt-log.md](references/prompt-log.md).
+
+---
+
 ## Tips
 
 - **Issues elsewhere than code?** `.flightdirector/config.json` has two axes — `code` and `issues` — so you

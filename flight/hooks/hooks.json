@@ -1,0 +1,38 @@
+{
+	"description": "Optional Claude Code prompt and token ledger for Flight Director projects. No-op unless .flightdirector/config.json sets code.promptLog.enabled = true.",
+	"hooks": {
+		"UserPromptSubmit": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "LS_HARNESS=claude \"${CLAUDE_PLUGIN_ROOT}/bin/flight\" prompt-log prompt",
+						"timeout": 30
+					}
+				]
+			}
+		],
+		"Stop": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "LS_HARNESS=claude \"${CLAUDE_PLUGIN_ROOT}/bin/flight\" prompt-log stop",
+						"timeout": 30
+					}
+				]
+			}
+		],
+		"SubagentStop": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "LS_HARNESS=claude \"${CLAUDE_PLUGIN_ROOT}/bin/flight\" prompt-log subagent-stop",
+						"timeout": 30
+					}
+				]
+			}
+		]
+	}
+}

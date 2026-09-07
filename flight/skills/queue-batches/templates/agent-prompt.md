@@ -114,7 +114,11 @@ For each issue `#N` with slug `<slug>`:
    ```bash
    {dispatcher} issues set-status --number <N> --status to-test
    # Write your finishing record (work summary + model/token note; see working-an-issue
-   # for the format). The dispatcher owns stable-family derivation; tool/service ids
+   # for the format). If the repo has the prompt ledger on, append the measured block —
+   # your subagent turns are rows under the parent session, so pass the parent's id:
+   #   {dispatcher} prompt-log summary --session <parent session id> >> "{scratch}/done-<N>.md"
+   # It says "estimate only" when there are no rows; then note your own estimate.
+   # The dispatcher owns stable-family derivation; tool/service ids
    # return non-zero and are skipped:
    PRIMARY_MODEL=<model-id-from-ledger>
    if FAMILY="$({dispatcher} labels model-family --id "$PRIMARY_MODEL")"; then
