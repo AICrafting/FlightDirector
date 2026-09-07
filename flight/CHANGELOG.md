@@ -29,6 +29,13 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   never a silent zero. `working-an-issue`, the `queue-batches` worker prompt, and
   `setting-up-a-repo` (which now offers the switch) are updated. Absorbs #60 and #61.
 
+- **Codex can now write measured per-turn and delegated usage to the shared prompt ledger**
+  (#83). Plugin-bundled hooks capture prompts, completed or interrupted turn usage, and
+  subagent usage through the shared `flight prompt-log` route. Records are scoped to the exact
+  Codex turn and distinguish API-key cost from ChatGPT subscription API-equivalent cost. The
+  shared table includes official Standard short-context prices for current Codex model families;
+  missing pricing remains explicit as null fields with a visible warning.
+
 ### Changed
 
 - **Model provenance labels are now derived deterministically by the dispatcher** (#85).
