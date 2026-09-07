@@ -207,6 +207,18 @@ Release with the same notes using the coordinates in `.flightdirector/config.jso
 in `.flightdirector/secrets.json` (`--no-release` to skip). `scripts/release-notes.sh` is the
 changelog-section extractor it uses; both are repo tooling, not part of the plugin.
 
+**Publishing to the GitHub mirror.** `origin` (Forgejo) is the source of truth; GitHub is a
+mirror that is pushed by hand. After tagging, run:
+
+```bash
+scripts/push-mirror.sh                   # = --remote github --branch main; add --dry-run to preview
+```
+
+It pushes `origin/main` to the mirror **fast-forward only** (it refuses, and never forces, if the
+mirror's `main` has moved out of band) and then pushes every tag pointing at that head, so the
+release branch and its `flight-<version>` tag always arrive together. `--branch` is repeatable if
+other branches should be mirrored too.
+
 ## Writing skills
 
 The skills under `flight/skills/` follow the superpowers **`writing-skills`**
