@@ -31,6 +31,11 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   key: present — any value, `false` included — means answered and skipped; absent means asked.
   Every answer is written back, including "no" (`"promptLog": { "enabled": false }`), so a
   declined option is remembered rather than re-asked (`references/flight-setup.md`).
+- **The `git -C` rule is now one of the workflow red lines** `setting-up-a-repo` writes into
+  a repo's `AGENTS.md` (#93, follow-up to #65). The skills already modelled `git -C <path>`;
+  spelling it out in the committed instructions means it holds for any agent session in the
+  repo, not just one that has a flight skill loaded. Existing repos: add the bullet by hand,
+  or re-run the skill.
 
 ## [0.12.0] - 2026-09-07
 
