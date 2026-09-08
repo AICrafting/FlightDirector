@@ -170,6 +170,11 @@ token-creation steps differ per backend (GitHub, GitLab, Forgejo, Jira) — see
    ```json
    { "code": { "token": "<the token>" } }
    ```
+4. Verify the token before going any further: `flight auth check` (add `--axis issues` if the
+   issues axis has its own token). It is read-only, and it reports identity, repo/project reach,
+   and each capability the skills need — so a wrong scope, a wrong `owner`/`repo`, or an expired
+   token surfaces here instead of halfway through the label reconcile. A candidate token can be
+   checked before it goes live with `flight auth check --secrets .flightdirector/secrets-new.json`.
 
 ## Step 3: Workflow preferences — stage pipeline preset
 

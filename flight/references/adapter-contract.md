@@ -19,6 +19,7 @@ flight/scripts/
       pr                     # subcommands: open merge        (pull request; "MR" on GitLab)
       ci                     # subcommands: watch log
       labels                 # subcommands: resolve
+      auth                   # subcommands: check        (read-only token verifier)
     github/ …                # future: same executable names, same contract
 ```
 
@@ -36,8 +37,9 @@ flight <group> <verb> [--flag value …]
 The dispatcher:
 
 1. Reads `.flightdirector/config.json` (config) and `.flightdirector/secrets.json` (token), from repo root.
-2. Picks the **axis** for the group — `issues`/`labels` → `issues.*`, `pr`/`ci` → `code.*` —
-   applying `code → issues` inheritance when the `issues` block is omitted.
+2. Picks the **axis** for the group — `issues`/`labels` → `issues.*`, `pr`/`ci`/`auth` → `code.*`
+   (`auth check --axis issues` overrides that one) — applying `code → issues` inheritance when the
+   `issues` block is omitted.
 3. Exports the resolved coordinates + token into the adapter's environment: `LS_API`,
    `LS_OWNER`, `LS_REPO`, `LS_TOKEN`, `LS_TRUNK` (code's trunk branch), `LS_LABELS_JSON`
    (the `labels` map, for role→name resolution), and `LS_BACKEND`. Token precedence:
@@ -99,6 +101,33 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 |---------|--------------------------------------------------------|--------|
 | `open`  | `--head BRANCH` `--base BRANCH` `--title T` `--body-file PATH` | `number⇥url` |
 | `merge` | `--number N` `--strategy merge\|squash\|rebase`        | (nothing) |
+
+### `auth`
+
+| Verb    | Args                                          | stdout |
+|---------|-----------------------------------------------|--------|
+| `check` | `[--secrets PATH]` `[--axis code\|issues]`     | one `✓`/`✗`/`-` line per check: `<mark> <label>  <detail>`. Exit non-zero if any check failed |
+
+`auth check` verifies a token **before** anything relies on it: the identity the backend reports,
+whether the repo/project named in `config.json` is reachable, one probe per capability group the
+skills exercise, and the token's expiry where the backend exposes it. Rules:
+
+- **Read-only, always.** It issues `GET`s only — never creating, editing or deleting anything —
+  so **write access is reported "not tested"** rather than guessed at. `_authlib.sh`'s `probe`
+  refuses any other method.
+- It is the one verb that must **not** die on an HTTP error: a `401`/`403`/`404` *is* the finding.
+  So the auth adapters use `probe` (records the status, keeps going) instead of each backend's
+  `_api` (which exits on ≥ 400), and they share `adapters/_authlib.sh` for the line shape.
+- Failures carry the **backend's own wording**, which is what actually names the fix — GitLab's
+  `insufficient_granular_scope … [Work Item: Read]`, GitHub's per-resource 403.
+- The **token is never printed** beyond its first 8 characters.
+- Both flags are dispatcher-owned. `--axis` selects which axis's coordinates and token to check
+  (default `code`). `--secrets PATH` points the token lookup at a **candidate** file so a new
+  token is verified before it replaces the live one; precedence is `--secrets` > `LS_SECRETS_FILE`
+  > the normal resolution (`LS_TOKEN`/`FLIGHT_TOKEN` env, then the repo's secrets file) — an
+  explicit candidate file deliberately beats an ambient env token.
+- The per-backend probe list is the executable form of the scope/permission tables in
+  [backends.md](backends.md); keep the two in step.
 
 ### `ci` (the two MCP couldn't do)
 

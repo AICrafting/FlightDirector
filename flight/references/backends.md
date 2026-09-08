@@ -24,6 +24,16 @@ and/or `issues.token`, with `code → issues` inheritance); see
 `setting-up-a-repo` autodetects Forgejo and GitHub coordinates from the git remote; GitLab and Jira
 are configured by hand-editing `.flightdirector/config.json` (and `secrets.json`) for now.
 
+**Verify a token instead of guessing.** `flight auth check` (add `--axis issues` for a split
+setup) probes exactly the read endpoints the adapters use and prints one `✓`/`✗` line per check —
+identity, the repo/project named in `config.json`, each capability group below, and the token's
+expiry where the backend exposes it — exiting non-zero if anything fails. It is strictly
+read-only, so write access is reported "not tested" rather than guessed at, and it never prints
+more than a token's first 8 characters. Point it at a candidate file with
+`flight auth check --secrets .flightdirector/secrets-new.json` to verify a replacement token
+*before* it goes live, which makes rotation: create token → check → move into place. The probe
+lists below are the tables the verb executes — if you change one, change the other.
+
 ---
 
 ## Forgejo (reference backend)

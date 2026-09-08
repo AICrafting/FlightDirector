@@ -13,6 +13,19 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+
+- **`flight auth check` — verify a token before you rely on it** (#81). A read-only verb that
+  reports, one `✓`/`✗` line per check: the identity the backend sees, whether the repo/project
+  in `config.json` is reachable, one probe per capability the skills need (issues, labels,
+  PRs/MRs, CI), and the token's expiry where the backend exposes it — exiting non-zero if
+  anything fails. Failures carry the backend's own wording, so GitLab names the missing
+  fine-grained permission and Jira names the project permission the account lacks. Write access
+  is reported "not tested" (probing it would have side effects) and the token is never printed
+  beyond its first 8 characters. `--axis code|issues` picks the axis; `--secrets <file>` checks
+  a **candidate** token file, so rotation is: create token → check → move into place. All four
+  backends; `setting-up-a-repo` Step 2 now runs it right after writing the secrets file.
+
 ### Changed
 
 - **The prompt ledger moved to `.flightdirector/prompt-log.jsonl`** (#107). The root-level
