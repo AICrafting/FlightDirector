@@ -14,6 +14,8 @@ Flight Director — AI Crafting's Claude Code + Codex plugins (marketplace `flig
 - **Code:** Prefer tabs (width 4) over spaces.
 - **Trailing whitespace:** Trimmed on save (except for .md files)
 - **Final newlines:** Trimmed (but leave one final newline)
+- **File and script names:** kebab-case (`run-checks.sh`, `verify-git-logs.sh`), never camelCase.
+  Scripts end in `.sh`, unit tests in `.test.sh`; tracked scripts carry the exec bit (`100755`).
 
 ## Issue tracking — flight
 
