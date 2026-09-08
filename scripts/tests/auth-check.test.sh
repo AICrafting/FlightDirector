@@ -6,6 +6,12 @@
 # fake API that can be told to fail a specific endpoint.
 set -euo pipefail
 
+# Isolate from the caller's environment: the dispatcher lets an ambient token
+# (LS_TOKEN → FLIGHT_TOKEN → FORGEJO_TOKEN) outrank the secrets file, and CI
+# runners inject one — the "default source" cases below must see the sandbox's
+# secrets.json. Cases that want an env token set it explicitly per invocation.
+unset LS_TOKEN FLIGHT_TOKEN FORGEJO_TOKEN LS_SECRETS_FILE
+
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 FLIGHT="$REPO_ROOT/flight/scripts/flight"
 SANDBOX="$(mktemp -d)"
