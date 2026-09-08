@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook producer for Flight's shared prompt_log.jsonl ledger.
+"""Claude Code hook producer for Flight's shared prompt ledger (.flightdirector/prompt-log.jsonl).
 
 Invoked by the plugin's bundled hooks (flight/hooks/hooks.json) through the
 dispatcher: `LS_HARNESS=claude flight prompt-log <prompt|stop|interrupt|subagent-stop>`.

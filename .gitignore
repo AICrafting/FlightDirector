@@ -15,8 +15,8 @@ secret*
 
 # Claude
 .claude/settings.local.json
-# Prompt usage log (may contain sensitive prompt content)
-prompt_log.jsonl
+# flight prompt ledger (may contain sensitive prompt content)
+.flightdirector/prompt-log.jsonl
 AGENTS.local.md
 .superpowers/
 

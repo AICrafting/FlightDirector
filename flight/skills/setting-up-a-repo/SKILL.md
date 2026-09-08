@@ -142,8 +142,8 @@ token-creation steps differ per backend (GitHub, GitLab, Forgejo, Jira) — see
    `git add -A` from being committed. `.worktrees/` is where `working-an-issue` creates
    per-issue git worktrees, and `.flightdirector/batches/` is where `queue-batches` writes per-run
    batch manifests — both are per-run local state (not secrets) that must be ignored so they
-   don't appear as untracked content in the repo. Add `prompt_log.jsonl` too if the user opts
-   into the prompt ledger in Step 4 (it holds prompt text).
+   don't appear as untracked content in the repo. Add `.flightdirector/prompt-log.jsonl` too if
+   the user opts into the prompt ledger in Step 4 (it holds prompt text).
 3. Write `.flightdirector/secrets.json`:
    ```json
    { "code": { "token": "<the token>" } }
@@ -228,12 +228,16 @@ the skill. You can also add an optional `code.zones` array later — see
 deterministically instead of inferring zones.
 
 **Offer the prompt ledger (opt-in).** Ask: *"Log each agent turn's prompt, tokens, and estimated
-cost to `prompt_log.jsonl` so issue ledgers are measured rather than estimated? (Both Claude Code
-and Codex write the same file; it stays local and gitignored.)"* If yes, add
-`"promptLog": { "enabled": true }` under `code` and make sure `prompt_log.jsonl` is in
-`.gitignore` (Step 2). The plugin's bundled hooks do the rest — nothing else to install. If the
-user already runs a personal prompt-logger hook (e.g. in `.claude/settings.local.json`), tell them
-to remove it or every turn is logged twice. Details: [prompt-log.md](../../references/prompt-log.md).
+cost to `.flightdirector/prompt-log.jsonl` so issue ledgers are measured rather than estimated?
+(Both Claude Code and Codex write the same file; it stays local and gitignored.)"* If yes, add
+`"promptLog": { "enabled": true }` under `code` and make sure `.flightdirector/prompt-log.jsonl`
+is in `.gitignore` (Step 2). The plugin's bundled hooks do the rest — nothing else to install.
+
+**Leave the user's other hooks alone.** Flight's hooks are plugin-bundled and write only their
+own file, so any prompt-related hook the user already runs (in `.claude/settings.local.json`,
+`settings.json`, or Codex's config) — an audit log, a cost dashboard, another plugin's telemetry
+— coexists with the ledger. Never edit, disable, or advise deleting such hooks; if you notice
+one, you may mention it and move on. Details: [prompt-log.md](../../references/prompt-log.md).
 
 Use the `stages` array from the chosen preset (a), (b), or the user's custom pipeline. All six
 status roles (`in-progress`, `to-test`, `blocked`, `deferred`, `review`, `qa`, `done`) are seeded so the
