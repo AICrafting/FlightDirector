@@ -12,7 +12,7 @@ check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=
 			else printf '\033[0;31m  ✗ %s\033[0m\n' "$1"; fail=$((fail+1)); fi; }
 
 O="$T/origin.git"; G="$T/github.git"; R="$T/repo"
-git init -q --bare "$O"; git init -q --bare "$G"
+git init -q --bare -b main "$O"; git init -q --bare -b main "$G"
 git init -q -b main "$R"
 git -C "$R" config user.email t@t; git -C "$R" config user.name t; git -C "$R" config commit.gpgsign false
 echo a >"$R/a"; git -C "$R" add a; git -C "$R" commit -qm one
@@ -40,7 +40,7 @@ out="$("$PM")"
 check "second run: branch already there, tag already there, exit 0" "$(grep -q 'already at' <<<"$out" && grep -q 'already on github' <<<"$out" && echo 1 || echo 0)"
 
 # --- mirror moved out of band → refuse, no force ---
-M="$T/mirror-clone"; git clone -q "$G" "$M"; git -C "$M" config user.email x@x; git -C "$M" config user.name x; git -C "$M" config commit.gpgsign false
+M="$T/mirror-clone"; git clone -q -b main "$G" "$M"; git -C "$M" config user.email x@x; git -C "$M" config user.name x; git -C "$M" config commit.gpgsign false
 echo rogue >"$M/rogue"; git -C "$M" add rogue; git -C "$M" commit -qm rogue; git -C "$M" push -q origin main
 ROGUE="$(git -C "$M" rev-parse HEAD)"
 if "$PM" >/dev/null 2>"$T/refuse.err"; then rc=0; else rc=$?; fi
