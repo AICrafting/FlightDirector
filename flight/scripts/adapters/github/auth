@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+#
+# GitHub auth adapter — verb: check.
+#
+# STRICTLY READ-ONLY: it probes only GET endpoints the other GitHub adapters
+# already call. Write access cannot be probed without side effects and is
+# reported "not tested". The probe list mirrors the fine-grained permission
+# table in ../../../references/backends.md (Contents, Issues, Pull requests,
+# Actions) — keep the two in step.
+set -euo pipefail
+ADAPTER_NAME="github/auth"
+# shellcheck source-path=SCRIPTDIR source=_authlib.sh
+source "$(cd "$(dirname "$0")" && pwd)/../_authlib.sh"
+
+verb="${1:-}"; shift || true
+[ "$verb" = "check" ] || die "unknown verb '${verb}' (auth: check)"
+[ $# -eq 0 ] || die "auth check: unknown arg '$1'"
+
+need LS_API LS_OWNER LS_REPO LS_TOKEN
+SITE="${LS_API%/}"
+REPO_API="${SITE}/repos/${LS_OWNER}/${LS_REPO}"
+HDRS=(
+	-H "Authorization: Bearer ${LS_TOKEN}"
+	-H "Accept: application/vnd.github+json"
+	-H "X-GitHub-Api-Version: 2022-11-28"
+)
+
+expires=""; scopes=""
+# 1. Identity. GitHub returns the token's expiry and (for classic PATs) its
+# scopes in response headers, so capture them from this first call.
+if probe GET "${SITE}/user"; then
+	pass "authenticates" "$(body_field '.login // "?"') ($(body_field '.type // "user"')) — token $(mask "$LS_TOKEN")"
+	expires="$(hdr github-authentication-token-expiration)"
+	scopes="$(hdr x-oauth-scopes)"
+else
+	fail "authenticates" "$(why)"
+	hint "fine-grained PATs: https://github.com/settings/personal-access-tokens ; classic: https://github.com/settings/tokens"
+fi
+
+# 2. The repository named in config.json (also the Contents: Read probe).
+if probe GET "$REPO_API"; then
+	pass "repository" "$(body_field '.full_name // "?"')$(body_field 'if .private then " (private)" else "" end')"
+else
+	fail "repository" "$(why) — ${LS_OWNER}/${LS_REPO} (check owner/repo in config.json, and that a fine-grained token lists this repository)"
+fi
+
+# 3. Read probes, one per permission the table calls for. A fine-grained token
+# missing one 403s on exactly that resource, which `why` surfaces verbatim.
+probe_row "issues read"  "Issues: Read"        GET "${REPO_API}/issues?per_page=1&state=all"
+probe_row "labels read"  "Issues: Read"        GET "${REPO_API}/labels?per_page=1"
+probe_row "pulls read"   "Pull requests: Read" GET "${REPO_API}/pulls?per_page=1&state=all"
+probe_row "actions read" "Actions: Read"       GET "${REPO_API}/actions/runs?per_page=1"
+
+# 4/5.
+note "write access" "not tested — probing a write would create or change something"
+if [ -n "$scopes" ]; then
+	note "token scopes" "$scopes (classic PAT)"
+fi
+if [ -n "$expires" ]; then
+	note "token expiry" "$expires"
+else
+	note "token expiry" "not exposed (no expiration header — a non-expiring token)"
+fi
+
+finish
