@@ -67,6 +67,10 @@ scopes:
 Do **not** add `write:misc`: the skills don't use it, and Forgejo refuses to combine `write:misc`
 with a single-repository restriction.
 
+Forgejo also won't combine a single-repository restriction with `read:user`, so on this token
+`flight auth check` cannot read the account behind it: the identity line is reported as
+informational (`-`), not a failure, and the repository probe is what proves the token works.
+
 ---
 
 ## GitHub (full parity)
