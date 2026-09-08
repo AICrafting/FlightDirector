@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# GitLab merge-request adapter — verbs: open merge. (The contract's "pr" == MR here.)
+# GitLab merge-request adapter — verbs: open get update merge. (The contract's "pr" == MR here.)
 # See ../../../references/adapter-contract.md.
 set -euo pipefail
 ADAPTER_NAME="gitlab/pr"
@@ -36,6 +36,43 @@ case "$verb" in
     _api POST "/merge_requests" "$payload" | jq -r '[(.iid|tostring), .web_url] | @tsv'
     ;;
 
+  # Patch an open PR after the fact — only the fields passed are sent, so a
+  # title fix does not clobber the body (and vice versa). Mirrors `issues update`.
+  update)
+    number=""; title=""; body=""; body_file=""; have_title=0; have_body=0
+    while [ $# -gt 0 ]; do case "$1" in
+      --number)    number="$2"; shift 2 ;;
+      --title)     title="$2"; have_title=1; shift 2 ;;
+      --body)      body="$2"; have_body=1; shift 2 ;;
+      --body-file) body_file="$2"; have_body=1; shift 2 ;;
+      *) die "pr update: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "pr update: --number required"
+    patch='{}'
+    [ "$have_title" = 1 ] && patch="$(printf '%s' "$patch" | jq --arg t "$title" '. + {title:$t}')"
+    if [ "$have_body" = 1 ]; then
+      if [ -n "$body_file" ]; then
+        [ -f "$body_file" ] || die "pr update: --body-file '$body_file' not found"
+        patch="$(printf '%s' "$patch" | jq --rawfile b "$body_file" '. + {description:$b}')"
+      else
+        patch="$(printf '%s' "$patch" | jq --arg b "$body" '. + {description:$b}')"
+      fi
+    fi
+    [ "$patch" = '{}' ] && die "pr update: nothing to change (pass --title and/or --body)"
+    _api PUT "/merge_requests/${number}" "$patch" >/dev/null
+    ;;
+
+  get)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "pr get: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "pr get: --number required"
+    _api GET "/merge_requests/${number}" \
+      | jq -r '[(.iid|tostring), .title, .state, .web_url] | @tsv'
+    ;;
+
   merge)
     number=""; strategy="merge"
     while [ $# -gt 0 ]; do case "$1" in
@@ -55,5 +92,5 @@ case "$verb" in
     _api PUT "/merge_requests/${number}/merge" "$payload" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (pr: open merge)" ;;
+  *) die "unknown verb '${verb}' (pr: open get update merge)" ;;
 esac

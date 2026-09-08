@@ -13,6 +13,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+
+- **`flight pr update` and `flight pr get`** (#104). `pr update --number N [--title T]
+  [--body B | --body-file PATH]` patches an already-open PR — only the fields you pass, so a
+  title fix leaves the body alone — and `pr get --number N` reads one back as
+  `number⇥title⇥state⇥url`. A typo or a late test-plan edit in a PR body no longer has to be
+  fixed by hand in the web UI. Forgejo, GitHub and GitLab; `promoting-a-branch` Step 4 points
+  at it.
+
 ### Changed
 
 - **The prompt ledger moved to `.flightdirector/prompt-log.jsonl`** (#107). The root-level

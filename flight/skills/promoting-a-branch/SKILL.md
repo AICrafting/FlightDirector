@@ -210,6 +210,10 @@ PR="$(flight pr open --head "$BRANCH" --base <target> \
 PR_NUM="$(printf '%s' "$PR" | cut -f1)"
 ```
 
+A typo or a late test-plan edit does **not** need the web UI: correct an already-open PR with
+`flight pr update --number "$PR_NUM" --title "…" --body-file "$SCRATCH/pr-body.md"` (only the
+fields you pass are patched), and read back what is on it with `flight pr get --number "$PR_NUM"`.
+
 Then watch CI in the background and surface state via Monitor. Watch by **`--pr`**, not by a local
 SHA: the adapter resolves the PR's head commit — the exact SHA the run reports — so a local tip
 that was never pushed can't send the watcher chasing a run that doesn't exist. It exits non-zero on

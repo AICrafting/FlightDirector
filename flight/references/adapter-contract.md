@@ -98,6 +98,8 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 | Verb    | Args                                                   | stdout |
 |---------|--------------------------------------------------------|--------|
 | `open`  | `--head BRANCH` `--base BRANCH` `--title T` `--body-file PATH` | `number⇥url` |
+| `get`   | `--number N`                                           | `number⇥title⇥state⇥url` |
+| `update`| `--number N` `--title T` and/or `--body B` (or `--body-file PATH`) | (nothing) — patches only the fields passed, so a title fix leaves the body alone (mirrors `issues update`) |
 | `merge` | `--number N` `--strategy merge\|squash\|rebase`        | (nothing) |
 
 ### `ci` (the two MCP couldn't do)
