@@ -111,12 +111,17 @@ That triggers **`setting-up-a-repo`**, which walks you through setup:
 1. **Coordinates** — it reads your git remote to detect the backend (Forgejo/Gitea, GitHub, or
    GitLab), propose the `owner/repo` and the API base, and asks you to confirm.
 2. **Token** — it asks for the per-repo token, adds `.flightdirector/secrets*` **and**
-   `.worktrees/` to your `.gitignore`, and writes the token to the gitignored secrets file.
+   `.worktrees/` to your `.gitignore`, writes the token to the gitignored secrets file, and
+   verifies it with `flight auth check` (identity, repo access, per-capability permissions,
+   expiry) before going further.
 3. **Pipeline preset** — it asks which stage pipeline you want:
    - **(a) Simple** — `develop → main`
    - **(b) Multi-stage** — `develop → qa → main`
    - **(c) Advanced** — a custom ordered set of stages, or hand-edit afterward.
-4. **Labels** — it reconciles a default label taxonomy against what your repo already has,
+4. **Preferences** — the default worker model for parallel batches, and whether to turn on the
+   prompt ledger (see [Cost ledger](#cost-ledger-optional)). Every answer is recorded, "no"
+   included, so a re-run asks only what's new.
+5. **Labels** — it reconciles a default label taxonomy against what your repo already has,
    *adopting your existing names* (if you already call a state `status/qa`, it keeps that),
    shows you a plan, and creates only what's missing.
 
@@ -244,7 +249,9 @@ deleted until you say go, and deleting on **origin** is a separate yes from dele
 - **`.flightdirector/config.json`** (commit it) — backend + coordinates, the `stages` pipeline, and your
   role→label-name map. See [flight-setup.md](references/flight-setup.md) for the schema.
 - **`.flightdirector/secrets.json`** (gitignored) — your API token(s). If flight ever finds this
-  file tracked by git, it warns you on every run.
+  file tracked by git, it warns you on every run. Rotating a token? Write the new one to
+  `.flightdirector/secrets-new.json`, run `flight auth check --secrets .flightdirector/secrets-new.json`,
+  and move it into place only once every line is a `✓`.
 
 Want a different pipeline later? Edit `code.stages` in `.flightdirector/config.json` — e.g. add a `qa`
 stage between `develop` and `main`. The skills pick it up immediately. For worked setups at 1, 2, 3,

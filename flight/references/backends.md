@@ -1,7 +1,8 @@
 # Supported backends
 
 flight talks to a backend through an **adapter** — skills call verbs on the dispatcher, the
-dispatcher resolves the axis (`issues`/`labels` → `issues.*`, `pr`/`ci` → `code.*`) and execs the
+dispatcher resolves the axis (`issues`/`labels` → `issues.*`, `pr`/`ci`/`auth`/`branches` →
+`code.*`; `auth check --axis issues` overrides that one) and execs the
 right backend's adapter (see [adapter-contract.md](adapter-contract.md)). Four backends ship today:
 
 | Backend   | `backend` value | Axes it can serve        | Parity                                   |
@@ -143,7 +144,7 @@ scope; you pick per-resource permissions instead). Grant, for the one project:
 |---|---|---|
 | Project | Read | project lookup, default branch |
 | Work Item | Read, Create, Update | `issues` (issues *and* their comments/notes) |
-| Label | Read, Create, Update | `labels`, `issues set-status` |
+| Label | Read, Create, Update, Delete | `labels` (Delete only for `labels delete`), `issues set-status` |
 | Merge Request | Read, Create, Update, Merge | `pr` |
 | Pipeline | Read | `ci runs` / `ci watch` |
 | Job | Read | `ci log` (per-job traces) |
