@@ -151,7 +151,7 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
 - `code.promptLog.enabled` — turns on the bundled prompt/cost logger for this repo. The plugin
   ships hooks for both harnesses; they run `flight prompt-log <mode>`, which exits silently unless
   this is `true`, so the switch is the only producer control. When on, every turn appends one
-  record to `prompt_log.jsonl` at the main worktree root (gitignore it — records contain prompt
+  record to `.flightdirector/prompt-log.jsonl` under the main worktree root (gitignore it — records contain prompt
   text) and `working-an-issue` sums them per session for the work-ledger comment via
   `flight prompt-log summary`. Schema, pricing, and semantics: [prompt-log.md](prompt-log.md).
 - `.flightdirector/pricing.json` — optional per-repo pricing override/extension, merged on top of

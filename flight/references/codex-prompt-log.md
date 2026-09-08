@@ -1,7 +1,7 @@
 # Codex prompt ledger
 
 Flight's Codex plugin bundles lifecycle hooks that can append one record per turn to the
-shared `prompt_log.jsonl` described in [prompt-log.md](prompt-log.md). The hooks are off by
+shared `.flightdirector/prompt-log.jsonl` described in [prompt-log.md](prompt-log.md). The hooks are off by
 default. Enable them for a repository with:
 
 ```json
@@ -21,7 +21,7 @@ hook hash and may require review again.
 
 The hook resolves the installed logger through `$PLUGIN_ROOT`, then resolves the ledger at the
 main worktree through Git's common directory. Linked worktrees therefore share one log. Add
-`prompt_log.jsonl` to the repository's `.gitignore` because records contain prompt text.
+`.flightdirector/prompt-log.jsonl` to the repository's `.gitignore` because records contain prompt text.
 
 Codex history persistence must remain enabled: `Stop`, `Interrupt`, and `SubagentStop` parse the
 transcript paths supplied by Codex. Do not use `codex exec --ephemeral` when ledger output is

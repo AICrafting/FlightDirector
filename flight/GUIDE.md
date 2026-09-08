@@ -252,7 +252,7 @@ cost. Turn on the **prompt ledger** and those numbers are measured instead of gu
 ```
 
 The plugin's bundled hooks then append one record per agent turn — prompt, model, tokens,
-estimated cost — to a gitignored `prompt_log.jsonl` at the repo root. **Claude Code and Codex
+estimated cost — to a gitignored `.flightdirector/prompt-log.jsonl`. **Claude Code and Codex
 write the same file with the same schema**, so a project worked from both (even at once) has one
 ledger, and `flight prompt-log summary --session <id>` renders the per-model totals the
 ledger comment pastes in. Cost is priced from a bundled table you can extend per repo

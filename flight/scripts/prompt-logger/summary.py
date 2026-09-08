@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Summarise prompt_log.jsonl for a work-ledger entry.
+"""Summarise the prompt ledger (.flightdirector/prompt-log.jsonl) for a work-ledger entry.
 
 	flight prompt-log summary --session <id> [--session <id> …] [--since <ISO-8601>] [--json]
 
-Reads the main worktree's prompt_log.jsonl (any harness, any provider), keeps
+Reads the main worktree's .flightdirector/prompt-log.jsonl (any harness, any provider), keeps
 the rows for the given session id(s) (and, with --since, at or after that
 timestamp), and prints a Markdown block the ledger comment can paste as-is:
 totals per provider/model, rows with null usage counted separately so an
@@ -19,7 +19,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from common import main_worktree, warn
+from common import ledger_path, main_worktree, warn
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -27,7 +27,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 	parser.add_argument("--session", action="append", default=[], help="session_id to include (repeatable)")
 	parser.add_argument("--since", help="ISO-8601 timestamp; keep rows at or after it")
 	parser.add_argument("--json", action="store_true", help="emit the aggregate as JSON instead of Markdown")
-	parser.add_argument("--log", help="path to prompt_log.jsonl (default: <main worktree>/prompt_log.jsonl)")
+	parser.add_argument("--log", help="path to the ledger (default: <main worktree>/.flightdirector/prompt-log.jsonl)")
 	return parser.parse_args(argv)
 
 
@@ -122,14 +122,14 @@ def fmt_tokens(value: int) -> str:
 def render_markdown(summary: dict[str, Any], sessions: list[str]) -> str:
 	lines: list[str] = []
 	if summary["rows"] == 0:
-		lines.append(f"**Cost / tokens:** no `prompt_log.jsonl` rows for session(s) {', '.join(f'`{s[:8]}`' for s in sessions) or '(none given)'} — estimate only.")
+		lines.append(f"**Cost / tokens:** no `prompt-log.jsonl` rows for session(s) {', '.join(f'`{s[:8]}`' for s in sessions) or '(none given)'} — estimate only.")
 		return "\n".join(lines)
 	basis = summary["cost_basis"]
 	basis_note = {
 		("actual-api",): "actual API billing",
 		("api-equivalent",): "API-equivalent estimate (subscription auth)",
 	}.get(tuple(basis), "mixed cost bases: " + ", ".join(basis) if basis else "cost basis unknown")
-	lines.append(f"**Cost / tokens** (from `prompt_log.jsonl`, session(s) {', '.join(f'`{s[:8]}`' for s in sessions)}; {basis_note})")
+	lines.append(f"**Cost / tokens** (from `prompt-log.jsonl`, session(s) {', '.join(f'`{s[:8]}`' for s in sessions)}; {basis_note})")
 	lines.append("")
 	lines.append("| Harness | Model | Turns | Input | Output | Cache write | Cache read | Cost (USD) |")
 	lines.append("|---|---|---:|---:|---:|---:|---:|---:|")
@@ -158,7 +158,7 @@ def render_markdown(summary: dict[str, Any], sessions: list[str]) -> str:
 
 def main(argv: list[str]) -> int:
 	args = parse_args(argv)
-	log_path = Path(args.log) if args.log else main_worktree() / "prompt_log.jsonl"
+	log_path = Path(args.log) if args.log else ledger_path(main_worktree())
 	rows = load_rows(log_path) if log_path.is_file() else []
 	if not log_path.is_file():
 		warn(f"no prompt log at {log_path}")

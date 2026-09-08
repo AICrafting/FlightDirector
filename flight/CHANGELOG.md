@@ -13,7 +13,18 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- **The prompt ledger moved to `.flightdirector/prompt-log.jsonl`** (#107). The root-level
+  `prompt_log.jsonl` name was generic enough for another tool to pick independently, and two
+  producers appending to one file corrupts both ledgers. Producers, `flight prompt-log summary`,
+  and the docs now use the namespaced path; `setting-up-a-repo` gitignores the new path and no
+  longer adds the old one. **No migration:** an existing root `prompt_log.jsonl` is neither read
+  nor moved — delete it by hand, and drop its `.gitignore` line if you want leftovers to show.
+- **`setting-up-a-repo` no longer advises removing a user's own prompt-logger hook** when the
+  ledger is enabled. Flight's hooks are plugin-bundled and write only their own file, so other
+  prompt hooks coexist; the skill must never edit, disable, or advise deleting hooks in the
+  user's settings files (`references/prompt-log.md`).
 
 ## [0.12.0] - 2026-09-07
 
