@@ -25,6 +25,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   ledger is enabled. Flight's hooks are plugin-bundled and write only their own file, so other
   prompt hooks coexist; the skill must never edit, disable, or advise deleting hooks in the
   user's settings files (`references/prompt-log.md`).
+- **`setting-up-a-repo` re-runs ask only the unanswered questions** (#108). Reusing an existing
+  config used to jump straight to the label reconcile, so a repo set up before an option existed
+  (the prompt ledger, for one) was never offered it. Now each setup question maps to a config
+  key: present — any value, `false` included — means answered and skipped; absent means asked.
+  Every answer is written back, including "no" (`"promptLog": { "enabled": false }`), so a
+  declined option is remembered rather than re-asked (`references/flight-setup.md`).
 
 ## [0.12.0] - 2026-09-07
 

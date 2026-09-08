@@ -24,6 +24,12 @@ API with `curl`. There is no MCP server, and no token handling in the skills the
 
 ### `.flightdirector/config.json` — committable
 
+**Present means answered.** `setting-up-a-repo` treats every key it owns as the recorded answer
+to one setup question: on a re-run it asks only the questions whose key is *absent*, and writes
+every answer back — including a "no" (e.g. `"promptLog": { "enabled": false }`). So a key set to
+`false` is not the same as a missing key: the first is a decision, the second is a question the
+repo has never been asked, and the next re-run will ask it.
+
 Backend, coordinates, and preferences, across two independent axes:
 
 - **`code`** — the required base: where code, change-requests (PRs), and CI live.
@@ -154,6 +160,8 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
   record to `.flightdirector/prompt-log.jsonl` under the main worktree root (gitignore it — records contain prompt
   text) and `working-an-issue` sums them per session for the work-ledger comment via
   `flight prompt-log summary`. Schema, pricing, and semantics: [prompt-log.md](prompt-log.md).
+  Write `false` to decline explicitly — a missing key makes `setting-up-a-repo` offer the ledger
+  again on its next re-run (see "Present means answered" above).
 - `.flightdirector/pricing.json` — optional per-repo pricing override/extension, merged on top of
   the bundled `flight/scripts/prompt-logger/pricing.json` (same shape).
 
