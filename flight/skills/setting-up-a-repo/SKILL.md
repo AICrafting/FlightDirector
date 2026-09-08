@@ -49,10 +49,32 @@ never guess a backend into the config.
 
 **First, reuse an existing flight config.** If `.flightdirector/config.json` already exists, read
 it and treat it as the source of truth: show its coordinates + stage pipeline back to the user and
-ask whether to reuse it as-is (skip to the label reconcile, Step 5) or revise it. Don't re-ask for
-values it already has. Either way, check the agent instructions (`AGENTS.md` / `CLAUDE.md`) for the backend
-breadcrumb (Step 9) — repos set up before that step existed won't have one, and a re-run is how
-they retrofit it.
+ask whether to keep it or revise it. Don't re-ask for values it already has — but **"keep it" does
+not mean "skip the questions"**: it means carry forward every question the config already
+answers, then run the **gap check** below and ask only the ones it doesn't. Either way, check the
+agent instructions (`AGENTS.md` / `CLAUDE.md`) for the backend breadcrumb (Step 9) — repos set up
+before that step existed won't have one, and a re-run is how they retrofit it.
+
+**The gap check — ask only what the config has no explicit answer for.** Every question this
+skill owns maps to a config key. On a re-run, for each one: the key is **present** (with any
+value — `false` and `null` count) → skip the question; the key is **absent** → ask it, exactly as
+a first run would, and **write the answer down even when it is "no"** so the next re-run doesn't
+ask again. This is the whole contract — it is what lets a repo set up before a question existed
+pick that question up on its next re-run, and it is why a declined option is recorded as an
+explicit `false` rather than left out.
+
+| Question | Config key(s) | Asked in |
+|---|---|---|
+| Backend + coordinates | `code.backend`, `code.owner`, `code.repo`, `code.api` | Step 1 |
+| API token | `code.token` in `.flightdirector/secrets.json` | Step 2 |
+| Stage pipeline | `code.stages` | Step 3 |
+| Worker model for `queue-batches` | `code.queueBatches.defaultModel` | Step 4 |
+| Prompt ledger | `code.promptLog.enabled` | Step 4 |
+
+A question added to this skill later gets a row here and follows the same rule; the rule is the
+contract, not this list. Run the gap check **before** Step 5 (labels) so the config is complete
+when the `labels` map is finalized in Step 8, and write only the keys the gap check filled —
+never rewrite the keys you carried forward (Step 4's "don't clobber hand-edits").
 
 **Migrate a legacy `.lightspeed/` folder.** If `.lightspeed/config.json` exists but
 `.flightdirector/config.json` does not, the repo was configured before the plugin was renamed. Offer
@@ -220,18 +242,22 @@ Write `.flightdirector/config.json` in the `.flightdirector/` folder (created in
 }
 ```
 
-`code.queueBatches.defaultModel` sets the default model the `queue-batches` skill gives its
-worker agents (overridable per run). `sonnet` is a sensible default for mechanical implementation
-work; change it here to retarget all future parallel runs (e.g. to a newer model) without editing
-the skill. You can also add an optional `code.zones` array later — see
+**Ask for the worker model.** Skip this if `code.queueBatches.defaultModel` is already present
+(gap check, Step 0). Otherwise ask which model `queue-batches` should give its worker agents by
+default (overridable per run), offering `sonnet` as the sensible default for mechanical
+implementation work, and write the answer to `code.queueBatches.defaultModel`. Changing it later
+retargets all future parallel runs (e.g. to a newer model) without editing the skill. You can also add an optional `code.zones` array later — see
 [flight-setup.md](../../references/flight-setup.md) — to make `queue-batches` schedule
 deterministically instead of inferring zones.
 
-**Offer the prompt ledger (opt-in).** Ask: *"Log each agent turn's prompt, tokens, and estimated
-cost to `.flightdirector/prompt-log.jsonl` so issue ledgers are measured rather than estimated?
-(Both Claude Code and Codex write the same file; it stays local and gitignored.)"* If yes, add
+**Offer the prompt ledger (opt-in).** Skip this if `code.promptLog.enabled` is already present
+(gap check, Step 0). Otherwise ask: *"Log each agent turn's prompt, tokens, and estimated cost to
+`.flightdirector/prompt-log.jsonl` so issue ledgers are measured rather than estimated? (Both
+Claude Code and Codex write the same file; it stays local and gitignored.)"* If yes, add
 `"promptLog": { "enabled": true }` under `code` and make sure `.flightdirector/prompt-log.jsonl`
-is in `.gitignore` (Step 2). The plugin's bundled hooks do the rest — nothing else to install.
+is in `.gitignore` (Step 2). If no, write `"promptLog": { "enabled": false }` — an explicit
+"no" is an answer; a missing key is an unasked question and gets asked again next re-run. The
+plugin's bundled hooks do the rest — nothing else to install.
 
 **Leave the user's other hooks alone.** Flight's hooks are plugin-bundled and write only their
 own file, so any prompt-related hook the user already runs (in `.claude/settings.local.json`,
@@ -242,8 +268,8 @@ one, you may mention it and move on. Details: [prompt-log.md](../../references/p
 Use the `stages` array from the chosen preset (a), (b), or the user's custom pipeline. All six
 status roles (`in-progress`, `to-test`, `blocked`, `deferred`, `review`, `qa`, `done`) are seeded so the
 reconcile step in Steps 6–8 ensures the corresponding labels exist. If a config already exists,
-show the diff and confirm before overwriting — don't clobber hand-edits. From here the dispatcher
-works.
+write only the keys the gap check (Step 0) filled in, show that diff, and confirm before writing
+— don't clobber hand-edits or rewrite carried-forward keys. From here the dispatcher works.
 
 ## Step 5: Load defaults and existing labels
 
@@ -413,3 +439,8 @@ to move it there so there is one copy, not two that drift.
   leaks the token.
 - Seeding `area/*` from the table without checking the project.
 - Recoloring or renaming an existing label to match the default. Only add what's missing.
+- Treating "reuse the existing config" as "jump to labels". A re-run must still run the gap
+  check (Step 0) — a repo set up before a question existed never gets asked it otherwise, and
+  the ledger (or whatever the newest option is) silently stays off.
+- Leaving a declined option out of the config instead of writing it as `false`. Absent means
+  "never asked", so the user gets the same question on every re-run.

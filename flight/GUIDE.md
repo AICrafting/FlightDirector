@@ -270,5 +270,8 @@ and semantics: [prompt-log.md](references/prompt-log.md).
   put. By default `issues` inherits `code`. See [backends.md](references/backends.md).
 - **The merge gate is real.** If you want something merged, say so explicitly — "merge #N" /
   "promote …". Claude will leave work at *ready-to-test* and stop otherwise.
-- **Re-running setup is safe.** `setting-up-a-repo` is idempotent — it only adds what's
-  missing and never renames or deletes your existing labels.
+- **Re-running setup is safe — and useful after an upgrade.** `setting-up-a-repo` is
+  idempotent: it only adds what's missing and never renames or deletes your existing labels.
+  It also asks only the setup questions your config has no answer for yet, so a re-run is how a
+  repo picks up an option added in a newer release (the prompt ledger, say) without being
+  re-asked the ones it already answered.
