@@ -392,6 +392,9 @@ earlier instructions were summarized away or the model changed mid-session:
 - Each issue is worked on its own `feature/<N>-<slug>` branch in its own
   `.worktrees/<N>-<slug>` worktree — NEVER commit directly to the integration
   branch (`<stages[0]>`) or any later stage.
+- Every git command is `git -C "<worktree path>" …` — a bare `git` is a bug,
+  even when you think you're in the right directory; the shell's cwd persists
+  between tool calls.
 - Merging is gated on the user's explicit go-ahead ("promote"); it happens
   through the promoting-a-branch skill, never by hand.
 - Keep the issue's status label honest at every transition
