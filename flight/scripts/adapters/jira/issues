@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Jira Cloud issues adapter (REST v3) — verbs: list get comments create update
-# comment set-status clear-status label-add assign unassign close reopen.
+# comment set-status clear-status label-add label-remove assign unassign close
+# reopen.
 #
 # Jira specifics (see ../../../references/adapter-contract.md, "Jira backend"):
 #   - The `--number` value is a Jira KEY (e.g. KAN-123), treated as an opaque id.
@@ -206,6 +207,29 @@ case "$verb" in
     _api PUT "/rest/api/3/issue/${number}" "$(jq -n --argjson o "$ops" '{update:{labels:$o}}')" >/dev/null
     ;;
 
+  # Mirror of label-add. Jira labels are free text with no repo-level registry,
+  # so there is nothing to validate beyond the space rule; only labels the issue
+  # actually carries are removed, which makes this idempotent.
+  label-remove)
+    number=""; labels=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --label)  labels+=("$2"); shift 2 ;;
+      *) die "issues label-remove: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues label-remove: --number required"
+    [ ${#labels[@]} -gt 0 ] || die "issues label-remove: at least one --label required"
+    for n in "${labels[@]}"; do
+      case "$n" in *" "*) die "issues label-remove: Jira labels cannot contain spaces — '$n' is invalid";; esac
+    done
+    names_json="$(printf '%s\n' "${labels[@]}" | jq -R . | jq -s .)"
+    current="$(_api GET "/rest/api/3/issue/${number}?fields=labels" | jq -c '.fields.labels // []')"
+    ops="$(jq -n --argjson l "$names_json" --argjson cur "$current" \
+      '[$l[] | select(. as $n | $cur | index($n) != null) | {remove:.}]')"
+    [ "$ops" = "[]" ] && exit 0
+    _api PUT "/rest/api/3/issue/${number}" "$(jq -n --argjson o "$ops" '{update:{labels:$o}}')" >/dev/null
+    ;;
+
   # Assign the issue to one user. Jira Cloud wants an accountId, so --user
   # (email or display name) is resolved via user search; Jira holds a single
   # assignee, so --user is NOT repeatable here. `unassign` clears it.
@@ -266,5 +290,5 @@ case "$verb" in
     _api POST "/rest/api/3/issue/${number}/transitions" "$(jq -n --arg id "$tid" '{transition:{id:$id}}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get comments create update comment set-status clear-status label-add assign unassign close reopen)" ;;
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment set-status clear-status label-add label-remove assign unassign close reopen)" ;;
 esac

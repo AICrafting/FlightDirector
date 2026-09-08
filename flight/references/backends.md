@@ -185,7 +185,7 @@ just what the adapter exercises:
 
 - **Browse Projects** — `issues list`/`get`/`comments`.
 - **Create Issues** — `issues create`.
-- **Edit Issues** — `issues update`, and `set-status`/`label-add` (Jira status is driven via
+- **Edit Issues** — `issues update`, and `set-status`/`label-add`/`label-remove` (Jira status is driven via
   labels, which are an edit-issue operation).
 - **Add Comments** — `issues comment`.
 - **Transition Issues** — `issues close`/`reopen` post real workflow transitions (Done ⇄ To-Do).
