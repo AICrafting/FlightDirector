@@ -13,6 +13,14 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+
+- **`flight issues label-remove --number N --label NAME`** (#63) — the exact mirror of
+  `label-add`, for taking a label back off an issue (repeatable `--label`). Implemented for
+  every backend (Forgejo, GitHub, GitLab, Jira). An unknown label name is an error, the same
+  as `label-add`, but removing a label the issue isn't carrying succeeds silently, so the verb
+  is safe to run unconditionally.
+
 ### Changed
 
 - **The prompt ledger moved to `.flightdirector/prompt-log.jsonl`** (#107). The root-level

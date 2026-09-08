@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # GitHub issues adapter — verbs: list get comments create update comment
-# set-status clear-status label-add assign unassign close reopen.
+# set-status clear-status label-add label-remove assign unassign close reopen.
 # See ../../../references/adapter-contract.md.
 set -euo pipefail
 ADAPTER_NAME="github/issues"
@@ -186,6 +186,29 @@ case "$verb" in
     _api POST "/issues/${number}/labels" "$(jq -n --argjson l "$names_json" '{labels:$l}')" >/dev/null
     ;;
 
+  # Mirror of label-add. Idempotent: a label the issue doesn't carry is a
+  # no-op success (GitHub 404s on removing an absent label), while an unknown
+  # label name is still an error (catches typos).
+  label-remove)
+    number=""; labels=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --label)  labels+=("$2"); shift 2 ;;
+      *) die "issues label-remove: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues label-remove: --number required"
+    [ ${#labels[@]} -gt 0 ] || die "issues label-remove: at least one --label required"
+    for n in "${labels[@]}"; do
+      [ -n "$(label_id "$n")" ] || die "issues label-remove: label '$n' not found"
+    done
+    current_names="$(_api GET "/issues/${number}" | jq -c '[.labels[].name]')"
+    for n in "${labels[@]}"; do
+      if printf '%s' "$current_names" | jq -e --arg n "$n" 'index($n) != null' >/dev/null; then
+        _api DELETE "/issues/${number}/labels/$(urlenc "$n")" >/dev/null
+      fi
+    done
+    ;;
+
   # Replace the issue's assignees with the given user login(s). Repeatable
   # --user; `unassign` clears them all.
   assign)
@@ -231,5 +254,5 @@ case "$verb" in
     _api PATCH "/issues/${number}" "$(jq -n '{state:"open"}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add assign unassign close reopen)" ;;
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add label-remove assign unassign close reopen)" ;;
 esac
