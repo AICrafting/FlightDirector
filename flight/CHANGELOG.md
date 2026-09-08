@@ -15,6 +15,11 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- **`flight labels delete --name NAME [--force]`** (#111) — remove a label from the repo
+  through the dispatcher, the repo-level counterpart of `issues label-remove`. Safe by default:
+  it refuses while the label is still on any issue or PR/MR, open or closed, and says how many;
+  `--force` deletes it anyway. Unknown names error. Forgejo, GitHub, GitLab; Jira has no
+  repo-level label object and says so.
 - **`flight issues label-remove --number N --label NAME`** (#63) — the exact mirror of
   `label-add`, for taking a label back off an issue (repeatable `--label`). Implemented for
   every backend (Forgejo, GitHub, GitLab, Jira). An unknown label name is an error, the same

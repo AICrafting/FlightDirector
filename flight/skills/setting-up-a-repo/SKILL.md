@@ -30,7 +30,9 @@ must be proposed from the actual project, not seeded from a table.
 
 ## Red flags — STOP
 
-- **Never rename, recolor, or delete an existing label.** This skill only *adds*.
+- **Never rename, recolor, or delete an existing label.** This skill only *adds*. (Removing a
+  label later is a deliberate, user-invoked action: `flight labels delete --name NAME`, which
+  refuses while the label is still in use.)
 - **An equivalent already present is ADOPTED, not duplicated.** If the repo has `enhancement`,
   don't create `feature` — record `enhancement` as the name for that role and move on.
 - **Never create `area/*` labels without project input.** They're project-dependent — propose,

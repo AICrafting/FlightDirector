@@ -95,6 +95,7 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 | `ensure`  | `--model MODEL_ID`                       | derives the stable family in the dispatcher, then ensures the standard `model/<family>` label |
 | `model-family` | `--id MODEL_ID`                      | stable family on stdout; non-zero for tool/service ids; warns when using the sanitized fallback |
 | `edit`    | `--name NAME --new-name NAME`            | renamed label's `id`; preserves issue associations where the backend supports global labels |
+| `delete`  | `--name NAME` `[--force]`                | (nothing). Removes the label from the repo. **Refuses by default while the label is still on any issue or PR/MR, open or closed**, naming the count (`50+` past one page); `--force` deletes regardless and the backend strips it from those issues. Unknown name is an error. Jira has no repo-level label object → always errors (use `issues label-remove`) |
 
 ### `pr` (pull request — "MR" on GitLab)
 
