@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Forgejo pull-request adapter — verbs: open merge.  ("MR" on GitLab.)
+# Forgejo pull-request adapter — verbs: open merge list.  ("MR" on GitLab.)
 # See ../../../references/adapter-contract.md.
 set -euo pipefail
 ADAPTER_NAME="forgejo/pr"
@@ -10,6 +10,36 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 verb="${1:-}"; shift || true
 
 case "$verb" in
+  list)
+    state="open"; head=""; base=""; limit=30
+    while [ $# -gt 0 ]; do case "$1" in
+      --state)  state="$2"; shift 2 ;;
+      --head)   head="$2"; shift 2 ;;
+      --base)   base="$2"; shift 2 ;;
+      --limit)  limit="$2"; shift 2 ;;
+      *) die "pr list: unknown arg '$1'" ;;
+    esac; done
+    # Forgejo has no `merged` state — a merged PR is a closed one with merged_at set,
+    # so ask for closed and filter. --head/--base are client-side here (the endpoint
+    # has no branch filter); the limit therefore bounds the *fetch*, not the matches.
+    case "$state" in
+      open)   api_state="open";   merged_only=0 ;;
+      closed) api_state="closed"; merged_only=0 ;;
+      merged) api_state="closed"; merged_only=1 ;;
+      all)    api_state="all";    merged_only=0 ;;
+      *) die "pr list: --state must be open|closed|merged|all" ;;
+    esac
+    _api GET "/pulls?state=${api_state}&limit=${limit}" \
+      | jq -r --arg h "$head" --arg b "$base" --argjson m "$merged_only" '
+          .[]
+          | select($h == "" or .head.ref == $h)
+          | select($b == "" or .base.ref == $b)
+          | select($m == 0 or (.merged_at != null))
+          | [ (.number|tostring),
+              (if .merged_at != null then "merged" else .state end),
+              .head.ref, .base.ref, .title ] | @tsv'
+    ;;
+
   open)
     head=""; base=""; title=""; body=""; body_file=""
     while [ $# -gt 0 ]; do case "$1" in
@@ -50,5 +80,5 @@ case "$verb" in
     _api POST "/pulls/${number}/merge" "$(jq -n --arg d "$strategy" '{Do:$d}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (pr: open merge)" ;;
+  *) die "unknown verb '${verb}' (pr: open merge list)" ;;
 esac
