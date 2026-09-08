@@ -7,7 +7,7 @@
 > called `lightspeed` during initial development/testing — see the [CHANGELOG](CHANGELOG.md)
 > for the migration notes.
 
-Seven skills for running an issue + code workflow from Claude Code or Codex using one shared package.
+Eight skills for running an issue + code workflow from Claude Code or Codex using one shared package.
 Everything goes through the **flight dispatcher** — `flight <group> <verb>` — which calls
 the backend's REST API with `curl`. Skills resolve its installed path rather than requiring Codex
 to inject the plugin's `bin/` directory into `PATH`.
@@ -26,6 +26,7 @@ server to install.
 | `promoting-a-branch` | "promote this", "promote to qa", "open a PR for this branch", "this branch is ready" | Advances the current branch one stage up the pipeline (feature → develop → qa → main), with the hop's merge strategy, gate, test-plan halt, and CI watch |
 | `promoting-branches` | "promote each zone", "promote the first zone", "promote issues 18, 93, 12", "batch promote" | Promotes a selected group of first-hop feature branches into `stages[0]` in one go, honoring that hop's merge strategy (direct → N merges; pr → one PR per group) |
 | `queue-batches` | `/queue-batches NxM`, "work N issues in parallel", "batch these issues", "dispatch agents" | Dispatch N background agents, each working M issues sequentially through the working-an-issue lifecycle in isolated worktrees (zones), stopping at the to-test gate; batch hand-off to promoting-branches |
+| `cleaning-up-branches` | "clean up the branches", "delete merged branches", "prune old feature branches", "what branches can go" | Finds feature/bugfix/release branches already merged into a stage (ancestry, or a merged PR for squash/rebase hops), cross-checks each against its issue's status, then deletes the local ref, the remote ref, and the leftover worktree behind a preview and an explicit go-ahead |
 | `setting-up-a-repo` | "set up labels", "bootstrap labels", "add default labels", or a bare repo during filing | First-run setup: writes config + secrets, then reconciles a default taxonomy against existing labels and creates only what's missing |
 
 ## How it works

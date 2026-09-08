@@ -137,6 +137,7 @@ all speak your repo's conventions.
 | "promote this", "promote develop to main" | **promoting-a-branch** | Advance the branch one stage (direct merge or PR + CI) |
 | "promote each zone", "promote issues 18, 93, 12", "batch promote" | **promoting-branches** | Promote a selected group of first-hop feature branches into `stages[0]` at once (direct → N merges; pr → one PR per group) |
 | `/queue-batches NxM`, "work N issues in parallel", "batch these" | **queue-batches** | Dispatch N background agents × M issues each; isolated worktrees (zones), stop at to-test, then a batch hand-off to promoting-branches |
+| "clean up the branches", "delete merged branches", "what branches can go" | **cleaning-up-branches** | Find branches already merged into a stage, cross-check their issues, then delete refs + worktrees on your go-ahead |
 | "set up flight", "bootstrap labels" | **setting-up-a-repo** | First-run setup (above) |
 
 You never type the underlying commands — you talk to Claude, and the skills drive the forge for
@@ -223,6 +224,18 @@ When you have several independent issues to tackle at once, `/queue-batches NxM`
 horizontally: N background agents each work M issues sequentially in isolated worktrees (zones),
 stopping at the to-test gate; you then ship the batch with **promoting-branches** (or hand-pick
 branches one at a time with promoting-a-branch).
+
+### 5. Sweep up
+
+Merged branches don't remove themselves — `working-an-issue` clears the *worktree*, but the
+`feature/<N>-<slug>` ref stays on origin (and usually locally) forever. Every so often:
+
+> **You:** "clean up the branches"
+
+**cleaning-up-branches** finds the ones whose work has already landed in a stage — including
+squash-merged ones, which git alone can't recognise — checks each against its issue's status so a
+half-finished promotion gets flagged rather than swept away, and shows you the list. Nothing is
+deleted until you say go, and deleting on **origin** is a separate yes from deleting locally.
 
 ---
 
