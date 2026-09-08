@@ -57,13 +57,13 @@ There are three distinct layers — keep them straight:
 
 | What | Where | Runs | Purpose |
 |---|---|---|---|
-| **Pre-push checks** | `scripts/checks/*.sh` via `scripts/runChecks.sh` | `.githooks/pre-push` (local), on demand | Working-tree cleanliness: `lint.sh` (yamllint + shellcheck), `verifyGitLogs.sh` (commit signatures) |
-| **Script unit tests** | `scripts/tests/*.test.sh` via `scripts/runTests.sh` | CI (`.github/workflows/tests.yml`), on demand | Unit tests for the repo's own scripts (e.g. `bump-version.test.sh`) |
+| **Pre-push checks** | `scripts/checks/*.sh` via `scripts/run-checks.sh` | `.githooks/pre-push` (local), on demand | Working-tree cleanliness: `lint.sh` (yamllint + shellcheck), `verify-git-logs.sh` (commit signatures) |
+| **Script unit tests** | `scripts/tests/*.test.sh` via `scripts/run-tests.sh` | CI (`.github/workflows/tests.yml`), on demand | Unit tests for the repo's own scripts (e.g. `bump-version.test.sh`) |
 | **Integration rigs** | `test-rig/<backend>/` | on demand | Per-backend adapter smoke tests (see below) |
 
 ```bash
-scripts/runChecks.sh    # lint + signature checks (what the pre-push hook runs)
-scripts/runTests.sh     # all scripts/tests/*.test.sh
+scripts/run-checks.sh    # lint + signature checks (what the pre-push hook runs)
+scripts/run-tests.sh     # all scripts/tests/*.test.sh
 ```
 
 Enable the pre-push hook once per clone:
@@ -76,16 +76,16 @@ The hook reads the ref list git passes on stdin and verifies signatures on exact
 the commits each ref will push (`<remote>..<local>`, or everything not yet on the
 remote for a new branch), then runs the remaining checks with the signature pass
 skipped (`RUNCHECKS_SKIP`). A push that carries no commits (a `git push --delete
-<branch>`, or nothing to push) runs nothing at all. `verifyGitLogs.sh` can also be
+<branch>`, or nothing to push) runs nothing at all. `verify-git-logs.sh` can also be
 run by hand with a count or any `git rev-list` selection, e.g.
-`scripts/checks/verifyGitLogs.sh origin/develop..HEAD`.
+`scripts/checks/verify-git-logs.sh origin/develop..HEAD`.
 
 CI runs two workflows on push to `develop` and on PRs: **`lint`** (yamllint +
-shellcheck) and **`tests`** (`runTests.sh`).
+shellcheck) and **`tests`** (`run-tests.sh`).
 
 **Adding a check or test.** A pre-push check is any `*.sh` in `scripts/checks/`
-(`runChecks.sh` runs each that is executable). A unit test is any `*.test.sh` in
-`scripts/tests/` (`runTests.sh` runs each). Keep unit tests out of `scripts/checks/`
+(`run-checks.sh` runs each that is executable). A unit test is any `*.test.sh` in
+`scripts/tests/` (`run-tests.sh` runs each). Keep unit tests out of `scripts/checks/`
 — the pre-push path is for cleanliness, not for testing individual scripts.
 
 **Executable bit — important.** This repo has `core.fileMode = false`, so a plain
@@ -137,7 +137,7 @@ flight develops itself through its own pipeline: **feature → develop → qa �
 
 Other conventions:
 
-- **Signed commits are required.** The pre-push `verifyGitLogs.sh` rejects any unpushed
+- **Signed commits are required.** The pre-push `verify-git-logs.sh` rejects any unpushed
   commit whose signature isn't good (`%G?` of `G`/`U`). Merge commits occasionally sign
   badly (`B`) — re-sign with `git commit --amend --no-edit -S` before pushing.
 - **Agent instructions** — repo-wide rules for coding agents live in [AGENTS.md](AGENTS.md)
@@ -211,7 +211,7 @@ changelog-section extractor it uses; both are repo tooling, not part of the plug
 mirror that is pushed by hand. After tagging, run:
 
 ```bash
-scripts/push-mirror.sh                   # = --remote github --branch main; add --dry-run to preview
+scripts/push-to-mirror.sh                   # = --remote github --branch main; add --dry-run to preview
 ```
 
 It pushes `origin/main` to the mirror **fast-forward only** (it refuses, and never forces, if the

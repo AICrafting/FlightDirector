@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Publish a branch and the release tags at its head to the public mirror.
 #
-#   scripts/push-mirror.sh [--remote <name>] [--branch <name>]... [--dry-run]
+#   scripts/push-to-mirror.sh [--remote <name>] [--branch <name>]... [--dry-run]
 #
 # Defaults: --remote github, --branch main. For each branch it:
 #   1. fetches origin/<branch> (the source of truth) and the mirror's copy;
@@ -17,8 +17,8 @@
 set -euo pipefail
 
 REPO_ROOT="${PUSH_MIRROR_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-die() { printf '\033[0;31mpush-mirror: %s\033[0m\n' "$1" >&2; exit 1; }
-say() { printf '\033[0;32mpush-mirror:\033[0m %s\n' "$1"; }
+die() { printf '\033[0;31mpush-to-mirror: %s\033[0m\n' "$1" >&2; exit 1; }
+say() { printf '\033[0;32mpush-to-mirror:\033[0m %s\n' "$1"; }
 
 REMOTE="github"; BRANCHES=(); DRY=0
 while [ $# -gt 0 ]; do
@@ -26,7 +26,7 @@ while [ $# -gt 0 ]; do
 		--remote)  [ $# -ge 2 ] || die "missing value for $1"; REMOTE="$2"; shift 2 ;;
 		--branch)  [ $# -ge 2 ] || die "missing value for $1"; BRANCHES+=("$2"); shift 2 ;;
 		--dry-run) DRY=1; shift ;;
-		*) die "unknown argument: $1 (usage: push-mirror.sh [--remote <name>] [--branch <name>]... [--dry-run])" ;;
+		*) die "unknown argument: $1 (usage: push-to-mirror.sh [--remote <name>] [--branch <name>]... [--dry-run])" ;;
 	esac
 done
 [ ${#BRANCHES[@]} -gt 0 ] || BRANCHES=(main)
@@ -44,7 +44,7 @@ git -C "$REPO_ROOT" fetch -q "$REMOTE" 2>/dev/null || true	# the mirror may lack
 
 status=0
 for branch in "${BRANCHES[@]}"; do
-	src="$(git -C "$REPO_ROOT" rev-parse --verify -q "refs/remotes/origin/$branch")" || { printf 'push-mirror: origin has no branch %s — skipping\n' "$branch" >&2; status=1; continue; }
+	src="$(git -C "$REPO_ROOT" rev-parse --verify -q "refs/remotes/origin/$branch")" || { printf 'push-to-mirror: origin has no branch %s — skipping\n' "$branch" >&2; status=1; continue; }
 	short="${src:0:7}"
 	mirror="$(git -C "$REPO_ROOT" rev-parse --verify -q "refs/remotes/$REMOTE/$branch" 2>/dev/null || true)"
 
@@ -54,7 +54,7 @@ for branch in "${BRANCHES[@]}"; do
 	if [ -n "$mirror" ] && [ "$mirror" = "$src" ]; then
 		say "$REMOTE/$branch already at $short"
 	elif [ -n "$mirror" ] && ! git -C "$REPO_ROOT" merge-base --is-ancestor "$mirror" "$src"; then
-		printf '\033[0;31mpush-mirror: %s/%s (%s) is not an ancestor of origin/%s (%s) — the mirror moved out of band; refusing to force-push. Reconcile by hand.\033[0m\n' \
+		printf '\033[0;31mpush-to-mirror: %s/%s (%s) is not an ancestor of origin/%s (%s) — the mirror moved out of band; refusing to force-push. Reconcile by hand.\033[0m\n' \
 			"$REMOTE" "$branch" "${mirror:0:7}" "$branch" "$short" >&2
 		status=1
 		continue

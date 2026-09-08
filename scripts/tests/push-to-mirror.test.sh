@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Unit tests for scripts/push-mirror.sh (#106): sandbox repo with two bare
+# Unit tests for scripts/push-to-mirror.sh (#106): sandbox repo with two bare
 # remotes ("origin" = source of truth, "github" = mirror).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-PM="$REPO_ROOT/scripts/push-mirror.sh"
+PM="$REPO_ROOT/scripts/push-to-mirror.sh"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 
 pass=0; fail=0

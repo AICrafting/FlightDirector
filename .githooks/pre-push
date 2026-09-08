@@ -10,7 +10,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 # core.hooksPath lives in the shared .git/config, so this hook also fires from
 # sibling worktrees on branches that predate scripts/. Nothing to check there.
-[ -x "$REPO_ROOT/scripts/runChecks.sh" ] || exit 0
+[ -x "$REPO_ROOT/scripts/run-checks.sh" ] || exit 0
 
 remote="${1:-origin}"
 zero="$(git hash-object --stdin </dev/null | tr '0-9a-f' '0')"
@@ -26,9 +26,9 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
 	[ "$local_sha" != "$zero" ] || continue # ref deletion: nothing to verify
 	pushing_commits=1
 	if [ "$remote_sha" = "$zero" ]; then
-		"$REPO_ROOT/scripts/checks/verifyGitLogs.sh" "$local_sha" --not --remotes="$remote"
+		"$REPO_ROOT/scripts/checks/verify-git-logs.sh" "$local_sha" --not --remotes="$remote"
 	else
-		"$REPO_ROOT/scripts/checks/verifyGitLogs.sh" "${remote_sha}..${local_sha}"
+		"$REPO_ROOT/scripts/checks/verify-git-logs.sh" "${remote_sha}..${local_sha}"
 	fi
 done
 
@@ -37,5 +37,5 @@ done
 [ "$pushing_commits" -eq 1 ] || exit 0
 
 # Signatures were just verified on the exact push range above, so skip the
-# generic (upstream-guessing) pass runChecks would otherwise repeat.
-RUNCHECKS_SKIP="verifyGitLogs.sh" "$REPO_ROOT/scripts/runChecks.sh"
+# generic (upstream-guessing) pass run-checks would otherwise repeat.
+RUNCHECKS_SKIP="verify-git-logs.sh" "$REPO_ROOT/scripts/run-checks.sh"

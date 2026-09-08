@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Unit tests for scripts/checks/verifyGitLogs.sh — argument modes and the
+# Unit tests for scripts/checks/verify-git-logs.sh — argument modes and the
 # empty-selection / empty-repo guards. Signature *validity* itself is not
 # tested here (it needs a signing key); unsigned commits are used to show
 # that a selected commit is actually inspected.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-VERIFY_SRC="$REPO_ROOT/scripts/checks/verifyGitLogs.sh"
+VERIFY_SRC="$REPO_ROOT/scripts/checks/verify-git-logs.sh"
 
 pass=0; fail=0
 check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=$((pass+1));
@@ -20,9 +20,9 @@ git -C "$SANDBOX" config user.email test@example.com
 git -C "$SANDBOX" config user.name test
 git -C "$SANDBOX" config commit.gpgsign false
 mkdir -p "$SANDBOX/scripts/checks"
-cp "$VERIFY_SRC" "$SANDBOX/scripts/checks/verifyGitLogs.sh"
-chmod +x "$SANDBOX/scripts/checks/verifyGitLogs.sh"
-VERIFY="$SANDBOX/scripts/checks/verifyGitLogs.sh"
+cp "$VERIFY_SRC" "$SANDBOX/scripts/checks/verify-git-logs.sh"
+chmod +x "$SANDBOX/scripts/checks/verify-git-logs.sh"
+VERIFY="$SANDBOX/scripts/checks/verify-git-logs.sh"
 
 # --- empty repo ---
 out="$("$VERIFY" 2>&1)" && rc=0 || rc=$?
