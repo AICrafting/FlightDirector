@@ -1,0 +1,325 @@
+#!/usr/bin/env bash
+#
+# flight `branches` group — find and delete branches whose work is already merged.
+#
+#   flight branches list  [--merged-into STAGE] [--pattern GLOB]… [--no-fetch]
+#   flight branches prune [--merged-into STAGE] [--pattern GLOB]… [--branch NAME]…
+#                         [--local] [--remote] [--worktrees] [--dry-run] [--no-fetch]
+#
+# Dispatcher-owned (not a backend adapter): the work is git-local. The one backend
+# call is the merged-PR fallback for squash/rebase hops, which goes back through the
+# dispatcher as `pr list --state merged --head <branch>` so the backend stays behind
+# the adapter contract. Invoked by the dispatcher's `branches` case arm, which exports
+# FLIGHT_REPO_ROOT, FLIGHT_CONFIG and FLIGHT_SELF.
+#
+# See ../references/adapter-contract.md and ../skills/cleaning-up-branches/SKILL.md.
+set -euo pipefail
+
+die() { echo "flight branches: $*" >&2; exit 1; }
+warn() { echo "flight branches: $*" >&2; }
+
+: "${FLIGHT_REPO_ROOT:?FLIGHT_REPO_ROOT not set (dispatcher must export it)}"
+: "${FLIGHT_CONFIG:?FLIGHT_CONFIG not set (dispatcher must export it)}"
+: "${FLIGHT_SELF:?FLIGHT_SELF not set (dispatcher must export it)}"
+
+ROOT="$FLIGHT_REPO_ROOT"
+CFG="$FLIGHT_CONFIG"
+
+# Every git command is anchored to the MAIN checkout: branch refs and the worktree
+# list are shared across linked worktrees, and the caller may be sitting in any of them.
+g() { git -C "$ROOT" "$@"; }
+
+verb="${1:-}"; shift || true
+
+# ── args ────────────────────────────────────────────────────────────────────────
+merged_into=""; no_fetch=0; dry_run=0; do_local=0; do_remote=0; do_worktrees=0
+patterns=(); only_branches=()
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--merged-into) [ $# -ge 2 ] || die "$verb: --merged-into needs a stage name"; merged_into="$2"; shift 2 ;;
+		--pattern)     [ $# -ge 2 ] || die "$verb: --pattern needs a glob"; patterns+=("$2"); shift 2 ;;
+		--branch)      [ "$verb" = prune ] || die "list: --branch is a prune-only flag"
+		               [ $# -ge 2 ] || die "prune: --branch needs a name"; only_branches+=("$2"); shift 2 ;;
+		--no-fetch)    no_fetch=1; shift ;;
+		--dry-run)     [ "$verb" = prune ] || die "list: --dry-run is a prune-only flag (list never writes)"
+		               dry_run=1; shift ;;
+		--local)       [ "$verb" = prune ] || die "list: --local is a prune-only flag"; do_local=1; shift ;;
+		--remote)      [ "$verb" = prune ] || die "list: --remote is a prune-only flag"; do_remote=1; shift ;;
+		--worktrees)   [ "$verb" = prune ] || die "list: --worktrees is a prune-only flag"; do_worktrees=1; shift ;;
+		*) die "${verb:-branches}: unknown arg '$1'" ;;
+	esac
+done
+
+case "$verb" in
+	list|prune) ;;
+	*) die "unknown verb '${verb}' (branches: list prune)" ;;
+esac
+
+# `prune` with no target class named is a preview, not a no-op: deleting branches is a
+# red-line git write, so the safe reading of an under-specified command is "show me".
+prune_preview_only=0
+if [ "$verb" = prune ] && [ "$do_local" = 0 ] && [ "$do_remote" = 0 ] && [ "$do_worktrees" = 0 ]; then
+	prune_preview_only=1
+	dry_run=1
+fi
+
+# ── config ──────────────────────────────────────────────────────────────────────
+mapfile -t STAGES < <(jq -r '.code.stages[]?.name // empty' "$CFG")
+[ "${#STAGES[@]}" -gt 0 ] || die "no code.stages configured in $CFG — nothing to measure 'merged' against"
+
+if [ -n "$merged_into" ]; then
+	found=0
+	for s in "${STAGES[@]}"; do [ "$s" = "$merged_into" ] && found=1; done
+	[ "$found" = 1 ] || die "--merged-into '$merged_into' is not a configured stage (have: ${STAGES[*]})"
+	TARGETS=("$merged_into")
+else
+	TARGETS=("${STAGES[@]}")
+fi
+
+# Candidate patterns: --pattern wins, else code.branches.patterns, else the defaults.
+if [ "${#patterns[@]}" -eq 0 ]; then
+	mapfile -t patterns < <(jq -r '.code.branches.patterns[]? // empty' "$CFG")
+fi
+if [ "${#patterns[@]}" -eq 0 ]; then
+	patterns=("feature/*" "bugfix/*" "release/*")
+fi
+
+# ── freshness ───────────────────────────────────────────────────────────────────
+# A stale remote-tracking picture is the one way this tool can lie in the dangerous
+# direction (offering to delete a branch that has since moved, or hiding one that was
+# deleted elsewhere). Fetch by default; a failure warns rather than stops so an offline
+# `list` still works — it just says the picture is local-only.
+if [ "$no_fetch" = 0 ]; then
+	if g remote get-url origin >/dev/null 2>&1; then
+		g fetch -q --prune origin || warn "fetch failed — working from possibly stale remote-tracking refs"
+	else
+		warn "no 'origin' remote — remote branches are out of scope for this run"
+	fi
+fi
+
+HAS_ORIGIN=0
+g remote get-url origin >/dev/null 2>&1 && HAS_ORIGIN=1
+
+# ── worktree map: branch → path (and which paths are off limits) ────────────────
+# `git worktree list --porcelain` emits a `worktree <path>` line then, for a non-detached
+# checkout, a `branch refs/heads/<name>` line. The MAIN checkout is always the first entry.
+declare -A WT_PATH=()
+MAIN_WT=""
+_wt=""
+while IFS= read -r line; do
+	case "$line" in
+		"worktree "*) _wt="${line#worktree }"; [ -n "$MAIN_WT" ] || MAIN_WT="$_wt" ;;
+		"branch refs/heads/"*) WT_PATH["${line#branch refs/heads/}"]="$_wt" ;;
+	esac
+done < <(g worktree list --porcelain)
+
+# ── candidate collection ───────────────────────────────────────────────────────
+matches_pattern() {
+	local b="$1" p
+	for p in "${patterns[@]}"; do
+		# The right-hand side is deliberately a glob, not a literal.
+		# shellcheck disable=SC2053
+		[[ $b == $p ]] && return 0
+	done
+	return 1
+}
+
+# Never-touch list, independent of the patterns: a stage branch is the pipeline itself,
+# and archived/* is the deliberate keep-forever namespace (see open-source-prep).
+protected() {
+	local b="$1" s
+	case "$b" in archived/*) return 0 ;; esac
+	for s in "${STAGES[@]}"; do [ "$b" = "$s" ] && return 0; done
+	return 1
+}
+
+declare -A HAS_LOCAL=() HAS_REMOTE=()
+while IFS= read -r b; do
+	[ -n "$b" ] || continue
+	protected "$b" && continue
+	matches_pattern "$b" || continue
+	HAS_LOCAL["$b"]=1
+done < <(g for-each-ref --format='%(refname:short)' refs/heads/)
+
+if [ "$HAS_ORIGIN" = 1 ]; then
+	while IFS= read -r b; do
+		b="${b#origin/}"
+		[ -n "$b" ] && [ "$b" != "HEAD" ] || continue
+		protected "$b" && continue
+		matches_pattern "$b" || continue
+		HAS_REMOTE["$b"]=1
+	done < <(g for-each-ref --format='%(refname:short)' refs/remotes/origin/)
+fi
+
+# ── merged detection ───────────────────────────────────────────────────────────
+# Resolve the ref to measure a stage by: the remote-tracking tip when there is one
+# (that is what the rest of the world has), otherwise the local ref.
+stage_ref() {
+	local s="$1"
+	if [ "$HAS_ORIGIN" = 1 ] && g rev-parse -q --verify "refs/remotes/origin/$s" >/dev/null; then
+		printf 'origin/%s\n' "$s"
+	elif g rev-parse -q --verify "refs/heads/$s" >/dev/null; then
+		printf '%s\n' "$s"
+	fi
+}
+
+# branch_ref <branch> — prefer the local ref; fall back to the remote-tracking one for
+# a branch that exists only on origin.
+branch_ref() {
+	local b="$1"
+	if [ -n "${HAS_LOCAL[$b]:-}" ]; then printf 'refs/heads/%s\n' "$b"
+	else printf 'refs/remotes/origin/%s\n' "$b"; fi
+}
+
+# merged_stage <branch> — the first stage the branch tip is an ancestor of, else empty.
+merged_stage() {
+	local b="$1" s ref sref
+	ref="$(branch_ref "$b")"
+	for s in "${TARGETS[@]}"; do
+		sref="$(stage_ref "$s")" || true
+		[ -n "$sref" ] || continue
+		if g merge-base --is-ancestor "$ref" "$sref" 2>/dev/null; then
+			printf '%s\n' "$s"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# merged_pr <branch> — squash/rebase fallback. A `pr` hop that squashes rewrites the
+# commits, so the branch tip is NOT an ancestor of the target even though the work
+# landed. Ask the backend for a merged PR whose head was this branch; the PR's base
+# must be one of the stages we are measuring against. Prints "<stage>⇥<pr-number>".
+# A backend that has no `pr` adapter (Jira) or is unreachable is not fatal here — the
+# ancestor test simply stands alone and the branch is reported unmerged.
+merged_pr() {
+	local b="$1" rows base num s
+	rows="$("$FLIGHT_SELF" pr list --state merged --head "$b" --limit 20 2>/dev/null)" || return 1
+	while IFS=$'\t' read -r num _state _head base _title; do
+		[ -n "$num" ] || continue
+		for s in "${TARGETS[@]}"; do
+			if [ "$base" = "$s" ]; then printf '%s\t%s\n' "$s" "$num"; return 0; fi
+		done
+	done <<<"$rows"
+	return 1
+}
+
+# issue_number <branch> — the leading number of the slug: feature/90-cleaning-up → 90.
+# Empty when the branch does not carry one; the skill treats that as "cross-check by hand".
+issue_number() {
+	local slug="${1#*/}"
+	case "$slug" in
+		[0-9]*) printf '%s\n' "${slug%%[!0-9]*}" ;;
+	esac
+}
+
+# ── row assembly ───────────────────────────────────────────────────────────────
+# Emits: branch⇥where⇥merged-into⇥pr⇥issue⇥worktree  for the merged candidates only.
+collect_rows() {
+	local b where stage pr issue wt hit x
+	for b in $(printf '%s\n' "${!HAS_LOCAL[@]}" "${!HAS_REMOTE[@]}" | sort -u); do
+		[ -n "$b" ] || continue
+		if [ "${#only_branches[@]}" -gt 0 ]; then
+			hit=0
+			for x in "${only_branches[@]}"; do [ "$x" = "$b" ] && hit=1; done
+			[ "$hit" = 1 ] || continue
+		fi
+		where=""
+		[ -n "${HAS_LOCAL[$b]:-}" ] && where="local"
+		[ -n "${HAS_REMOTE[$b]:-}" ] && where="${where:+$where+}remote"
+
+		pr="-"
+		if stage="$(merged_stage "$b")"; then
+			:
+		elif IFS=$'\t' read -r stage pr < <(merged_pr "$b") && [ -n "$stage" ]; then
+			:
+		else
+			continue          # not merged anywhere we were asked about — leave it alone
+		fi
+
+		issue="$(issue_number "$b")"; issue="${issue:--}"
+		wt="${WT_PATH[$b]:--}"
+		printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$b" "$where" "$stage" "$pr" "$issue" "$wt"
+	done
+}
+
+if [ "$verb" = list ]; then
+	collect_rows
+	exit 0
+fi
+
+# ── prune ──────────────────────────────────────────────────────────────────────
+# Action lines are TSV too: action⇥branch⇥detail. `would-*` for a preview, `skip` for
+# anything deliberately left alone (with the reason), plain verbs for real deletions.
+if [ "$prune_preview_only" = 1 ]; then
+	warn "no --local/--remote/--worktrees given — showing what WOULD be deleted (nothing was)"
+fi
+
+act() { # act <verb> <branch> <detail>
+	printf '%s\t%s\t%s\n' "$1" "$2" "$3"
+}
+
+rc=0
+while IFS=$'\t' read -r b where stage pr issue wt; do
+	[ -n "$b" ] || continue
+
+	# A branch checked out in the MAIN checkout (or any worktree outside .worktrees/)
+	# is someone's working copy, not leftovers — never touch it, at any flag level.
+	if [ "$wt" != "-" ] && { [ "$wt" = "$MAIN_WT" ] || [ "${wt#"$ROOT"/.worktrees/}" = "$wt" ]; }; then
+		act skip "$b" "checked out at $wt (not a .worktrees/ entry)"
+		continue
+	fi
+
+	# Worktree first: git refuses to delete a branch that is checked out anywhere.
+	if [ "$wt" != "-" ]; then
+		if [ "$do_worktrees" = 1 ] || [ "$prune_preview_only" = 1 ]; then
+			if [ "$dry_run" = 1 ]; then
+				act would-remove-worktree "$b" "$wt"
+			elif g worktree remove "$wt" 2>/dev/null; then
+				act remove-worktree "$b" "$wt"
+				wt="-"
+			else
+				# No --force, ever: a dirty worktree holds work nobody has looked at.
+				act skip "$b" "worktree $wt is dirty or locked — resolve it by hand"
+				rc=1
+				continue
+			fi
+		else
+			# Local deletion is impossible while the branch is checked out, so say that
+			# rather than reporting a delete that git would refuse anyway.
+			act skip "$b" "worktree $wt present (pass --worktrees to remove it)"
+			continue
+		fi
+	fi
+
+	if [ -n "${HAS_LOCAL[$b]:-}" ]; then
+		if [ "$do_local" = 1 ] && [ "$dry_run" = 0 ]; then
+			# `-d`, never `-D`: git's own merged check is the last line of defence, and
+			# a refusal here means our "merged" verdict disagreed with git's.
+			if out="$(g branch -d "$b" 2>&1)"; then
+				act delete-local "$b" "merged into $stage"
+			else
+				act skip "$b" "git branch -d refused: ${out##*: }"
+				rc=1
+			fi
+		elif [ "$do_local" = 1 ] || [ "$prune_preview_only" = 1 ]; then
+			act would-delete-local "$b" "merged into $stage"
+		fi
+	fi
+
+	if [ -n "${HAS_REMOTE[$b]:-}" ]; then
+		if [ "$do_remote" = 1 ] && [ "$dry_run" = 0 ]; then
+			if out="$(g push origin --delete "$b" 2>&1)"; then
+				act delete-remote "$b" "merged into $stage"
+			else
+				act skip "$b" "push --delete failed: $(printf '%s' "$out" | tail -n1)"
+				rc=1
+			fi
+		elif [ "$do_remote" = 1 ] || [ "$prune_preview_only" = 1 ]; then
+			act would-delete-remote "$b" "merged into $stage"
+		fi
+	fi
+done < <(collect_rows)
+
+exit "$rc"

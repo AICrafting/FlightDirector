@@ -15,6 +15,77 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 _Nothing yet._
 
+## [0.13.0] - 2026-09-08
+
+### Added
+
+- **`flight labels delete --name NAME [--force]`** (#111) — remove a label from the repo
+  through the dispatcher, the repo-level counterpart of `issues label-remove`. Safe by default:
+  it refuses while the label is still on any issue or PR/MR, open or closed, and says how many;
+  `--force` deletes it anyway. Unknown names error. Forgejo, GitHub, GitLab; Jira has no
+  repo-level label object and says so.
+- **`flight issues label-remove --number N --label NAME`** (#63) — the exact mirror of
+  `label-add`, for taking a label back off an issue (repeatable `--label`). Implemented for
+  every backend (Forgejo, GitHub, GitLab, Jira). An unknown label name is an error, the same
+  as `label-add`, but removing a label the issue isn't carrying succeeds silently, so the verb
+  is safe to run unconditionally.
+- **`flight pr update` and `flight pr get`** (#104). `pr update --number N [--title T]
+  [--body B | --body-file PATH]` patches an already-open PR — only the fields you pass, so a
+  title fix leaves the body alone — and `pr get --number N` reads one back as
+  `number⇥title⇥state⇥url`. A typo or a late test-plan edit in a PR body no longer has to be
+  fixed by hand in the web UI. Forgejo, GitHub and GitLab; `promoting-a-branch` Step 4 points
+  at it.
+- **`flight auth check` — verify a token before you rely on it** (#81). A read-only verb that
+  reports, one `✓`/`✗` line per check: the identity the backend sees, whether the repo/project
+  in `config.json` is reachable, one probe per capability the skills need (issues, labels,
+  PRs/MRs, CI), and the token's expiry where the backend exposes it — exiting non-zero if
+  anything fails. Failures carry the backend's own wording, so GitLab names the missing
+  fine-grained permission and Jira names the project permission the account lacks. Write access
+  is reported "not tested" (probing it would have side effects) and the token is never printed
+  beyond its first 8 characters. `--axis code|issues` picks the axis; `--secrets <file>` checks
+  a **candidate** token file, so rotation is: create token → check → move into place. All four
+  backends; `setting-up-a-repo` Step 2 now runs it right after writing the secrets file.
+- **A `cleaning-up-branches` skill, plus `flight branches list|prune`** (#90). Nothing in flight
+  ever deleted a branch — `working-an-issue` and `promoting-branches` remove the *worktree*, so
+  every worked issue left its `feature/<N>-<slug>` on origin and usually a local ref too, until
+  the branch list stopped describing what was in flight. The new skill finds the branches whose
+  work has already landed in a stage (tip is an ancestor of the stage, **or** the backend reports
+  a merged PR whose head was that branch — which is the only way to see a squash/rebase merge),
+  cross-checks each against its issue's status so a half-run promotion is flagged rather than
+  swept away, and deletes the local ref, the remote ref, and the leftover `.worktrees/` entry
+  behind a preview and an explicit go-ahead. Deleting is `git branch -d` (never `-D`) and
+  `git worktree remove` (never `--force`); `prune` writes nothing unless one of `--local`,
+  `--remote`, `--worktrees` says so, and remote deletion is a separate yes every time. Stage
+  branches, `archived/*`, and anything checked out outside `.worktrees/` are protected regardless
+  of configuration. Candidate patterns come from the new optional `code.branches.patterns`
+  (default `["feature/*","bugfix/*","release/*"]`). Adds the `pr list --state
+  open|closed|merged|all [--head] [--base] [--limit]` verb on forgejo/github/gitlab that the
+  squash-merge detection needs.
+
+### Changed
+
+- **The prompt ledger moved to `.flightdirector/prompt-log.jsonl`** (#107). The root-level
+  `prompt_log.jsonl` name was generic enough for another tool to pick independently, and two
+  producers appending to one file corrupts both ledgers. Producers, `flight prompt-log summary`,
+  and the docs now use the namespaced path; `setting-up-a-repo` gitignores the new path and no
+  longer adds the old one. **No migration:** an existing root `prompt_log.jsonl` is neither read
+  nor moved — delete it by hand, and drop its `.gitignore` line if you want leftovers to show.
+- **`setting-up-a-repo` no longer advises removing a user's own prompt-logger hook** when the
+  ledger is enabled. Flight's hooks are plugin-bundled and write only their own file, so other
+  prompt hooks coexist; the skill must never edit, disable, or advise deleting hooks in the
+  user's settings files (`references/prompt-log.md`).
+- **`setting-up-a-repo` re-runs ask only the unanswered questions** (#108). Reusing an existing
+  config used to jump straight to the label reconcile, so a repo set up before an option existed
+  (the prompt ledger, for one) was never offered it. Now each setup question maps to a config
+  key: present — any value, `false` included — means answered and skipped; absent means asked.
+  Every answer is written back, including "no" (`"promptLog": { "enabled": false }`), so a
+  declined option is remembered rather than re-asked (`references/flight-setup.md`).
+- **The `git -C` rule is now one of the workflow red lines** `setting-up-a-repo` writes into
+  a repo's `AGENTS.md` (#93, follow-up to #65). The skills already modelled `git -C <path>`;
+  spelling it out in the committed instructions means it holds for any agent session in the
+  repo, not just one that has a flight skill loaded. Existing repos: add the bullet by hand,
+  or re-run the skill.
+
 ## [0.12.0] - 2026-09-07
 
 ### Added

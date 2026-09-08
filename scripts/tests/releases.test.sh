@@ -60,7 +60,7 @@ check "works on the repo's real CHANGELOG (0.11.0 section found)" "$([ -n "$real
 # sandbox repo: marketplace + plugin at 0.12.0 on main, bare origin, fake curl
 # ---------------------------------------------------------------------------
 R="$T/repo"; B="$T/origin.git"
-git init -q --bare "$B"
+git init -q --bare -b main "$B"
 git init -q -b main "$R"
 git -C "$R" config user.email t@t; git -C "$R" config user.name t; git -C "$R" config commit.gpgsign false
 mkdir -p "$R/.claude-plugin" "$R/flight/.claude-plugin" "$R/.flightdirector"

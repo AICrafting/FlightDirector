@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Codex hook producer for Flight's shared prompt_log.jsonl ledger."""
+"""Codex hook producer for Flight's shared prompt ledger (.flightdirector/prompt-log.jsonl)."""
 
 from __future__ import annotations
 

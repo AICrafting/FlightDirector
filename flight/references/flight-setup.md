@@ -24,6 +24,12 @@ API with `curl`. There is no MCP server, and no token handling in the skills the
 
 ### `.flightdirector/config.json` — committable
 
+**Present means answered.** `setting-up-a-repo` treats every key it owns as the recorded answer
+to one setup question: on a re-run it asks only the questions whose key is *absent*, and writes
+every answer back — including a "no" (e.g. `"promptLog": { "enabled": false }`). So a key set to
+`false` is not the same as a missing key: the first is a decision, the second is a question the
+repo has never been asked, and the next re-run will ask it.
+
 Backend, coordinates, and preferences, across two independent axes:
 
 - **`code`** — the required base: where code, change-requests (PRs), and CI live.
@@ -117,6 +123,30 @@ Backend, coordinates, and preferences, across two independent axes:
   For backwards compatibility a legacy `trunkBranch` is still read
   **first** if present; otherwise `stages[0].name` is used.
 
+### Branch cleanup config (optional)
+
+Consumed by the `cleaning-up-branches` skill and the `branches` dispatcher group.
+
+```jsonc
+"code": {
+  // …existing keys (backend, owner, repo, api, stages)…
+  "branches": { "patterns": ["feature/*", "bugfix/*", "release/*"] }
+}
+```
+
+- `code.branches.patterns` — globs naming which branches are cleanup *candidates* at all.
+  Defaults to `["feature/*", "bugfix/*", "release/*"]` when absent, which matches flight's own
+  `feature/<N>-<slug>` convention plus the usual bugfix and release-fold names. Set it when your
+  repo spells them differently (`feat/*`, `fix/*`) so you don't pass `--pattern` every time.
+  Widening it is safe: stage branches, `archived/*`, and any branch checked out in the main
+  checkout or in a worktree outside `.worktrees/` are protected regardless of what the patterns
+  say. Read it with:
+  ```
+  flight config '.code.branches.patterns // ["feature/*","bugfix/*","release/*"]'
+  ```
+  There is deliberately **no** "delete on the remote by default" knob: remote deletion is the one
+  irreversible step, so it stays an explicit `--remote` on each run.
+
 ### queue-batches config (all optional)
 
 Consumed only by the `queue-batches` skill; absent keys fall back safely.
@@ -151,9 +181,11 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
 - `code.promptLog.enabled` — turns on the bundled prompt/cost logger for this repo. The plugin
   ships hooks for both harnesses; they run `flight prompt-log <mode>`, which exits silently unless
   this is `true`, so the switch is the only producer control. When on, every turn appends one
-  record to `prompt_log.jsonl` at the main worktree root (gitignore it — records contain prompt
+  record to `.flightdirector/prompt-log.jsonl` under the main worktree root (gitignore it — records contain prompt
   text) and `working-an-issue` sums them per session for the work-ledger comment via
   `flight prompt-log summary`. Schema, pricing, and semantics: [prompt-log.md](prompt-log.md).
+  Write `false` to decline explicitly — a missing key makes `setting-up-a-repo` offer the ledger
+  again on its next re-run (see "Present means answered" above).
 - `.flightdirector/pricing.json` — optional per-repo pricing override/extension, merged on top of
   the bundled `flight/scripts/prompt-logger/pricing.json` (same shape).
 
@@ -257,7 +289,7 @@ Where to create each token and the reasoning behind each minimum is in
 ## How resolution works
 
 The dispatcher picks the **axis** from the group — `issues`/`labels` → `issues.*`,
-`pr`/`ci` → `code.*` — resolves that axis's backend, coordinates, and token (inheriting `code`),
+`pr`/`ci`/`branches` → `code.*` — resolves that axis's backend, coordinates, and token (inheriting `code`),
 exports them as `LS_*`, and execs `adapters/<backend>/<group>`. Skills therefore never pass
 owner/repo/token; they just name the verb. `setting-up-a-repo` autodetects and writes the
 coordinates from the git remote on first run, so in the normal case you set nothing by hand.

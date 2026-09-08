@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+#
+# Forgejo auth adapter — verb: check.
+#
+# STRICTLY READ-ONLY: it probes only GET endpoints the other Forgejo adapters
+# already call, so a check never creates, edits or deletes anything. Write
+# access cannot be probed without side effects and is reported "not tested".
+# The probe list mirrors the Forgejo scope list in ../../../references/backends.md
+# (`write:repository`, `write:issue`) — keep the two in step.
+set -euo pipefail
+ADAPTER_NAME="forgejo/auth"
+# shellcheck source-path=SCRIPTDIR source=_authlib.sh
+source "$(cd "$(dirname "$0")" && pwd)/../_authlib.sh"
+
+verb="${1:-}"; shift || true
+[ "$verb" = "check" ] || die "unknown verb '${verb}' (auth: check)"
+[ $# -eq 0 ] || die "auth check: unknown arg '$1'"
+
+need LS_API LS_OWNER LS_REPO LS_TOKEN
+SITE="${LS_API%/}"
+REPO_API="${SITE}/repos/${LS_OWNER}/${LS_REPO}"
+HDRS=(-H "Authorization: token ${LS_TOKEN}")
+
+# 1. Identity.
+if probe GET "${SITE}/user"; then
+	login="$(body_field '.login // .username // "?"')"
+	uid="$(body_field '.id // "?"')"
+	pass "authenticates" "$login (id $uid) — token $(mask "$LS_TOKEN")"
+else
+	fail "authenticates" "$(why)"
+	hint "Forgejo tokens are created at <instance>/user/settings/applications"
+fi
+
+# 2. The repository named in config.json.
+if probe GET "$REPO_API"; then
+	pass "repository" "$(body_field '.full_name // "?"') — $(body_field '.html_url // ""')"
+else
+	fail "repository" "$(why) — ${LS_OWNER}/${LS_REPO} (check owner/repo/api in config.json, and that the token is not restricted to a different repository)"
+fi
+
+# 3. Read probes, one per capability group the skills exercise.
+probe_row "issues read"   "write:issue"      GET "${REPO_API}/issues?limit=1&state=all"
+probe_row "labels read"   "write:issue"      GET "${REPO_API}/labels?limit=1"
+probe_row "pulls read"    "write:repository" GET "${REPO_API}/pulls?limit=1&state=all"
+probe_row "branches read" "write:repository" GET "${REPO_API}/branches?limit=1"
+probe_row "actions read"  "write:repository" GET "${REPO_API}/actions/runs?limit=1"
+
+# 4/5. Things this check deliberately does not or cannot establish.
+note "write access" "not tested — probing a write would create or change something"
+note "token expiry" "not exposed by the Forgejo API; check the token in the web UI"
+
+finish

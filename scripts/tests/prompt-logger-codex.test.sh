@@ -59,9 +59,9 @@ prompt_event="$(jq -nc --arg cwd "$repo" '{session_id:"session-main",turn_id:"tu
 stop_event="$(jq -nc --arg cwd "$repo" --arg path "$FIXTURES/codex-main.jsonl" '{session_id:"session-main",turn_id:"turn-main",model:"gpt-5.6-sol",cwd:$cwd,transcript_path:$path,hook_event_name:"Stop"}')"
 invoke prompt "$prompt_event" "$repo" "$state"
 invoke stop "$stop_event" "$repo" "$state" 2>"$TEST_TMP/main.err"
-assert_jq "main row uses the frozen identity fields" '.harness == "codex" and .provider == "openai" and .session_id == "session-main" and .turn_id == "turn-main" and .prompt == "main prompt" and .model == "gpt-5.6-sol"' "$repo/prompt_log.jsonl"
-assert_jq "main row maps current rollout usage" '.input_tokens == 1200 and .output_tokens == 90 and .reasoning_output_tokens == 30 and .cache_creation_tokens == 0 and .cache_read_tokens == 800' "$repo/prompt_log.jsonl"
-assert_jq "bundled Codex pricing sets API-equivalent cost" '.cost_usd == 0.00372 and .cost_basis == "api-equivalent" and .duration_seconds == 2' "$repo/prompt_log.jsonl"
+assert_jq "main row uses the frozen identity fields" '.harness == "codex" and .provider == "openai" and .session_id == "session-main" and .turn_id == "turn-main" and .prompt == "main prompt" and .model == "gpt-5.6-sol"' "$repo/.flightdirector/prompt-log.jsonl"
+assert_jq "main row maps current rollout usage" '.input_tokens == 1200 and .output_tokens == 90 and .reasoning_output_tokens == 30 and .cache_creation_tokens == 0 and .cache_read_tokens == 800' "$repo/.flightdirector/prompt-log.jsonl"
+assert_jq "bundled Codex pricing sets API-equivalent cost" '.cost_usd == 0.00372 and .cost_basis == "api-equivalent" and .duration_seconds == 2' "$repo/.flightdirector/prompt-log.jsonl"
 if [ ! -s "$TEST_TMP/main.err" ]; then ok "known Codex model pricing does not warn"; else not_ok "known Codex model pricing does not warn"; fi
 if jq -e '
 	.families["gpt-6-astra"] == {"input_per_million":10,"output_per_million":50,"cache_creation_per_million":12.5,"cache_read_per_million":1}
@@ -74,7 +74,7 @@ else
 	not_ok "bundled Codex rates match official Standard short-context prices"
 fi
 invoke stop "$stop_event" "$repo" "$state" 2>/dev/null
-if [ "$(wc -l <"$repo/prompt_log.jsonl")" -eq 1 ]; then ok "repeated stop delivery does not duplicate a turn"; else not_ok "repeated stop delivery does not duplicate a turn"; fi
+if [ "$(wc -l <"$repo/.flightdirector/prompt-log.jsonl")" -eq 1 ]; then ok "repeated stop delivery does not duplicate a turn"; else not_ok "repeated stop delivery does not duplicate a turn"; fi
 
 repo="$TEST_TMP/priced"
 state="$TEST_TMP/state-priced"
@@ -89,7 +89,7 @@ printf '%s' "$stop_event" | env \
 	FLIGHT_CODEX_AUTH_MODE=chatgpt \
 	CODEX_API_KEY=test-only \
 	python3 "$LOGGER" stop 2>/dev/null
-assert_jq "override pricing excludes reasoning from output cost" '.cost_usd == 0.0083 and .cost_basis == "actual-api"' "$repo/prompt_log.jsonl"
+assert_jq "override pricing excludes reasoning from output cost" '.cost_usd == 0.0083 and .cost_basis == "actual-api"' "$repo/.flightdirector/prompt-log.jsonl"
 
 repo="$TEST_TMP/multi"
 state="$TEST_TMP/state-multi"
@@ -98,7 +98,7 @@ prompt_event="$(jq -nc --arg cwd "$repo" '{session_id:"session-multi",turn_id:"t
 stop_event="$(jq -nc --arg cwd "$repo" --arg path "$FIXTURES/codex-multi-request.jsonl" '{session_id:"session-multi",turn_id:"turn-multi",cwd:$cwd,transcript_path:$path,hook_event_name:"Stop"}')"
 invoke prompt "$prompt_event" "$repo" "$state"
 invoke stop "$stop_event" "$repo" "$state" 2>/dev/null
-assert_jq "multi-request uses the latest cumulative matching turn record" '.input_tokens == 3500 and .output_tokens == 450 and .reasoning_output_tokens == 120 and .model == "gpt-6-astra"' "$repo/prompt_log.jsonl"
+assert_jq "multi-request uses the latest cumulative matching turn record" '.input_tokens == 3500 and .output_tokens == 450 and .reasoning_output_tokens == 120 and .model == "gpt-6-astra"' "$repo/.flightdirector/prompt-log.jsonl"
 
 repo="$TEST_TMP/interrupted"
 state="$TEST_TMP/state-interrupted"
@@ -107,15 +107,15 @@ prompt_event="$(jq -nc --arg cwd "$repo" '{session_id:"session-interrupt",turn_i
 interrupt_event="$(jq -nc --arg cwd "$repo" --arg path "$FIXTURES/codex-interrupted.jsonl" '{session_id:"session-interrupt",turn_id:"turn-interrupt",cwd:$cwd,transcript_path:$path,hook_event_name:"Interrupt"}')"
 invoke prompt "$prompt_event" "$repo" "$state"
 invoke interrupt "$interrupt_event" "$repo" "$state" 2>/dev/null
-assert_jq "interrupt records partial matching usage" '.turn_id == "turn-interrupt" and .interrupted == true and .input_tokens == 700 and .output_tokens == 40 and .duration_seconds >= 0' "$repo/prompt_log.jsonl"
+assert_jq "interrupt records partial matching usage" '.turn_id == "turn-interrupt" and .interrupted == true and .input_tokens == 700 and .output_tokens == 40 and .duration_seconds >= 0' "$repo/.flightdirector/prompt-log.jsonl"
 
 repo="$TEST_TMP/subagent"
 state="$TEST_TMP/state-subagent"
 make_repo "$repo" true
 subagent_event="$(jq -nc --arg cwd "$repo" --arg path "$FIXTURES/codex-subagent.jsonl" '{session_id:"session-parent",turn_id:"turn-subagent",agent_id:"agent-one",agent_type:"worker",cwd:$cwd,agent_transcript_path:$path,hook_event_name:"SubagentStop"}')"
 invoke subagent-stop "$subagent_event" "$repo" "$state" 2>/dev/null
-assert_jq "subagent row keeps parent session and uses agent id/model" '.subagent == true and .session_id == "session-parent" and .turn_id == "agent-one" and .model == "gpt-5.6-luna" and .prompt == "delegated work"' "$repo/prompt_log.jsonl"
-assert_jq "subagent row uses delegated cumulative usage" '.input_tokens == 1800 and .cache_read_tokens == 1400 and .output_tokens == 210 and .reasoning_output_tokens == 80' "$repo/prompt_log.jsonl"
+assert_jq "subagent row keeps parent session and uses agent id/model" '.subagent == true and .session_id == "session-parent" and .turn_id == "agent-one" and .model == "gpt-5.6-luna" and .prompt == "delegated work"' "$repo/.flightdirector/prompt-log.jsonl"
+assert_jq "subagent row uses delegated cumulative usage" '.input_tokens == 1800 and .cache_read_tokens == 1400 and .output_tokens == 210 and .reasoning_output_tokens == 80' "$repo/.flightdirector/prompt-log.jsonl"
 
 repo="$TEST_TMP/missing-usage"
 state="$TEST_TMP/state-missing"
@@ -124,7 +124,7 @@ prompt_event="$(jq -nc --arg cwd "$repo" '{session_id:"session-missing",turn_id:
 stop_event="$(jq -nc --arg cwd "$repo" --arg path "$FIXTURES/codex-main.jsonl" '{session_id:"session-missing",turn_id:"turn-missing",cwd:$cwd,transcript_path:$path,hook_event_name:"Stop"}')"
 invoke prompt "$prompt_event" "$repo" "$state"
 invoke stop "$stop_event" "$repo" "$state" 2>"$TEST_TMP/missing.err"
-assert_jq "wrong-turn transcript never supplies another turn's usage" '.turn_id == "turn-missing" and .input_tokens == null and .output_tokens == null and .reasoning_output_tokens == null and .cache_creation_tokens == null and .cache_read_tokens == null and .cost_usd == null' "$repo/prompt_log.jsonl"
+assert_jq "wrong-turn transcript never supplies another turn's usage" '.turn_id == "turn-missing" and .input_tokens == null and .output_tokens == null and .reasoning_output_tokens == null and .cache_creation_tokens == null and .cache_read_tokens == null and .cost_usd == null' "$repo/.flightdirector/prompt-log.jsonl"
 if grep -q 'turn-missing' "$TEST_TMP/missing.err"; then ok "missing exact turn writes a visible warning"; else not_ok "missing exact turn writes a visible warning"; fi
 
 repo="$TEST_TMP/disabled"
@@ -132,7 +132,7 @@ state="$TEST_TMP/state-disabled"
 make_repo "$repo" false
 prompt_event="$(jq -nc --arg cwd "$repo" '{session_id:"session-disabled",turn_id:"turn-disabled",prompt:"disabled",model:"gpt-5.6-sol",cwd:$cwd,hook_event_name:"UserPromptSubmit"}')"
 printf '%s' "$prompt_event" | env LS_HARNESS=codex FLIGHT_PROMPT_LOG_STATE_DIR="$state" "$DISPATCHER" prompt-log prompt >"$TEST_TMP/disabled.out" 2>"$TEST_TMP/disabled.err"
-if [ ! -e "$repo/prompt_log.jsonl" ] && [ ! -s "$TEST_TMP/disabled.out" ] && [ ! -s "$TEST_TMP/disabled.err" ]; then ok "config opt-out exits silently without writing"; else not_ok "config opt-out exits silently without writing"; fi
+if [ ! -e "$repo/.flightdirector/prompt-log.jsonl" ] && [ ! -s "$TEST_TMP/disabled.out" ] && [ ! -s "$TEST_TMP/disabled.err" ]; then ok "config opt-out exits silently without writing"; else not_ok "config opt-out exits silently without writing"; fi
 
 repo="$TEST_TMP/dispatcher"
 state="$TEST_TMP/state-dispatcher"
@@ -144,7 +144,7 @@ stop_event="$(jq -nc --arg cwd "$repo" --arg path "$FIXTURES/codex-main.jsonl" '
 	printf '%s' "$prompt_event" | env LS_HARNESS=codex FLIGHT_PROMPT_LOG_STATE_DIR="$state" FLIGHT_CODEX_AUTH_MODE=chatgpt "$DISPATCHER" prompt-log prompt
 	printf '%s' "$stop_event" | env LS_HARNESS=codex FLIGHT_PROMPT_LOG_STATE_DIR="$state" FLIGHT_CODEX_AUTH_MODE=chatgpt "$DISPATCHER" prompt-log stop 2>/dev/null
 )
-assert_jq "dispatcher route invokes the Codex producer" '.prompt == "dispatcher prompt" and .harness == "codex"' "$repo/prompt_log.jsonl"
+assert_jq "dispatcher route invokes the Codex producer" '.prompt == "dispatcher prompt" and .harness == "codex"' "$repo/.flightdirector/prompt-log.jsonl"
 
 repo="$TEST_TMP/main-worktree"
 linked="$TEST_TMP/linked-worktree"
@@ -159,7 +159,7 @@ stop_event="$(jq -nc --arg cwd "$linked" --arg path "$FIXTURES/codex-main.jsonl"
 	printf '%s' "$prompt_event" | env LS_HARNESS=codex FLIGHT_PROMPT_LOG_STATE_DIR="$state" FLIGHT_CODEX_AUTH_MODE=chatgpt "$DISPATCHER" prompt-log prompt
 	printf '%s' "$stop_event" | env LS_HARNESS=codex FLIGHT_PROMPT_LOG_STATE_DIR="$state" FLIGHT_CODEX_AUTH_MODE=chatgpt "$DISPATCHER" prompt-log stop 2>/dev/null
 )
-if [ -f "$repo/prompt_log.jsonl" ] && [ ! -e "$linked/prompt_log.jsonl" ]; then ok "linked worktree appends only at the main worktree"; else not_ok "linked worktree appends only at the main worktree"; fi
+if [ -f "$repo/.flightdirector/prompt-log.jsonl" ] && [ ! -e "$linked/.flightdirector/prompt-log.jsonl" ]; then ok "linked worktree appends only at the main worktree"; else not_ok "linked worktree appends only at the main worktree"; fi
 
 repo="$TEST_TMP/concurrent"
 state="$TEST_TMP/state-concurrent"
@@ -171,7 +171,7 @@ for index in 1 2 3 4 5 6 7 8; do
 	pids+=("$!")
 done
 for pid in "${pids[@]}"; do wait "$pid"; done
-if [ "$(wc -l <"$repo/prompt_log.jsonl")" -eq 8 ] && jq -e . "$repo/prompt_log.jsonl" >/dev/null; then ok "concurrent hook appends remain complete JSONL rows"; else not_ok "concurrent hook appends remain complete JSONL rows"; fi
+if [ "$(wc -l <"$repo/.flightdirector/prompt-log.jsonl")" -eq 8 ] && jq -e . "$repo/.flightdirector/prompt-log.jsonl" >/dev/null; then ok "concurrent hook appends remain complete JSONL rows"; else not_ok "concurrent hook appends remain complete JSONL rows"; fi
 
 if jq -e '.hooks == "./hooks/codex-hooks.json"' "$ROOT/flight/.codex-plugin/plugin.json" >/dev/null \
 	&& jq -e '.hooks.UserPromptSubmit and .hooks.Stop and .hooks.Interrupt and .hooks.SubagentStop' "$ROOT/flight/hooks/codex-hooks.json" >/dev/null \

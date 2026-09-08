@@ -7,7 +7,7 @@
 <!--
 One plan per issue this branch resolves — numbered steps a human can follow, ending in an
 `Expected:` line. For changes with no user surface, say so and name the command that proves
-it instead, e.g. "- no user surface — verify via `scripts/runTests.sh`".
+it instead, e.g. "- no user surface — verify via `scripts/run-tests.sh`".
 -->
 
 **#N — <issue title>**
@@ -28,10 +28,10 @@ Ready #N
 
 ## Checklist
 
-- [ ] Every commit is **signed** — the pre-push `scripts/checks/verifyGitLogs.sh` rejects any
+- [ ] Every commit is **signed** — the pre-push `scripts/checks/verify-git-logs.sh` rejects any
       unpushed commit whose `%G?` isn't `G` or `U`. (Merge commits sometimes sign as `B`;
       re-sign with `git commit --amend --no-edit -S`.)
-- [ ] `scripts/runChecks.sh` passes (yamllint + shellcheck + signatures).
-- [ ] `scripts/runTests.sh` passes.
+- [ ] `scripts/run-checks.sh` passes (yamllint + shellcheck + signatures).
+- [ ] `scripts/run-tests.sh` passes.
 - [ ] User-visible behaviour changes are in the affected plugin's `CHANGELOG.md`
       under `## [Unreleased]`.

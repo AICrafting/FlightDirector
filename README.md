@@ -87,7 +87,7 @@ verb — lives under [`flight/references/`](flight/references/), starting with
 │   ├── skills/                       # the skills, shared by both harnesses
 │   ├── references/                   # setup, adapter contract, backends, labels
 │   └── GUIDE.md · README.md · CHANGELOG.md
-├── scripts/                          # repo tooling: bump-version.sh, runTests.sh, runChecks.sh, checks/, tests/
+├── scripts/                          # repo tooling: bump-version.sh, run-tests.sh, run-checks.sh, checks/, tests/
 ├── test-rig/                         # live adapter rigs per backend (dev tooling, not shipped)
 ├── docs/                             # ADRs, dogfooding notes
 ├── AGENTS.md · CLAUDE.md             # agent instructions (CLAUDE.md imports AGENTS.md)

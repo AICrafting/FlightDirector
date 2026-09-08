@@ -14,6 +14,8 @@ Flight Director — AI Crafting's Claude Code + Codex plugins (marketplace `flig
 - **Code:** Prefer tabs (width 4) over spaces.
 - **Trailing whitespace:** Trimmed on save (except for .md files)
 - **Final newlines:** Trimmed (but leave one final newline)
+- **File and script names:** kebab-case (`run-checks.sh`, `verify-git-logs.sh`), never camelCase.
+  Scripts end in `.sh`, unit tests in `.test.sh`; tracked scripts carry the exec bit (`100755`).
 
 ## Issue tracking — flight
 
@@ -31,6 +33,9 @@ earlier instructions were summarized away or the model changed mid-session:
 - Each issue is worked on its own `feature/<N>-<slug>` branch in its own
   `.worktrees/<N>-<slug>` worktree — NEVER commit directly to `develop` or
   any later stage.
+- Every git command is `git -C "<worktree path>" …` — a bare `git` is a bug,
+  even when you think you're in the right directory; the shell's cwd persists
+  between tool calls.
 - Merging is gated on the user's explicit go-ahead ("promote"); it happens
   through the promoting-a-branch skill, never by hand.
 - Keep the issue's status label honest at every transition

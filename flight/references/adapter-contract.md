@@ -16,9 +16,10 @@ flight/scripts/
     forgejo/
       _common.sh             # shared: _api(), label_id(), auth, error handling (sourced)
       issues                 # subcommands: list get create comment set-status close reopen
-      pr                     # subcommands: open merge        (pull request; "MR" on GitLab)
+      pr                     # subcommands: open merge list   (pull request; "MR" on GitLab)
       ci                     # subcommands: watch log
       labels                 # subcommands: resolve
+      auth                   # subcommands: check        (read-only token verifier)
     github/ …                # future: same executable names, same contract
 ```
 
@@ -36,8 +37,9 @@ flight <group> <verb> [--flag value …]
 The dispatcher:
 
 1. Reads `.flightdirector/config.json` (config) and `.flightdirector/secrets.json` (token), from repo root.
-2. Picks the **axis** for the group — `issues`/`labels` → `issues.*`, `pr`/`ci` → `code.*` —
-   applying `code → issues` inheritance when the `issues` block is omitted.
+2. Picks the **axis** for the group — `issues`/`labels` → `issues.*`, `pr`/`ci`/`auth`/`branches` → `code.*`
+   (`auth check --axis issues` overrides that one) — applying `code → issues` inheritance when the
+   `issues` block is omitted.
 3. Exports the resolved coordinates + token into the adapter's environment: `LS_API`,
    `LS_OWNER`, `LS_REPO`, `LS_TOKEN`, `LS_TRUNK` (code's trunk branch), `LS_LABELS_JSON`
    (the `labels` map, for role→name resolution), and `LS_BACKEND`. Token precedence:
@@ -76,6 +78,7 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 | `set-status`| `--number N` `--status ROLE`           | (nothing) — resolves ROLE→label name→id internally, removes other status/* first |
 | `clear-status`| `--number N`                         | (nothing) — removes every managed `status/*` label from the issue |
 | `label-add` | `--number N` `--label NAME` (repeatable) | (nothing) — adds existing labels by name (errors if a name doesn't exist) |
+| `label-remove` | `--number N` `--label NAME` (repeatable) | (nothing) — removes labels by name; the exact mirror of `label-add`. Errors if a name doesn't exist on the repo (catches typos), but is **idempotent** about the issue: a label the issue isn't carrying is a no-op success. Jira, whose labels are free text with no repo-level registry, validates only its no-spaces rule |
 | `assign`    | `--number N` `--user LOGIN` (repeatable) | (nothing) — **replaces** the issue's assignees with the given user(s). Forgejo/GitHub take logins as-is; GitLab resolves login→numeric id via the instance `/users` lookup; Jira resolves email/name→accountId and allows only ONE `--user` (single-assignee model) |
 | `unassign`  | `--number N`                           | (nothing) — removes all assignees |
 | `close`     | `--number N`                           | (nothing) |
@@ -92,13 +95,44 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 | `ensure`  | `--model MODEL_ID`                       | derives the stable family in the dispatcher, then ensures the standard `model/<family>` label |
 | `model-family` | `--id MODEL_ID`                      | stable family on stdout; non-zero for tool/service ids; warns when using the sanitized fallback |
 | `edit`    | `--name NAME --new-name NAME`            | renamed label's `id`; preserves issue associations where the backend supports global labels |
+| `delete`  | `--name NAME` `[--force]`                | (nothing). Removes the label from the repo. **Refuses by default while the label is still on any issue or PR/MR, open or closed**, naming the count (`50+` past one page); `--force` deletes regardless and the backend strips it from those issues. Unknown name is an error. Jira has no repo-level label object → always errors (use `issues label-remove`) |
 
 ### `pr` (pull request — "MR" on GitLab)
 
 | Verb    | Args                                                   | stdout |
 |---------|--------------------------------------------------------|--------|
 | `open`  | `--head BRANCH` `--base BRANCH` `--title T` `--body-file PATH` | `number⇥url` |
+| `get`   | `--number N`                                           | `number⇥title⇥state⇥url` |
+| `update`| `--number N` `--title T` and/or `--body B` (or `--body-file PATH`) | (nothing) — patches only the fields passed, so a title fix leaves the body alone (mirrors `issues update`) |
 | `merge` | `--number N` `--strategy merge\|squash\|rebase`        | (nothing) |
+| `list`  | `--state open\|closed\|merged\|all` (default `open`) `[--head BRANCH] [--base BRANCH] [--limit N]` (default 30) | one row per PR: `number⇥state⇥head⇥base⇥title`; `state` is `merged` for a merged PR whatever the backend calls it. `--state merged --head <branch>` is how `branches` detects a **squash/rebase** merge, whose commits are rewritten so the branch tip never becomes an ancestor of the target. `--limit` bounds the **fetch**, not the matches — on Forgejo, where `--head`/`--base` filter client-side, a small limit can hide an old PR. |
+
+### `auth`
+
+| Verb    | Args                                          | stdout |
+|---------|-----------------------------------------------|--------|
+| `check` | `[--secrets PATH]` `[--axis code\|issues]`     | one `✓`/`✗`/`-` line per check: `<mark> <label>  <detail>`. Exit non-zero if any check failed |
+
+`auth check` verifies a token **before** anything relies on it: the identity the backend reports,
+whether the repo/project named in `config.json` is reachable, one probe per capability group the
+skills exercise, and the token's expiry where the backend exposes it. Rules:
+
+- **Read-only, always.** It issues `GET`s only — never creating, editing or deleting anything —
+  so **write access is reported "not tested"** rather than guessed at. `_authlib.sh`'s `probe`
+  refuses any other method.
+- It is the one verb that must **not** die on an HTTP error: a `401`/`403`/`404` *is* the finding.
+  So the auth adapters use `probe` (records the status, keeps going) instead of each backend's
+  `_api` (which exits on ≥ 400), and they share `adapters/_authlib.sh` for the line shape.
+- Failures carry the **backend's own wording**, which is what actually names the fix — GitLab's
+  `insufficient_granular_scope … [Work Item: Read]`, GitHub's per-resource 403.
+- The **token is never printed** beyond its first 8 characters.
+- Both flags are dispatcher-owned. `--axis` selects which axis's coordinates and token to check
+  (default `code`). `--secrets PATH` points the token lookup at a **candidate** file so a new
+  token is verified before it replaces the live one; precedence is `--secrets` > `LS_SECRETS_FILE`
+  > the normal resolution (`LS_TOKEN`/`FLIGHT_TOKEN` env, then the repo's secrets file) — an
+  explicit candidate file deliberately beats an ambient env token.
+- The per-backend probe list is the executable form of the scope/permission tables in
+  [backends.md](backends.md); keep the two in step.
 
 ### `ci` (the two MCP couldn't do)
 
@@ -106,6 +140,37 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 |---------|---------------------------------------------------|--------|
 | `watch` | `--pr N` \| `--sha SHA` `[--status-file PATH] [--timeout SECS]` | one line per state change: `ci runs=<n> pending=<p> failed=<f> status=<pending\|success\|failure>`; **aggregates all runs** for the SHA — stays watching while any is pending, verdict is `failure` if any run failed. Exits 0 once none pending. `--pr` resolves the PR's head SHA (the SHA the run reports — prefer it; a local `--sha` may be unpushed). `--timeout` (env `LS_CI_WATCH_TIMEOUT` / config `code.ciWatchTimeout`; default 900; 0 disables) exits non-zero rather than polling forever. **Superseded runs don't count**: only the latest attempt per (workflow, trigger event) is scored — a retried-to-green flake watches green — and a newest manual re-dispatch (`workflow_dispatch`; GitLab: `web` pipeline) supersedes that workflow's earlier runs outright. Background-friendly for the `Monitor` tool. |
 | `log`   | `--sha SHA` (or `--failed BRANCH`)                | failed jobs' plaintext logs to stdout, one `── job <id>: <name> ──` header per job, fetched via the backend's per-job logs API (Forgejo 16+: `/actions/jobs/{id}/logs`) |
+
+### `branches` (dispatcher-owned, not a backend adapter)
+
+Finding and deleting merged branches is git-local work — ref ancestry, the worktree list, `git
+branch -d` — so `branches` lives in the dispatcher (`scripts/branches`) rather than behind a
+backend adapter. Its one backend need, the squash/rebase fallback, **recurses through the
+dispatcher** as `pr list --state merged --head <branch>`, so every HTTP request still happens
+inside an adapter. It is anchored to the **main** checkout (parent of the shared git dir), so it
+behaves identically when invoked from a linked worktree. Driven by the
+[cleaning-up-branches](../skills/cleaning-up-branches/SKILL.md) skill.
+
+| Verb    | Args | stdout |
+|---------|------|--------|
+| `list`  | `[--merged-into STAGE] [--pattern GLOB]… [--no-fetch]` | one row per **merged** candidate: `branch⇥where⇥merged-into⇥pr⇥issue⇥worktree`. `where` is `local`/`remote`/`local+remote`; `pr` is the merged PR number when the evidence came from the backend, else `-`; `issue` is the `N` parsed from `<prefix>/<N>-<slug>`, else `-`; `worktree` is the `.worktrees/` path still holding it, else `-`. Runs `git fetch --prune origin` first unless `--no-fetch` (a fetch failure warns, it does not stop). Unmerged branches are absent, not flagged. |
+| `prune` | `[--merged-into STAGE] [--pattern GLOB]… [--branch NAME]… [--local] [--remote] [--worktrees] [--dry-run] [--no-fetch]` | one row per action: `action⇥branch⇥detail`, where action is `remove-worktree`, `delete-local`, `delete-remote`, the `would-…` preview form, or `skip` (detail = why). Exits non-zero if anything was skipped because an operation *failed*. |
+
+**Merged** means either the branch tip is an ancestor of a configured stage, or the backend
+reports a merged PR whose head was that branch and whose base is a configured stage. Candidates
+come from `code.branches.patterns` (default `["feature/*","bugfix/*","release/*"]`);
+`--merged-into` narrows the stages considered and `--pattern` overrides the config.
+
+Safety is in the verb, not in the caller:
+
+- `prune` with **none** of `--local`/`--remote`/`--worktrees` deletes nothing — it prints the
+  `would-…` preview and says so on stderr. Under-specifying is a preview, never a guess.
+- Local deletion is `git branch -d` — **never `-D`**. A refusal is reported as a `skip`.
+- Worktree removal is `git worktree remove` — **never `--force`**. A dirty or locked worktree is
+  a `skip` and a non-zero exit.
+- Remote deletion happens **only** under `--remote`.
+- Stage branches, `archived/*`, and any branch checked out in the main checkout or a worktree
+  outside `.worktrees/` are protected regardless of the patterns.
 
 ## Notes
 
@@ -124,7 +189,9 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
   github adapter resolves and applies labels by name internally (skills are unchanged). `issues
   attach` is **not supported** on GitHub (no REST API for issue attachments) and exits non-zero
   with that reason. `issues list` filters out pull requests (GitHub returns PRs from the issues
-  endpoint). `pr merge` maps `--strategy` to GitHub's `merge_method`. `ci log` streams per-job
+  endpoint). `pr merge` maps `--strategy` to GitHub's `merge_method`. `pr list` has no `merged` state
+  either — merged is closed-with-`merged_at` — but GitHub *does* filter by branch server-side, so
+  the adapter sends `head=<owner>:<branch>` and `base=` and re-checks client-side. `ci log` streams per-job
   logs (`/actions/jobs/{id}/logs`) rather than the run-level zip. Note GitHub's `issues list`
   endpoint is **eventually consistent** — a just-created issue can take a few seconds to appear in
   the list, though `issues get` reflects it immediately; don't rely on a list snapshot taken
@@ -144,11 +211,16 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
   SHA (`?sha=`), `--pr` resolves the MR head SHA (`.sha`); pending = created/waiting/preparing/
   pending/running/scheduled, a clean pass = success/skipped/manual, anything else (failed/canceled)
   counts as failure. `ci log` pulls the failed pipeline's failed-job traces (`/jobs/:id/trace`).
+  `pr list` is the one backend with a first-class `merged` state and server-side
+  `source_branch`/`target_branch` filters; `--state open` is spelled `opened`.
   MR **mergeability is computed asynchronously**, so an immediate `pr merge` right after `pr open`
   can transiently 405 until GitLab finishes its merge check — retry briefly (the rig smoke does).
 - **Jira backend specifics:** Jira is an **issues-axis-only** backend (an issue tracker, not a git
   host) — it implements **only `issues` + `labels`**; `pr`/`ci` keep resolving to the `code`
-  backend. Pair it with a git `code` backend. It targets Jira **Cloud REST v3** with HTTP **Basic**
+  backend. Pair it with a git `code` backend. There is no `jira/pr` adapter file at all, so every
+  `pr` verb — `list` included — is unreachable through a Jira axis (the dispatcher's "no `pr`
+  adapter for backend 'jira'"). `branches` treats a `pr list` it cannot get an answer from as
+  "no PR evidence" and falls back to the ancestry test alone rather than failing. It targets Jira **Cloud REST v3** with HTTP **Basic**
   `email:api_token` auth (a classic Atlassian API token, not OAuth). The dispatcher threads two
   generic passthroughs for it — `LS_PROJECT` (the project key, config `issues.project`) and
   `LS_EMAIL` (config `issues.email`, or `LS_EMAIL` in the env). Decisions:

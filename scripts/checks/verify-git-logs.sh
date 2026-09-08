@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Verify that recent commits carry valid signatures.
 # Can be run from anywhere:
-#   verifyGitLogs.sh        — check the unpushed commits (vs the upstream),
+#   verify-git-logs.sh        — check the unpushed commits (vs the upstream),
 #                             or the last 10 if there are none / no upstream
-#   verifyGitLogs.sh N      — check the most recent N commits
-#   verifyGitLogs.sh <rev-list args>
+#   verify-git-logs.sh N      — check the most recent N commits
+#   verify-git-logs.sh <rev-list args>
 #                           — check exactly the commits git rev-list selects,
 #                             e.g. `origin/main..HEAD` or `HEAD --not --remotes`
 #

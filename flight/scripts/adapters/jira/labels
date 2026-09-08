@@ -56,5 +56,9 @@ case "$verb" in
     die "labels edit: Jira labels are free text and cannot be renamed globally; move issue associations to the new label name instead"
     ;;
 
-  *) die "unknown verb '${verb}' (labels: list resolve create ensure edit)" ;;
+  delete)
+    die "labels delete: Jira labels are free text with no repo-level label object; take them off issues with 'issues label-remove' instead"
+    ;;
+
+  *) die "unknown verb '${verb}' (labels: list resolve create ensure edit delete)" ;;
 esac
