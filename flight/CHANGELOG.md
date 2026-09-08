@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.13.0] - 2026-09-08
+
 ### Added
 
 - **`flight labels delete --name NAME [--force]`** (#111) — remove a label from the repo

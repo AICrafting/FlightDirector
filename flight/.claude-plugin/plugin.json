@@ -1,7 +1,7 @@
 {
   "name": "flight",
   "description": "Opinionated issue + code workflow for a repo from within a session — first-run setup, filing, triaging, working issues through their lifecycle, promoting, and cleaning up — over the backend's REST API (Forgejo/Gitea, GitHub, GitLab; Jira for issues), no MCP server required.",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "license": "MIT",
   "author": {
     "name": "AI Crafting"
