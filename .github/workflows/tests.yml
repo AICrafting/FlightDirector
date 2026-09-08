@@ -24,4 +24,4 @@ jobs:
 
       - name: Run script tests
         run: |
-          bash scripts/runTests.sh
+          bash scripts/run-tests.sh

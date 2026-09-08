@@ -15,15 +15,17 @@ ADAPTERS_DIR="$SELF_DIR/adapters"
 
 die() { echo "flight: $*" >&2; exit 1; }
 
-[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci config reconcile prompt-log)"
+[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci auth branches config reconcile prompt-log)"
 group="$1"; verb="$2"; shift 2
 
 # Which config axis backs this group.
 case "$group" in
   issues|labels) axis="issues" ;;
   pr|ci)         axis="code" ;;
+  auth)          axis="code" ;;   # default; `auth check --axis issues` overrides it below
+  branches)      axis="code" ;;             # dispatcher-owned (git-local); see below
   config|reconcile|prompt-log) axis="" ;;   # handled below; no adapter needed
-  *) die "unknown group '$group' (expected: issues labels pr ci config reconcile prompt-log)" ;;
+  *) die "unknown group '$group' (expected: issues labels pr ci auth branches config reconcile prompt-log)" ;;
 esac
 
 command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
@@ -108,6 +110,39 @@ sec="$cfg_dir/secrets.json"
 cfg_rel="${cfg#"$repo_root"/}"
 sec_rel="${sec#"$repo_root"/}"
 
+# `flight auth check [--secrets <file>] [--axis code|issues]` — verify a token
+# BEFORE relying on it (identity, repo/project reach, per-capability read
+# probes, expiry where the backend exposes it). Both flags are dispatcher-owned,
+# like every other config/secrets concern:
+#
+#   --axis   which axis's coordinates and token to check (default `code`; use
+#            `issues` for a split setup such as Jira issues + a git code host).
+#   --secrets  read the token from a CANDIDATE file instead of the live one, so
+#            a freshly minted token is verified before it replaces the real
+#            `.flightdirector/secrets.json`. Rotation becomes: create token →
+#            `auth check --secrets secrets-new.json` → move it into place.
+#
+# Token source precedence: --secrets > LS_SECRETS_FILE > the normal resolution
+# (LS_TOKEN/FLIGHT_TOKEN env, then the repo's secrets file). An explicit
+# candidate file deliberately beats an ambient env token — otherwise the check
+# would silently verify a different token than the one being rotated in.
+if [ "$group" = "auth" ]; then
+  [ "$verb" = "check" ] || die "usage: flight auth check [--secrets <file>] [--axis code|issues]"
+  secrets_override="${LS_SECRETS_FILE:-}"
+  while [ $# -gt 0 ]; do case "$1" in
+    --secrets) [ $# -ge 2 ] || die "auth check: --secrets needs a file path"; secrets_override="$2"; shift 2 ;;
+    --axis)    [ $# -ge 2 ] || die "auth check: --axis needs a value"; axis="$2"; shift 2 ;;
+    *) die "auth check: unknown arg '$1'" ;;
+  esac; done
+  case "$axis" in code|issues) ;; *) die "auth check: --axis must be code or issues (got '$axis')" ;; esac
+  if [ -n "$secrets_override" ]; then
+    [ -f "$secrets_override" ] || die "auth check: --secrets file '$secrets_override' not found"
+    sec="$secrets_override"
+    sec_rel="${sec#"$repo_root"/}"
+    unset LS_TOKEN FLIGHT_TOKEN FORGEJO_TOKEN LS_EMAIL
+  fi
+fi
+
 # Prompt logging is opt-in per repository. Hook processes must be silent when
 # the switch or config is absent because bundled hooks run in every project.
 if [ "$group" = "prompt-log" ]; then
@@ -177,6 +212,18 @@ if [ "$group" = "reconcile" ]; then
   trap - EXIT
   printf 'flight: reconciled %s config with plugin %s %s\n' "$harness" "$plugin" "$version" >&2
   exit 0
+fi
+
+# `flight branches <list|prune>` — dispatcher-owned, because the work is git-local
+# (ref ancestry, the worktree list, branch deletion) rather than a backend call. Its one
+# backend need — the merged-PR fallback for squash/rebase hops — recurses through this
+# same dispatcher as `pr list`, so the adapter contract still owns every HTTP request.
+# Anchored to $repo_root, the MAIN checkout, so it behaves the same from a linked worktree.
+if [ "$group" = "branches" ]; then
+  case "$verb" in list|prune) ;; *) die "unknown verb '$verb' (branches: list prune)" ;; esac
+  [ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
+  export FLIGHT_REPO_ROOT="$repo_root" FLIGHT_CONFIG="$cfg" FLIGHT_SELF="$SELF_DIR/flight"
+  exec "$SELF_DIR/branches" "$verb" "$@"
 fi
 
 # `flight config <jq-filter>` — read the resolved config from anywhere (incl. a worktree).

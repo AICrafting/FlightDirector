@@ -1,7 +1,8 @@
 # Supported backends
 
 flight talks to a backend through an **adapter** — skills call verbs on the dispatcher, the
-dispatcher resolves the axis (`issues`/`labels` → `issues.*`, `pr`/`ci` → `code.*`) and execs the
+dispatcher resolves the axis (`issues`/`labels` → `issues.*`, `pr`/`ci`/`auth`/`branches` →
+`code.*`; `auth check --axis issues` overrides that one) and execs the
 right backend's adapter (see [adapter-contract.md](adapter-contract.md)). Four backends ship today:
 
 | Backend   | `backend` value | Axes it can serve        | Parity                                   |
@@ -23,6 +24,16 @@ and/or `issues.token`, with `code → issues` inheritance); see
 
 `setting-up-a-repo` autodetects Forgejo and GitHub coordinates from the git remote; GitLab and Jira
 are configured by hand-editing `.flightdirector/config.json` (and `secrets.json`) for now.
+
+**Verify a token instead of guessing.** `flight auth check` (add `--axis issues` for a split
+setup) probes exactly the read endpoints the adapters use and prints one `✓`/`✗` line per check —
+identity, the repo/project named in `config.json`, each capability group below, and the token's
+expiry where the backend exposes it — exiting non-zero if anything fails. It is strictly
+read-only, so write access is reported "not tested" rather than guessed at, and it never prints
+more than a token's first 8 characters. Point it at a candidate file with
+`flight auth check --secrets .flightdirector/secrets-new.json` to verify a replacement token
+*before* it goes live, which makes rotation: create token → check → move into place. The probe
+lists below are the tables the verb executes — if you change one, change the other.
 
 ---
 
@@ -133,7 +144,7 @@ scope; you pick per-resource permissions instead). Grant, for the one project:
 |---|---|---|
 | Project | Read | project lookup, default branch |
 | Work Item | Read, Create, Update | `issues` (issues *and* their comments/notes) |
-| Label | Read, Create, Update | `labels`, `issues set-status` |
+| Label | Read, Create, Update, Delete | `labels` (Delete only for `labels delete`), `issues set-status` |
 | Merge Request | Read, Create, Update, Merge | `pr` |
 | Pipeline | Read | `ci runs` / `ci watch` |
 | Job | Read | `ci log` (per-job traces) |
@@ -185,7 +196,7 @@ just what the adapter exercises:
 
 - **Browse Projects** — `issues list`/`get`/`comments`.
 - **Create Issues** — `issues create`.
-- **Edit Issues** — `issues update`, and `set-status`/`label-add` (Jira status is driven via
+- **Edit Issues** — `issues update`, and `set-status`/`label-add`/`label-remove` (Jira status is driven via
   labels, which are an edit-issue operation).
 - **Add Comments** — `issues comment`.
 - **Transition Issues** — `issues close`/`reopen` post real workflow transitions (Done ⇄ To-Do).

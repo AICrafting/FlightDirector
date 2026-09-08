@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+#
+# Jira Cloud auth adapter (REST v3) — verb: check.
+#
+# STRICTLY READ-ONLY. A classic Atlassian API token is UNSCOPED — it inherits
+# the account's Jira permissions — so the useful check is not "what can the
+# token do" but "what can this account do on this project". That is exactly what
+# /mypermissions answers, and the permission list below is the one spelled out
+# in ../../../references/backends.md (Browse Projects, Create Issues, Edit
+# Issues, Add Comments, Transition Issues) — keep the two in step.
+set -euo pipefail
+ADAPTER_NAME="jira/auth"
+# shellcheck source-path=SCRIPTDIR source=_authlib.sh
+source "$(cd "$(dirname "$0")" && pwd)/../_authlib.sh"
+
+verb="${1:-}"; shift || true
+[ "$verb" = "check" ] || die "unknown verb '${verb}' (auth: check)"
+[ $# -eq 0 ] || die "auth check: unknown arg '$1'"
+
+need LS_API LS_TOKEN LS_EMAIL LS_PROJECT
+SITE="${LS_API%/}"
+# HTTP Basic email:api_token, pre-encoded so the token never lands in a header
+# this script prints. (curl -u would work too; this keeps HDRS uniform.)
+HDRS=(-H "Authorization: Basic $(printf '%s:%s' "$LS_EMAIL" "$LS_TOKEN" | base64 | tr -d '\n')")
+
+# 1. Identity.
+if probe GET "${SITE}/rest/api/3/myself"; then
+	pass "authenticates" "$(body_field '.displayName // "?"') <$(body_field '.emailAddress // ""')> — token $(mask "$LS_TOKEN")"
+else
+	fail "authenticates" "$(why)"
+	hint "Basic auth is email:api_token — a wrong issues.email fails the same way a wrong token does"
+	hint "classic API tokens: https://id.atlassian.com/manage-profile/security/api-tokens"
+fi
+
+# 2. The project key named in config.json.
+if probe GET "${SITE}/rest/api/3/project/${LS_PROJECT}"; then
+	pass "project" "$(body_field '.key // "?"') — $(body_field '.name // ""')"
+else
+	fail "project" "$(why) — ${LS_PROJECT} (check issues.project in config.json)"
+fi
+
+# 3. Read probes.
+probe_row "issue search" "Browse Projects" GET "${SITE}/rest/api/3/search/jql?jql=$(printf '%s' "project = ${LS_PROJECT}" | jq -sRr @uri)&maxResults=1"
+probe_row "labels read"  "Browse Projects" GET "${SITE}/rest/api/3/label?maxResults=1"
+
+# 4. Account permissions on the project — the token itself is unscoped, so this
+# is where least privilege actually lives.
+perms="BROWSE_PROJECTS,CREATE_ISSUES,EDIT_ISSUES,ADD_COMMENTS,TRANSITION_ISSUES"
+if probe GET "${SITE}/rest/api/3/mypermissions?projectKey=${LS_PROJECT}&permissions=${perms}"; then
+	while IFS=$'\t' read -r key have name; do
+		[ -n "$key" ] || continue
+		if [ "$have" = true ]; then
+			pass "perm ${key}" "${name} — granted"
+		else
+			fail "perm ${key}" "${name} — NOT granted on ${LS_PROJECT}"
+		fi
+	done < <(body_field '(.permissions // {}) | to_entries[] | [.key, (.value.havePermission | tostring), (.value.name // .key)] | @tsv')
+else
+	fail "permissions" "$(why) on mypermissions — cannot tell what this account may do on ${LS_PROJECT}"
+fi
+
+# 5.
+note "write access" "not tested — probing a write would create or change something"
+note "token expiry" "not exposed by the Atlassian API; classic API tokens are managed at id.atlassian.com"
+
+finish

@@ -110,12 +110,25 @@ def remove_state(session_id: str, turn_id: str) -> None:
 		pass
 
 
+LEDGER_RELPATH = Path(".flightdirector") / "prompt-log.jsonl"
+
+
+def ledger_path(repo_root: Path) -> Path:
+	"""Where the ledger lives: <main worktree>/.flightdirector/prompt-log.jsonl.
+
+	Namespaced under flight's own state directory so it can never collide with
+	another tool's prompt log at the repo root.
+	"""
+	return repo_root / LEDGER_RELPATH
+
+
 def append_record(repo_root: Path, record: dict[str, Any], record_key: str) -> bool:
 	missing = REQUIRED_RECORD_FIELDS.difference(record)
 	if missing:
 		raise ValueError(f"record is missing required fields: {', '.join(sorted(missing))}")
 
-	log_path = repo_root / "prompt_log.jsonl"
+	log_path = ledger_path(repo_root)
+	log_path.parent.mkdir(parents=True, exist_ok=True)
 	lock_path = state_directory() / f"ledger-{stable_key(log_path)}.lock"
 	done_path = state_directory() / f"done-{stable_key(log_path, record_key)}"
 

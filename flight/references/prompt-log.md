@@ -1,7 +1,7 @@
-# The prompt ledger — `prompt_log.jsonl`
+# The prompt ledger — `.flightdirector/prompt-log.jsonl`
 
 Flight's work-ledger comments ("this issue cost $X across N turns on model M") are built from a
-per-repo **prompt ledger**: one JSON record per agent turn, appended to `prompt_log.jsonl` at the
+per-repo **prompt ledger**: one JSON record per agent turn, appended to `.flightdirector/prompt-log.jsonl` under the
 **main worktree root**. Both harnesses write the **same file with the same schema**, so a repo
 worked from Claude Code and Codex — even in the same project, even concurrently — has one ledger
 that `flight prompt-log summary` can total per session.
@@ -24,16 +24,23 @@ harnesses — `flight/hooks/hooks.json` (Claude Code, via `$CLAUDE_PLUGIN_ROOT`)
 `$PLUGIN_ROOT`) — and every hook invocation first runs the dispatcher route
 `flight prompt-log <mode>`, which exits 0 silently unless the repo it is running in has the
 switch on. So installing the plugin costs a repo that never opted in one `jq` read per turn and
-writes nothing. `setting-up-a-repo` offers to enable it and adds `prompt_log.jsonl` to
+writes nothing. `setting-up-a-repo` offers to enable it and adds `.flightdirector/prompt-log.jsonl` to
 `.gitignore`; do that by hand for an existing repo:
 
 ```
-echo 'prompt_log.jsonl' >> .gitignore
+echo '.flightdirector/prompt-log.jsonl' >> .gitignore
 ```
 
-> Migrating from a personal logger (a `~/.claude-shared/hooks/prompt_logger.py` wired in
-> `.claude/settings.local.json`)? Remove those hook lines when you enable the bundled one, or
-> every turn is logged twice.
+The ledger lives under `.flightdirector/` on purpose: a generic name at the repo root (the
+original `prompt_log.jsonl`) is one another tool or a hand-rolled hook could plausibly pick too,
+and two producers appending different schemas to one file corrupts both. Flight never reads or
+moves an old root `prompt_log.jsonl`; if one is left over, delete it by hand.
+
+> **Other prompt hooks can coexist.** Flight's hooks are plugin-bundled and write only their own
+> file; a user's own `UserPromptSubmit`/`Stop` hooks (an audit log, a cost dashboard, another
+> plugin's telemetry) keep working alongside them. Never edit, disable, or advise deleting hooks
+> in the user's settings files on flight's behalf — at most, mention that another prompt-related
+> hook was noticed.
 
 ## Record format
 

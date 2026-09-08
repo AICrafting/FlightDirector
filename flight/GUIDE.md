@@ -111,12 +111,17 @@ That triggers **`setting-up-a-repo`**, which walks you through setup:
 1. **Coordinates** — it reads your git remote to detect the backend (Forgejo/Gitea, GitHub, or
    GitLab), propose the `owner/repo` and the API base, and asks you to confirm.
 2. **Token** — it asks for the per-repo token, adds `.flightdirector/secrets*` **and**
-   `.worktrees/` to your `.gitignore`, and writes the token to the gitignored secrets file.
+   `.worktrees/` to your `.gitignore`, writes the token to the gitignored secrets file, and
+   verifies it with `flight auth check` (identity, repo access, per-capability permissions,
+   expiry) before going further.
 3. **Pipeline preset** — it asks which stage pipeline you want:
    - **(a) Simple** — `develop → main`
    - **(b) Multi-stage** — `develop → qa → main`
    - **(c) Advanced** — a custom ordered set of stages, or hand-edit afterward.
-4. **Labels** — it reconciles a default label taxonomy against what your repo already has,
+4. **Preferences** — the default worker model for parallel batches, and whether to turn on the
+   prompt ledger (see [Cost ledger](#cost-ledger-optional)). Every answer is recorded, "no"
+   included, so a re-run asks only what's new.
+5. **Labels** — it reconciles a default label taxonomy against what your repo already has,
    *adopting your existing names* (if you already call a state `status/qa`, it keeps that),
    shows you a plan, and creates only what's missing.
 
@@ -137,6 +142,7 @@ all speak your repo's conventions.
 | "promote this", "promote develop to main" | **promoting-a-branch** | Advance the branch one stage (direct merge or PR + CI) |
 | "promote each zone", "promote issues 18, 93, 12", "batch promote" | **promoting-branches** | Promote a selected group of first-hop feature branches into `stages[0]` at once (direct → N merges; pr → one PR per group) |
 | `/queue-batches NxM`, "work N issues in parallel", "batch these" | **queue-batches** | Dispatch N background agents × M issues each; isolated worktrees (zones), stop at to-test, then a batch hand-off to promoting-branches |
+| "clean up the branches", "delete merged branches", "what branches can go" | **cleaning-up-branches** | Find branches already merged into a stage, cross-check their issues, then delete refs + worktrees on your go-ahead |
 | "set up flight", "bootstrap labels" | **setting-up-a-repo** | First-run setup (above) |
 
 You never type the underlying commands — you talk to Claude, and the skills drive the forge for
@@ -224,6 +230,18 @@ horizontally: N background agents each work M issues sequentially in isolated wo
 stopping at the to-test gate; you then ship the batch with **promoting-branches** (or hand-pick
 branches one at a time with promoting-a-branch).
 
+### 5. Sweep up
+
+Merged branches don't remove themselves — `working-an-issue` clears the *worktree*, but the
+`feature/<N>-<slug>` ref stays on origin (and usually locally) forever. Every so often:
+
+> **You:** "clean up the branches"
+
+**cleaning-up-branches** finds the ones whose work has already landed in a stage — including
+squash-merged ones, which git alone can't recognise — checks each against its issue's status so a
+half-finished promotion gets flagged rather than swept away, and shows you the list. Nothing is
+deleted until you say go, and deleting on **origin** is a separate yes from deleting locally.
+
 ---
 
 ## Where your config lives
@@ -231,7 +249,9 @@ branches one at a time with promoting-a-branch).
 - **`.flightdirector/config.json`** (commit it) — backend + coordinates, the `stages` pipeline, and your
   role→label-name map. See [flight-setup.md](references/flight-setup.md) for the schema.
 - **`.flightdirector/secrets.json`** (gitignored) — your API token(s). If flight ever finds this
-  file tracked by git, it warns you on every run.
+  file tracked by git, it warns you on every run. Rotating a token? Write the new one to
+  `.flightdirector/secrets-new.json`, run `flight auth check --secrets .flightdirector/secrets-new.json`,
+  and move it into place only once every line is a `✓`.
 
 Want a different pipeline later? Edit `code.stages` in `.flightdirector/config.json` — e.g. add a `qa`
 stage between `develop` and `main`. The skills pick it up immediately. For worked setups at 1, 2, 3,
@@ -252,7 +272,7 @@ cost. Turn on the **prompt ledger** and those numbers are measured instead of gu
 ```
 
 The plugin's bundled hooks then append one record per agent turn — prompt, model, tokens,
-estimated cost — to a gitignored `prompt_log.jsonl` at the repo root. **Claude Code and Codex
+estimated cost — to a gitignored `.flightdirector/prompt-log.jsonl`. **Claude Code and Codex
 write the same file with the same schema**, so a project worked from both (even at once) has one
 ledger, and `flight prompt-log summary --session <id>` renders the per-model totals the
 ledger comment pastes in. Cost is priced from a bundled table you can extend per repo
@@ -270,5 +290,8 @@ and semantics: [prompt-log.md](references/prompt-log.md).
   put. By default `issues` inherits `code`. See [backends.md](references/backends.md).
 - **The merge gate is real.** If you want something merged, say so explicitly — "merge #N" /
   "promote …". Claude will leave work at *ready-to-test* and stop otherwise.
-- **Re-running setup is safe.** `setting-up-a-repo` is idempotent — it only adds what's
-  missing and never renames or deletes your existing labels.
+- **Re-running setup is safe — and useful after an upgrade.** `setting-up-a-repo` is
+  idempotent: it only adds what's missing and never renames or deletes your existing labels.
+  It also asks only the setup questions your config has no answer for yet, so a re-run is how a
+  repo picks up an option added in a newer release (the prompt ledger, say) without being
+  re-asked the ones it already answered.

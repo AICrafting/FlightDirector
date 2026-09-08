@@ -6,7 +6,7 @@
 # The hook verifies signatures on exactly the commits each ref pushes
 # (remote..local, or local --not --remotes=<remote> for a new branch), skips
 # ref deletions, exits 0 without running anything when no commits are pushed,
-# and then runs runChecks.sh with the signature check skipped.
+# and then runs run-checks.sh with the signature check skipped.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -17,7 +17,7 @@ check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=
 			else printf '\033[0;31m  ✗ %s\033[0m\n' "$1"; fail=$((fail+1)); fi; }
 
 # Sandbox: a real git repo (the hook resolves REPO_ROOT via rev-parse) holding
-# the hook plus stub runChecks.sh / verifyGitLogs.sh that record their calls.
+# the hook plus stub run-checks.sh / verify-git-logs.sh that record their calls.
 SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
 git init -q "$SANDBOX"
 mkdir -p "$SANDBOX/.githooks" "$SANDBOX/scripts/checks"
@@ -25,17 +25,17 @@ cp "$HOOK_SRC" "$SANDBOX/.githooks/pre-push"
 chmod +x "$SANDBOX/.githooks/pre-push"
 CHECKS_LOG="$SANDBOX/checks.log"
 VERIFY_LOG="$SANDBOX/verify.log"
-cat >"$SANDBOX/scripts/runChecks.sh" <<STUB
+cat >"$SANDBOX/scripts/run-checks.sh" <<STUB
 #!/usr/bin/env bash
 printf 'RUNCHECKS_SKIP=%s\n' "\${RUNCHECKS_SKIP:-}" >>"$CHECKS_LOG"
 exit "\${STUB_CHECKS_RC:-0}"
 STUB
-cat >"$SANDBOX/scripts/checks/verifyGitLogs.sh" <<STUB
+cat >"$SANDBOX/scripts/checks/verify-git-logs.sh" <<STUB
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >>"$VERIFY_LOG"
 exit "\${STUB_VERIFY_RC:-0}"
 STUB
-chmod +x "$SANDBOX/scripts/runChecks.sh" "$SANDBOX/scripts/checks/verifyGitLogs.sh"
+chmod +x "$SANDBOX/scripts/run-checks.sh" "$SANDBOX/scripts/checks/verify-git-logs.sh"
 
 ZERO="0000000000000000000000000000000000000000"
 SHA_A="1111111111111111111111111111111111111111"
@@ -65,8 +65,8 @@ check "empty ref list exits 0 without running anything" "$([ "$rc" = 0 ] && ! ch
 printf 'refs/heads/develop %s refs/heads/develop %s\n' "$SHA_B" "$SHA_A" | run_hook && rc=0 || rc=$?
 check "update push exits 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)"
 check "update push verifies remote..local" "$([ "$(verify_args)" = "$SHA_A..$SHA_B" ] && echo 1 || echo 0)"
-check "update push runs the checks with verifyGitLogs.sh skipped" \
-	"$(checks_ran && grep -q 'RUNCHECKS_SKIP=verifyGitLogs.sh' "$CHECKS_LOG" && echo 1 || echo 0)"
+check "update push runs the checks with verify-git-logs.sh skipped" \
+	"$(checks_ran && grep -q 'RUNCHECKS_SKIP=verify-git-logs.sh' "$CHECKS_LOG" && echo 1 || echo 0)"
 
 printf 'refs/heads/feature/3-z %s refs/heads/feature/3-z %s\n' "$SHA_A" "$ZERO" | run_hook && rc=0 || rc=$?
 check "new-branch push verifies local --not --remotes=<remote>" \
@@ -88,11 +88,11 @@ STUB_VERIFY_RC=1 bash -c 'cd "$3" && printf "refs/heads/develop %s refs/heads/de
 check "a bad signature fails the hook before the checks run" "$([ "$rc" != 0 ] && ! checks_ran && echo 1 || echo 0)"
 
 # --- sibling worktrees on branches without scripts/ are left alone ---
-chmod -x "$SANDBOX/scripts/runChecks.sh"
+chmod -x "$SANDBOX/scripts/run-checks.sh"
 printf 'refs/heads/develop %s refs/heads/develop %s\n' "$SHA_B" "$SHA_A" | run_hook && rc=0 || rc=$?
-check "exits 0 without verifying when runChecks.sh is not executable" \
+check "exits 0 without verifying when run-checks.sh is not executable" \
 	"$([ "$rc" = 0 ] && [ -z "$(verify_args)" ] && echo 1 || echo 0)"
-chmod +x "$SANDBOX/scripts/runChecks.sh"
+chmod +x "$SANDBOX/scripts/run-checks.sh"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

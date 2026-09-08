@@ -185,7 +185,7 @@ Only after explicit approval:
    append their own entry). Write it to a scratchpad file and pass `--body-file`:
    - A summary of the work done in **this** episode.
    - **Token cost, token counts, and model(s).** Preferred source: the repo's prompt ledger
-     (`prompt_log.jsonl`, written by the plugin's bundled hooks when `code.promptLog.enabled` is
+     (`.flightdirector/prompt-log.jsonl`, written by the plugin's bundled hooks when `code.promptLog.enabled` is
      on — both Claude Code and Codex write the same file). Don't hand-sum it; let the dispatcher
      render the block and paste it into the ledger file:
      ```

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # GitLab issues adapter — verbs: list get comments create update comment attach
-# set-status clear-status label-add assign unassign close reopen. See ../../../references/adapter-contract.md.
+# set-status clear-status label-add label-remove assign unassign close reopen.
+# See ../../../references/adapter-contract.md.
 # GitLab addresses issues by their per-project `iid` (what the contract calls --number),
 # labels by name, and stores the body in `description`.
 set -euo pipefail
@@ -215,6 +216,25 @@ case "$verb" in
     _api PUT "/issues/${number}" "$(jq -n --arg a "$csv" '{add_labels:$a}')" >/dev/null
     ;;
 
+  # Mirror of label-add. GitLab's remove_labels is idempotent — removing a
+  # label the issue lacks is a harmless no-op — but an unknown label name is
+  # still an error (catches typos).
+  label-remove)
+    number=""; labels=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --label)  labels+=("$2"); shift 2 ;;
+      *) die "issues label-remove: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues label-remove: --number required"
+    [ ${#labels[@]} -gt 0 ] || die "issues label-remove: at least one --label required"
+    for n in "${labels[@]}"; do
+      [ -n "$(label_id "$n")" ] || die "issues label-remove: label '$n' not found"
+    done
+    old="$IFS"; IFS=,; csv="${labels[*]}"; IFS="$old"
+    _api PUT "/issues/${number}" "$(jq -n --arg r "$csv" '{remove_labels:$r}')" >/dev/null
+    ;;
+
   # Replace the issue's assignees with the given user(s). GitLab wants numeric
   # user ids, so each --user login is resolved via the instance-wide /users
   # lookup. `unassign` clears (assignee_ids:[0] is GitLab's documented "none").
@@ -267,5 +287,5 @@ case "$verb" in
     _api PUT "/issues/${number}" "$(jq -n '{state_event:"reopen"}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add assign unassign close reopen)" ;;
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add label-remove assign unassign close reopen)" ;;
 esac

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Forgejo pull-request adapter — verbs: open merge.  ("MR" on GitLab.)
+# Forgejo pull-request adapter — verbs: open get update merge list.  ("MR" on GitLab.)
 # See ../../../references/adapter-contract.md.
 set -euo pipefail
 ADAPTER_NAME="forgejo/pr"
@@ -10,6 +10,36 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 verb="${1:-}"; shift || true
 
 case "$verb" in
+  list)
+    state="open"; head=""; base=""; limit=30
+    while [ $# -gt 0 ]; do case "$1" in
+      --state)  state="$2"; shift 2 ;;
+      --head)   head="$2"; shift 2 ;;
+      --base)   base="$2"; shift 2 ;;
+      --limit)  limit="$2"; shift 2 ;;
+      *) die "pr list: unknown arg '$1'" ;;
+    esac; done
+    # Forgejo has no `merged` state — a merged PR is a closed one with merged_at set,
+    # so ask for closed and filter. --head/--base are client-side here (the endpoint
+    # has no branch filter); the limit therefore bounds the *fetch*, not the matches.
+    case "$state" in
+      open)   api_state="open";   merged_only=0 ;;
+      closed) api_state="closed"; merged_only=0 ;;
+      merged) api_state="closed"; merged_only=1 ;;
+      all)    api_state="all";    merged_only=0 ;;
+      *) die "pr list: --state must be open|closed|merged|all" ;;
+    esac
+    _api GET "/pulls?state=${api_state}&limit=${limit}" \
+      | jq -r --arg h "$head" --arg b "$base" --argjson m "$merged_only" '
+          .[]
+          | select($h == "" or .head.ref == $h)
+          | select($b == "" or .base.ref == $b)
+          | select($m == 0 or (.merged_at != null))
+          | [ (.number|tostring),
+              (if .merged_at != null then "merged" else .state end),
+              .head.ref, .base.ref, .title ] | @tsv'
+    ;;
+
   open)
     head=""; base=""; title=""; body=""; body_file=""
     while [ $# -gt 0 ]; do case "$1" in
@@ -35,6 +65,43 @@ case "$verb" in
     _api POST "/pulls" "$payload" | jq -r '[(.number|tostring), .html_url] | @tsv'
     ;;
 
+  # Patch an open PR after the fact — only the fields passed are sent, so a
+  # title fix does not clobber the body (and vice versa). Mirrors `issues update`.
+  update)
+    number=""; title=""; body=""; body_file=""; have_title=0; have_body=0
+    while [ $# -gt 0 ]; do case "$1" in
+      --number)    number="$2"; shift 2 ;;
+      --title)     title="$2"; have_title=1; shift 2 ;;
+      --body)      body="$2"; have_body=1; shift 2 ;;
+      --body-file) body_file="$2"; have_body=1; shift 2 ;;
+      *) die "pr update: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "pr update: --number required"
+    patch='{}'
+    [ "$have_title" = 1 ] && patch="$(printf '%s' "$patch" | jq --arg t "$title" '. + {title:$t}')"
+    if [ "$have_body" = 1 ]; then
+      if [ -n "$body_file" ]; then
+        [ -f "$body_file" ] || die "pr update: --body-file '$body_file' not found"
+        patch="$(printf '%s' "$patch" | jq --rawfile b "$body_file" '. + {body:$b}')"
+      else
+        patch="$(printf '%s' "$patch" | jq --arg b "$body" '. + {body:$b}')"
+      fi
+    fi
+    [ "$patch" = '{}' ] && die "pr update: nothing to change (pass --title and/or --body)"
+    _api PATCH "/pulls/${number}" "$patch" >/dev/null
+    ;;
+
+  get)
+    number=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      *) die "pr get: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "pr get: --number required"
+    _api GET "/pulls/${number}" \
+      | jq -r '[(.number|tostring), .title, .state, .html_url] | @tsv'
+    ;;
+
   merge)
     number=""; strategy="merge"
     while [ $# -gt 0 ]; do case "$1" in
@@ -50,5 +117,5 @@ case "$verb" in
     _api POST "/pulls/${number}/merge" "$(jq -n --arg d "$strategy" '{Do:$d}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (pr: open merge)" ;;
+  *) die "unknown verb '${verb}' (pr: open get update merge list)" ;;
 esac

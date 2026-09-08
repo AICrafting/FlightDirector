@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Forgejo labels adapter — verbs: list resolve create ensure edit.
+# Forgejo labels adapter — verbs: list resolve create ensure edit delete.
 # See ../../../references/adapter-contract.md.
 set -euo pipefail
 ADAPTER_NAME="forgejo/labels"
@@ -77,5 +77,24 @@ case "$verb" in
     _api PATCH "/labels/$id" "$payload" | jq -r '.id'
     ;;
 
-  *) die "unknown verb '${verb}' (labels: list resolve create ensure edit)" ;;
+  delete)
+    name=""; force=0
+    while [ $# -gt 0 ]; do case "$1" in
+      --name)  name="$2"; shift 2 ;;
+      --force) force=1; shift ;;
+      *) die "labels delete: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$name" ] || die "labels delete: --name required"
+    id="$(label_id "$name")"
+    [ -n "$id" ] || die "labels delete: label '$name' not found"
+    if [ "$force" -ne 1 ]; then
+      # Issues AND pulls (no type= filter), any state; a full page means "50+".
+      enc="$(printf '%s' "$name" | jq -sRr @uri)"
+      in_use="$(_api GET "/issues?state=all&labels=${enc}&limit=50" | jq 'length')"
+      [ "$in_use" -eq 0 ] || die "labels delete: '$name' is still on ${in_use}$([ "$in_use" -ge 50 ] && printf '+') issue(s)/PR(s); pass --force to delete it anyway"
+    fi
+    _api DELETE "/labels/$id" >/dev/null
+    ;;
+
+  *) die "unknown verb '${verb}' (labels: list resolve create ensure edit delete)" ;;
 esac

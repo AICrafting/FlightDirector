@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+#
+# GitLab auth adapter — verb: check.
+#
+# STRICTLY READ-ONLY: it probes only GET endpoints the other GitLab adapters
+# already call. Write access cannot be probed without side effects and is
+# reported "not tested". The probe list mirrors the fine-grained permission
+# table in ../../../references/backends.md (Project, Work Item, Label, Merge
+# Request, Pipeline, Job, Repository) — keep the two in step.
+set -euo pipefail
+ADAPTER_NAME="gitlab/auth"
+# shellcheck source-path=SCRIPTDIR source=_authlib.sh
+source "$(cd "$(dirname "$0")" && pwd)/../_authlib.sh"
+
+verb="${1:-}"; shift || true
+[ "$verb" = "check" ] || die "unknown verb '${verb}' (auth: check)"
+[ $# -eq 0 ] || die "auth check: unknown arg '$1'"
+
+need LS_API LS_OWNER LS_REPO LS_TOKEN
+SITE="${LS_API%/}"
+PROJECT_ENC="$(printf '%s' "${LS_OWNER}/${LS_REPO}" | jq -sRr @uri)"
+PROJECT_API="${SITE}/projects/${PROJECT_ENC}"
+HDRS=(-H "PRIVATE-TOKEN: ${LS_TOKEN}")
+
+# 1. Identity. A *project* access token's bot user is the classic trap: it only
+# works if the bot actually holds a role on the project.
+is_bot=0
+if probe GET "${SITE}/user"; then
+	is_bot="$(body_field 'if (.bot // false) then 1 else 0 end')"
+	pass "authenticates" "$(body_field '.username // "?"')$(body_field 'if (.bot // false) then " (bot)" else "" end') (id $(body_field '.id // "?"')) — token $(mask "$LS_TOKEN")"
+else
+	fail "authenticates" "$(why)"
+	hint "401 invalid_token almost always means the token is past its expiry date"
+fi
+
+# 2. The project named in config.json.
+if probe GET "$PROJECT_API"; then
+	pass "project" "$(body_field '.path_with_namespace // "?"') (id $(body_field '.id // "?"'))"
+else
+	fail "project" "$(why) — ${LS_OWNER}/${LS_REPO}"
+	if [ "$is_bot" = 1 ]; then
+		hint "this is a bot account: a project access token whose bot has no membership gets 404 on its own project regardless of scopes — give the bot a role on the project"
+	else
+		hint "put subgroups in owner (e.g. \"group/subgroup\"); the adapter addresses the project as ${PROJECT_ENC}"
+	fi
+fi
+
+# 3. Read probes, named with GitLab's own fine-grained resource names. A
+# fine-grained token missing one answers `insufficient_granular_scope …
+# [Work Item: Read]`, which `why` prints verbatim.
+probe_row "issues read"    "Work Item: Read"     GET "${PROJECT_API}/issues?per_page=1"
+probe_row "labels read"    "Label: Read"         GET "${PROJECT_API}/labels?per_page=1"
+probe_row "mrs read"       "Merge Request: Read" GET "${PROJECT_API}/merge_requests?per_page=1"
+probe_row "pipelines read" "Pipeline: Read"      GET "${PROJECT_API}/pipelines?per_page=1"
+probe_row "jobs read"      "Job: Read"           GET "${PROJECT_API}/jobs?per_page=1"
+probe_row "branches read"  "Repository: Read"    GET "${PROJECT_API}/repository/branches?per_page=1"
+
+# 4/5. GitLab is the one backend that reports its own expiry and scopes.
+note "write access" "not tested — probing a write would create or change something"
+if probe GET "${SITE}/personal_access_tokens/self"; then
+	note "token scopes" "$(body_field '(.scopes // []) | join(", ")')"
+	exp="$(body_field '.expires_at // ""')"
+	if [ -n "$exp" ]; then
+		note "token expiry" "$exp (every GitLab token has a mandatory expiry date)"
+	else
+		note "token expiry" "no expiry date reported"
+	fi
+else
+	note "token expiry" "not exposed — $(why) on personal_access_tokens/self"
+fi
+
+finish
