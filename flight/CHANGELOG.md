@@ -36,6 +36,22 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   beyond its first 8 characters. `--axis code|issues` picks the axis; `--secrets <file>` checks
   a **candidate** token file, so rotation is: create token → check → move into place. All four
   backends; `setting-up-a-repo` Step 2 now runs it right after writing the secrets file.
+- **A `cleaning-up-branches` skill, plus `flight branches list|prune`** (#90). Nothing in flight
+  ever deleted a branch — `working-an-issue` and `promoting-branches` remove the *worktree*, so
+  every worked issue left its `feature/<N>-<slug>` on origin and usually a local ref too, until
+  the branch list stopped describing what was in flight. The new skill finds the branches whose
+  work has already landed in a stage (tip is an ancestor of the stage, **or** the backend reports
+  a merged PR whose head was that branch — which is the only way to see a squash/rebase merge),
+  cross-checks each against its issue's status so a half-run promotion is flagged rather than
+  swept away, and deletes the local ref, the remote ref, and the leftover `.worktrees/` entry
+  behind a preview and an explicit go-ahead. Deleting is `git branch -d` (never `-D`) and
+  `git worktree remove` (never `--force`); `prune` writes nothing unless one of `--local`,
+  `--remote`, `--worktrees` says so, and remote deletion is a separate yes every time. Stage
+  branches, `archived/*`, and anything checked out outside `.worktrees/` are protected regardless
+  of configuration. Candidate patterns come from the new optional `code.branches.patterns`
+  (default `["feature/*","bugfix/*","release/*"]`). Adds the `pr list --state
+  open|closed|merged|all [--head] [--base] [--limit]` verb on forgejo/github/gitlab that the
+  squash-merge detection needs.
 
 ### Changed
 

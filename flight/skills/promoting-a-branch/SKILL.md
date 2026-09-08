@@ -249,6 +249,10 @@ them now with the same snippet). For each resolved `#N`:
   flight issues close --number N
   ```
 
+Once the merge has landed, the branch itself is leftovers — **cleaning-up-branches** finds it
+(along with any others whose work already shipped) and deletes the local ref, the remote ref, and
+the worktree behind a preview and a go-ahead.
+
 This is the whole lifecycle: an issue's status and open/closed state follow its stage position.
 The terminal stage (or any stage with `closesIssues: true`) closes; every earlier stage just
 relabels and keeps it open. `working-an-issue` no longer closes at the first hop — it leaves a

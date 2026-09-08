@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# GitLab merge-request adapter — verbs: open get update merge. (The contract's "pr" == MR here.)
+# GitLab merge-request adapter — verbs: open get update merge list. (The contract's "pr" == MR here.)
 # See ../../../references/adapter-contract.md.
 set -euo pipefail
 ADAPTER_NAME="gitlab/pr"
@@ -10,6 +10,35 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 verb="${1:-}"; shift || true
 
 case "$verb" in
+  list)
+    state="open"; head=""; base=""; limit=30
+    while [ $# -gt 0 ]; do case "$1" in
+      --state)  state="$2"; shift 2 ;;
+      --head)   head="$2"; shift 2 ;;
+      --base)   base="$2"; shift 2 ;;
+      --limit)  limit="$2"; shift 2 ;;
+      *) die "pr list: unknown arg '$1'" ;;
+    esac; done
+    # GitLab is the one backend with a first-class `merged` state, and it filters by
+    # source/target branch server-side. `open` is spelled `opened`.
+    case "$state" in
+      open)   api_state="opened" ;;
+      closed) api_state="closed" ;;
+      merged) api_state="merged" ;;
+      all)    api_state="all" ;;
+      *) die "pr list: --state must be open|closed|merged|all" ;;
+    esac
+    q="state=${api_state}&per_page=${limit}"
+    [ -n "$head" ] && q="${q}&source_branch=${head}"
+    [ -n "$base" ] && q="${q}&target_branch=${base}"
+    _api GET "/merge_requests?${q}" \
+      | jq -r --arg h "$head" --arg b "$base" '
+          .[]
+          | select($h == "" or .source_branch == $h)
+          | select($b == "" or .target_branch == $b)
+          | [ (.iid|tostring), .state, .source_branch, .target_branch, .title ] | @tsv'
+    ;;
+
   open)
     head=""; base=""; title=""; body=""; body_file=""
     while [ $# -gt 0 ]; do case "$1" in
@@ -92,5 +121,5 @@ case "$verb" in
     _api PUT "/merge_requests/${number}/merge" "$payload" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (pr: open get update merge)" ;;
+  *) die "unknown verb '${verb}' (pr: open get update merge list)" ;;
 esac

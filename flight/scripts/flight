@@ -15,7 +15,7 @@ ADAPTERS_DIR="$SELF_DIR/adapters"
 
 die() { echo "flight: $*" >&2; exit 1; }
 
-[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci auth config reconcile prompt-log)"
+[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci auth branches config reconcile prompt-log)"
 group="$1"; verb="$2"; shift 2
 
 # Which config axis backs this group.
@@ -23,8 +23,9 @@ case "$group" in
   issues|labels) axis="issues" ;;
   pr|ci)         axis="code" ;;
   auth)          axis="code" ;;   # default; `auth check --axis issues` overrides it below
+  branches)      axis="code" ;;             # dispatcher-owned (git-local); see below
   config|reconcile|prompt-log) axis="" ;;   # handled below; no adapter needed
-  *) die "unknown group '$group' (expected: issues labels pr ci auth config reconcile prompt-log)" ;;
+  *) die "unknown group '$group' (expected: issues labels pr ci auth branches config reconcile prompt-log)" ;;
 esac
 
 command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
@@ -211,6 +212,18 @@ if [ "$group" = "reconcile" ]; then
   trap - EXIT
   printf 'flight: reconciled %s config with plugin %s %s\n' "$harness" "$plugin" "$version" >&2
   exit 0
+fi
+
+# `flight branches <list|prune>` — dispatcher-owned, because the work is git-local
+# (ref ancestry, the worktree list, branch deletion) rather than a backend call. Its one
+# backend need — the merged-PR fallback for squash/rebase hops — recurses through this
+# same dispatcher as `pr list`, so the adapter contract still owns every HTTP request.
+# Anchored to $repo_root, the MAIN checkout, so it behaves the same from a linked worktree.
+if [ "$group" = "branches" ]; then
+  case "$verb" in list|prune) ;; *) die "unknown verb '$verb' (branches: list prune)" ;; esac
+  [ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
+  export FLIGHT_REPO_ROOT="$repo_root" FLIGHT_CONFIG="$cfg" FLIGHT_SELF="$SELF_DIR/flight"
+  exec "$SELF_DIR/branches" "$verb" "$@"
 fi
 
 # `flight config <jq-filter>` — read the resolved config from anywhere (incl. a worktree).
