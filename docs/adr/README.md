@@ -12,3 +12,4 @@ that changes course gets a new ADR that supersedes the earlier one.
 | #    | Title                                          | Status   |
 |------|------------------------------------------------|----------|
 | [0001](0001-curl-over-mcp-and-adapter-architecture.md) | curl over MCP, and a per-axis adapter architecture | Accepted |
+| [0002](0002-sync-down-after-promotion.md) | Sync the source stage back down after a promotion | Accepted |
