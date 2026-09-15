@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.14.0] - 2026-09-15
+
 ### Added
 
 - **Sync-down after a promotion** (#120, [ADR 0002](../docs/adr/0002-sync-down-after-promotion.md)).
