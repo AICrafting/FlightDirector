@@ -44,6 +44,11 @@ See [flight-setup.md](../../references/flight-setup.md) and
   `origin/<target>`, **STOP and tell the user**. Reconciling a diverged integration branch is a
   decision the user makes, not a merge or rebase the agent invents. Behind is the only case you
   may fix yourself, and only by fast-forward.
+- **The sync-down is a true merge — never squash it, never reset a stage.** After a
+  stage-to-stage hop, Step 6 merges the target back into the source and cascades down. That
+  back-merge fast-forwards when it can and makes one merge commit when it can't; it is never
+  squashed (that re-diverges the branches) and a lower stage is never `reset` onto a higher
+  tip. A conflict or a red CI on the sync stops the cascade and is reported, not resolved.
 
 ## Step 1: Resolve the hop
 
@@ -258,6 +263,39 @@ The terminal stage (or any stage with `closesIssues: true`) closes; every earlie
 relabels and keeps it open. `working-an-issue` no longer closes at the first hop — it leaves a
 work-ledger comment and delegates the status/close to this step.
 
+## Step 6: Sync the lower stages back down (stage → stage hops only)
+
+**Only when the branch you promoted is itself a stage** (`stages[i-1] → stages[i]`, `i ≥ 1`).
+A feature → `stages[0]` hop never syncs down (the feature branch is leftovers), and neither does
+`promoting-branches`. After the merge has landed and Step 5 is done, run one command:
+
+```
+flight branches sync-down --from <target>
+```
+
+It walks every stage below `<target>` — `stages[i-1]`, then `stages[i-2]`, … `stages[0]` — and
+merges the stage above back into it, so `develop ≤ qa ≤ main` holds again by construction
+([ADR 0002](../../../docs/adr/0002-sync-down-after-promotion.md)). Each receiving stage's
+`syncDown` field (`direct` | `pr` | `none`, **default = that stage's own `merge`**) decides how:
+
+- **`direct`** — fetch, run the Step 4a freshness check on the lower stage, merge the upper
+  stage into it (`--ff` when it is a strict ancestor, which is the usual case and adds no
+  commit; one merge commit otherwise), push. If the checkout holding the lower stage is dirty,
+  the merge happens in a throwaway worktree and is pushed from there; the row then says the
+  local checkout is behind (it fast-forwards at the next freshness check).
+- **`pr`** — open a PR `<upper> → <lower>` (no `Closes`/`Ready` lines: the promotion already
+  drove the issue lifecycle), watch CI, and **auto-merge on green with `--strategy merge`** —
+  never the stage's promotion `strategy`. Red CI, a timeout or a refused merge leaves the PR
+  open and stops.
+- **`none`** — that stage is skipped and the cascade stops there.
+
+The verb prints one row per stage, `stage⇥outcome⇥detail`, where outcome is `fast-forwarded`,
+`merged`, `already-level`, `pr-merged`, `skipped`, or `stopped`, and exits non-zero on a
+`stopped` row. Relay every row to the user. A `stopped` row is the user's call — an ahead or
+diverged lower stage, a conflict (already aborted; nothing changed), or an open sync PR whose CI
+is red. Do **not** rerun with a hand-merge, a rebase or a reset; report it and stop, exactly as
+you would for a diverged target in Step 4a.
+
 ## Common mistakes
 
 - Promoting more than one hop at a time. One stage per invocation.
@@ -277,3 +315,9 @@ work-ledger comment and delegates the status/close to this step.
   report; only *behind* is safe to fix, and only with `--ff-only`.
 - Hard-coding `--strategy squash` (or any strategy) instead of reading the target stage's
   `strategy` field. The default is `merge`, and a repo that wants otherwise says so in config.
+- Skipping Step 6 after a stage → stage hop, or running it after a feature hop. Only a stage
+  source has stages below it to level; forgetting it leaves `develop` one commit behind `qa`
+  after every promotion, which is exactly the drift ADR 0002 removes.
+- "Fixing" a `stopped` sync-down row by squashing, rebasing, or resetting the lower stage. The
+  sync is a true merge or nothing; a conflict there means the stages carry different work and
+  the user decides how to reconcile.

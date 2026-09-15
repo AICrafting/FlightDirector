@@ -15,6 +15,38 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 _Nothing yet._
 
+## [0.14.0] - 2026-09-15
+
+### Added
+
+- **Sync-down after a promotion** (#120, [ADR 0002](../docs/adr/0002-sync-down-after-promotion.md)).
+  After a stage-to-stage hop lands (`develop → qa`, `qa → main`), `promoting-a-branch` now runs
+  the new `flight branches sync-down --from <stage>` verb, which merges the target back into the
+  source and cascades to `stages[0]` so every lower stage stays level — fast-forward when
+  possible, one true merge commit otherwise, never a squash or a reset. A new optional per-stage
+  `syncDown` field (`direct` | `pr` | `none`) says how a stage receives that back-merge and
+  **defaults to the stage's own `merge`**, so existing configs need no change; `none` opts a
+  stage out and stops the cascade. `pr` mode opens a `<upper> → <lower>` PR, watches CI, and
+  auto-merges on green with the `merge` method. Ahead/diverged lower stages, conflicts, and red
+  CI stop the cascade with a `stopped` row and a non-zero exit. Feature hops and
+  `promoting-branches` are unaffected.
+
+### Fixed
+
+- **`flight auth check` no longer fails on the recommended Forgejo token** (#117). A token
+  restricted to one repository cannot carry `read:user` (Forgejo won't mint that combination), so
+  the identity probe always answered 403 and the verb exited non-zero on a fully capable token.
+  A scope-limited 403 alongside a passing repository probe is now an informational line; a 401,
+  or a 403 with the repository probe failing too, still fails.
+
+### Changed
+
+- **`flight prompt-log summary`** (#121) — the rendered work-ledger table no longer lists
+  `unknown`-model rows that cost nothing (hook-only / synthetic turns with no model recorded);
+  their turn count stays in the **Total** line and a note says how many were omitted. An
+  `unknown` row that carries tokens but no price is still shown with its `(+N unpriced)`
+  marker, and `--json` output is unchanged.
+
 ## [0.13.0] - 2026-09-08
 
 ### Added

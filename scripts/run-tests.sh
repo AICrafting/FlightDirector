@@ -16,7 +16,11 @@ for test in "$TEST_DIR"/*.test.sh; do
 	if bash "$test"; then
 		:
 	else
+		rc=$?
 		fail=$((fail + 1))
+		# Name the exit code: 141 = SIGPIPE from an early-closing `| head` under pipefail (#110).
+		printf '\033[0;31m✗ %s exited %d%s\033[0m\n' "$(basename "$test")" "$rc" \
+			"$([ "$rc" -eq 141 ] && printf ' (SIGPIPE — a pipe reader closed early, e.g. "| head")')"
 	fi
 done
 
