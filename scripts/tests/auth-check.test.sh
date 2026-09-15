@@ -120,6 +120,34 @@ for backend in forgejo github; do
 	hasnt "$SANDBOX/out" 'live-token-aaaaaaaa' "$backend never prints the whole token"
 done
 
+# forgejo: a repo-scoped token cannot carry read:user, so /user answers 403 with
+# the scope named — informational, not a failure, as long as the repo probe passes.
+cfg forgejo forgejo
+if FAIL_MATCH='/user' FAIL_BODY='{"message":"token does not have at least one of required scope(s): [read:user]"}' check_auth; then
+	ok "forgejo: read:user 403 on a repo-scoped token does not fail the check"
+else
+	bad "forgejo: read:user 403 on a repo-scoped token failed the check ($(cat "$SANDBOX/err"))"
+fi
+has "$SANDBOX/out" '- authenticates' "forgejo: identity is reported as informational"
+has "$SANDBOX/out" 'not exposed to a repo-scoped token' "forgejo: the line explains the scope limitation"
+has "$SANDBOX/out" 'live-tok…' "forgejo: the informational line still masks the token"
+has "$SANDBOX/out" '✓ repository' "forgejo: the repository probe still passes"
+hasnt "$SANDBOX/out" '✗' "forgejo: no failure marks"
+# …but a 403 for any other reason, or a 401, is still a failing identity check.
+cfg forgejo forgejo
+if FAIL_MATCH='/user' FAIL_CODE=401 FAIL_BODY='{"message":"token is invalid"}' check_auth; then
+	bad "forgejo: a 401 on /user passed the check"
+else
+	check "$rc" "1" "forgejo: a 401 on /user still fails the check"
+fi
+has "$SANDBOX/out" '✗ authenticates' "forgejo: 401 identity is a failure mark"
+cfg forgejo forgejo
+if FAIL_MATCH='/user' FAIL_BODY='{"message":"forbidden"}' check_auth; then
+	bad "forgejo: a 403 without the scope message passed the check"
+else
+	check "$rc" "1" "forgejo: a 403 without the read:user message still fails"
+fi
+
 # forgejo: expiry is not exposed by the API; github reads it from a header.
 cfg forgejo forgejo; check_auth || true
 has "$SANDBOX/out" 'not exposed' "forgejo reports expiry as not exposed"

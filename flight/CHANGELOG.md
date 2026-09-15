@@ -13,6 +13,14 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Fixed
+
+- **`flight auth check` no longer fails on the recommended Forgejo token** (#117). A token
+  restricted to one repository cannot carry `read:user` (Forgejo won't mint that combination), so
+  the identity probe always answered 403 and the verb exited non-zero on a fully capable token.
+  A scope-limited 403 alongside a passing repository probe is now an informational line; a 401,
+  or a 403 with the repository probe failing too, still fails.
+
 ### Changed
 
 - **`flight prompt-log summary`** (#121) — the rendered work-ledger table no longer lists
