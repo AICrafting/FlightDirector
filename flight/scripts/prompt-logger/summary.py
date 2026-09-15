@@ -133,11 +133,23 @@ def render_markdown(summary: dict[str, Any], sessions: list[str]) -> str:
 	lines.append("")
 	lines.append("| Harness | Model | Turns | Input | Output | Cache write | Cache read | Cost (USD) |")
 	lines.append("|---|---|---:|---:|---:|---:|---:|---:|")
+	# Rows whose model was never recorded and that cost nothing carry no provenance —
+	# they are hook-only / synthetic turns, not something the user can price or fix —
+	# so they only add noise to the ledger table. Omit them from the table (the JSON
+	# aggregate keeps them) and disclose the count in a note so nothing is hidden.
+	# An "unknown" group with measured tokens but no price is different: that is
+	# exactly what the unpriced-models note exists to surface, so it stays.
+	no_model_rows = 0
 	for g in summary["groups"]:
+		if g["model"] == "unknown" and g["cost_usd"] == 0 and g["unpriced_rows"] == 0:
+			no_model_rows += g["rows"]
+			continue
 		cost = f"{g['cost_usd']:.4f}" if g["unpriced_rows"] == 0 else f"{g['cost_usd']:.4f} (+{g['unpriced_rows']} unpriced)"
 		lines.append(f"| {g['harness']} | {g['model']} | {g['rows']} | {fmt_tokens(g['input_tokens'])} | {fmt_tokens(g['output_tokens'])} | {fmt_tokens(g['cache_creation_tokens'])} | {fmt_tokens(g['cache_read_tokens'])} | {cost} |")
 	lines.append(f"| **Total** | | {summary['rows']} | | | | | **{summary['cost_usd']:.4f}** |")
 	notes: list[str] = []
+	if no_model_rows:
+		notes.append(f"{no_model_rows} turn(s) recorded no model and cost nothing (omitted from the table)")
 	if summary["subagent_rows"]:
 		notes.append(f"{summary['subagent_rows']} subagent row(s) included")
 	if summary["unmeasured_rows"]:

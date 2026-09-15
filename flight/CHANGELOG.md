@@ -21,6 +21,14 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   A scope-limited 403 alongside a passing repository probe is now an informational line; a 401,
   or a 403 with the repository probe failing too, still fails.
 
+### Changed
+
+- **`flight prompt-log summary`** (#121) — the rendered work-ledger table no longer lists
+  `unknown`-model rows that cost nothing (hook-only / synthetic turns with no model recorded);
+  their turn count stays in the **Total** line and a note says how many were omitted. An
+  `unknown` row that carries tokens but no price is still shown with its `(+N unpriced)`
+  marker, and `--json` output is unchanged.
+
 ## [0.13.0] - 2026-09-08
 
 ### Added
