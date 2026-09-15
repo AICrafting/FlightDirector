@@ -53,7 +53,10 @@ out3="$("$NOTES" --changelog "$T/CHANGELOG.md" --version 0.1.0)"
 check "version match is literal (0.1.0 does not pick up 0.11.0)" "$([ "$out3" = "- ancient" ] && echo 1 || echo 0)"
 out4="$("$NOTES" --changelog - --version 0.11.0 <"$T/CHANGELOG.md")"
 check "reads the changelog from stdin with '-'" "$([ "$(printf '%s' "$out4" | tail -1)" = "- Older stuff." ] && echo 1 || echo 0)"
-real="$("$NOTES" --changelog "$REPO_ROOT/flight/CHANGELOG.md" --version 0.11.0 | head -1)"
+# Capture everything, then take the first line in the shell — `| head -1` closes the pipe
+# early, and under pipefail the writer's SIGPIPE (141) kills the test on a big CHANGELOG (#110).
+real_all="$("$NOTES" --changelog "$REPO_ROOT/flight/CHANGELOG.md" --version 0.11.0)"
+real="${real_all%%$'\n'*}"
 check "works on the repo's real CHANGELOG (0.11.0 section found)" "$([ -n "$real" ] && echo 1 || echo 0)"
 
 # ---------------------------------------------------------------------------
@@ -114,7 +117,7 @@ out="$(run flight)"
 check "creates an annotated tag <plugin>-<version> on the origin/main commit" \
 	"$([ "$(git -C "$R" cat-file -t flight-0.12.0)" = tag ] && [ "$(git -C "$R" rev-parse 'flight-0.12.0^{commit}')" = "$SHA" ] && echo 1 || echo 0)"
 check "tag message is '<plugin> <version>' + the CHANGELOG section" \
-	"$(git -C "$R" tag -l --format='%(contents)' flight-0.12.0 | head -1 | grep -q '^flight 0.12.0$' && git -C "$R" tag -l --format='%(contents)' flight-0.12.0 | grep -q 'Thing one' && echo 1 || echo 0)"
+	"$(tagmsg="$(git -C "$R" tag -l --format='%(contents)' flight-0.12.0)"; [ "${tagmsg%%$'\n'*}" = "flight 0.12.0" ] && grep -q 'Thing one' <<<"$tagmsg" && echo 1 || echo 0)"
 check "unsigned annotated when commit.gpgsign is off" "$(grep -q 'unsigned annotated' <<<"$out" && echo 1 || echo 0)"
 check "tag pushed to origin" "$(git -C "$B" rev-parse -q --verify refs/tags/flight-0.12.0 >/dev/null && echo 1 || echo 0)"
 check "Release POSTed to <api>/repos/<owner>/<repo>/releases with the secrets token" \

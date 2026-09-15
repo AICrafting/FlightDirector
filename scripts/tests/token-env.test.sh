@@ -44,7 +44,7 @@ run() {	# run [VAR=value …] — invokes `issues list` with the given env, retu
 	rm -f "$HDRS"
 	(cd "$R" && env -u LS_TOKEN -u FLIGHT_TOKEN -u FORGEJO_TOKEN PATH="$FAKE_DIR:$PATH" "$@" \
 		"$DISP" issues list --state open --limit 5 >/dev/null 2>"$SANDBOX/err") || { cat "$SANDBOX/err" >&2; return 1; }
-	sed -n 's/^Authorization: token //p' "$HDRS" | head -1
+	sed -n '/^Authorization: token /{s///p;q;}' "$HDRS"	# first match only; no `| head` (SIGPIPE, #110)
 }
 
 check "secrets file is the fallback when no env var is set" \

@@ -118,6 +118,20 @@ Backend, coordinates, and preferences, across two independent axes:
   issues open after the final stage; `true` on a non-terminal stage closes issues early at that
   stage (e.g. close at `develop`, treat `main` as a pure release cut). The `gate` field is
   orthogonal — it governs merge policy, not issue lifecycle.
+- **`syncDown`** (per stage, optional) — how this stage **receives a back-merge** after a
+  promotion lands on a stage above it: `direct` | `pr` | `none`. **Defaults to the stage's own
+  `merge` value**, so a stage written by PR is synced by PR and a direct-merge stage by direct
+  push — most repos need no config change. After `stages[i-1] → stages[i]` lands,
+  `promoting-a-branch` runs `flight branches sync-down --from <stages[i]>`, which merges each
+  stage back into the one below it and cascades to `stages[0]`, so every lower stage stays level
+  ([ADR 0002](../../docs/adr/0002-sync-down-after-promotion.md)). The back-merge is always a true
+  merge (fast-forward when possible, one merge commit otherwise; a `pr` sync merges with the
+  `merge` method regardless of the stage's promotion `strategy`). `none` opts the stage out and
+  stops the cascade there. A stage whose branch protection rejects direct pushes needs
+  `syncDown: "pr"` or `"none"`. Read it with:
+  ```
+  flight config '.code.stages[<j>].syncDown // .code.stages[<j>].merge // "direct"'
+  ```
 - Note: `trunkBranch`, `mergeStrategy`, and `gate` (single-value top-level fields) are
   superseded by `stages` — the per-stage `strategy` field replaces a top-level `mergeStrategy`.
   For backwards compatibility a legacy `trunkBranch` is still read

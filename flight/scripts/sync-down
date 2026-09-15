@@ -1,0 +1,281 @@
+#!/usr/bin/env bash
+#
+# flight `branches sync-down` — after a stage-to-stage promotion, merge the target
+# stage back into the source and cascade down the pipeline (ADR 0002).
+#
+#   flight branches sync-down --from <stage>
+#
+# <stage> is the stage that just RECEIVED a promotion (stages[i], i ≥ 1). The verb
+# walks j = i-1 … 0 and merges stages[j+1] into stages[j], honouring each receiving
+# stage's `syncDown` (`direct` | `pr` | `none`; default = that stage's own `merge`).
+# A stage set to `none` is skipped and stops the cascade there. Any freshness
+# problem or conflict stops the cascade too — the verb never resolves, rebases or
+# resets a stage; it reports and exits non-zero so the user decides.
+#
+# Dispatcher-owned (git-local work). Its backend needs in `pr` mode — open the PR,
+# watch CI, merge it — recurse through the dispatcher (FLIGHT_SELF), so every HTTP
+# request still happens inside an adapter. Anchored to FLIGHT_REPO_ROOT, the MAIN
+# checkout, so it behaves the same from a linked worktree.
+#
+# Output: one TSV row per stage touched — stage⇥outcome⇥detail — where outcome is
+#   fast-forwarded | merged | already-level | pr-merged | skipped | stopped | nothing-below
+# Exit 0 unless a hop was `stopped`.
+#
+# See ../references/adapter-contract.md and ../skills/promoting-a-branch/SKILL.md.
+set -euo pipefail
+
+die()  { echo "flight branches sync-down: $*" >&2; exit 1; }
+warn() { echo "flight branches sync-down: $*" >&2; }
+
+: "${FLIGHT_REPO_ROOT:?FLIGHT_REPO_ROOT not set (dispatcher must export it)}"
+: "${FLIGHT_CONFIG:?FLIGHT_CONFIG not set (dispatcher must export it)}"
+: "${FLIGHT_SELF:?FLIGHT_SELF not set (dispatcher must export it)}"
+
+ROOT="$FLIGHT_REPO_ROOT"
+CFG="$FLIGHT_CONFIG"
+
+# Every git command is anchored to the MAIN checkout: refs and the worktree list are
+# shared across linked worktrees, and the caller may be sitting in any of them.
+g() { git -C "$ROOT" "$@"; }
+
+# ── args ────────────────────────────────────────────────────────────────────────
+from=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--from) [ $# -ge 2 ] || die "--from needs a stage name"; from="$2"; shift 2 ;;
+		*) die "unknown arg '$1' (usage: flight branches sync-down --from <stage>)" ;;
+	esac
+done
+[ -n "$from" ] || die "usage: flight branches sync-down --from <stage>"
+
+# ── config ──────────────────────────────────────────────────────────────────────
+mapfile -t STAGES < <(jq -r '.code.stages[]?.name // empty' "$CFG")
+[ "${#STAGES[@]}" -gt 0 ] || die "no code.stages configured in $CFG"
+
+from_idx=-1
+for i in "${!STAGES[@]}"; do [ "${STAGES[$i]}" = "$from" ] && from_idx=$i; done
+[ "$from_idx" -ge 0 ] || die "--from '$from' is not a configured stage (have: ${STAGES[*]})"
+
+# mode <j> — how stages[j] receives a back-merge: syncDown, else its own merge, else direct.
+mode() {
+	local m
+	m="$(jq -r --argjson j "$1" '.code.stages[$j] | (.syncDown // .merge // "direct")' "$CFG")"
+	case "$m" in
+		direct|pr|none) printf '%s\n' "$m" ;;
+		*) die "stage '${STAGES[$1]}': syncDown must be direct, pr or none (got '$m')" ;;
+	esac
+}
+
+# Validate every receiving stage's mode up front so a typo cannot stop the cascade
+# half way through, with some stages already synced and pushed.
+for ((j = from_idx - 1; j >= 0; j--)); do mode "$j" >/dev/null; done
+
+# ── output ──────────────────────────────────────────────────────────────────────
+row() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }	# stage outcome detail
+
+if [ "$from_idx" -eq 0 ]; then
+	row "$from" nothing-below "'$from' is stages[0]; there is no lower stage to sync"
+	exit 0
+fi
+
+# ── remote ──────────────────────────────────────────────────────────────────────
+HAS_ORIGIN=0
+if g remote get-url origin >/dev/null 2>&1; then
+	if g fetch -q origin "${STAGES[@]:0:from_idx+1}" 2>/dev/null; then
+		HAS_ORIGIN=1
+	else
+		warn "fetch failed — working offline from local refs (nothing will be pushed)"
+	fi
+else
+	warn "no 'origin' remote — working from local refs (nothing will be pushed)"
+fi
+
+# stage_ref <stage> — the tip to measure/merge against: the remote-tracking tip when
+# there is one (that is what the rest of the world has), otherwise the local ref.
+stage_ref() {
+	if [ "$HAS_ORIGIN" = 1 ] && g rev-parse -q --verify "refs/remotes/origin/$1" >/dev/null; then
+		printf 'origin/%s\n' "$1"
+	else
+		printf '%s\n' "$1"
+	fi
+}
+
+# ── worktree map: branch → path ─────────────────────────────────────────────────
+declare -A WT_PATH=()
+_wt=""
+while IFS= read -r line; do
+	case "$line" in
+		"worktree "*) _wt="${line#worktree }" ;;
+		"branch refs/heads/"*) WT_PATH["${line#branch refs/heads/}"]="$_wt" ;;
+	esac
+done < <(g worktree list --porcelain)
+
+# clean <path> — no staged or unstaged changes to tracked files (untracked files are fine).
+clean() { git -C "$1" diff --quiet && git -C "$1" diff --cached --quiet; }
+
+# ── freshness (promoting-a-branch Step 4a) ──────────────────────────────────────
+# fresh <stage> — bring the local ref level with origin when it is merely behind.
+# Prints nothing on success; on ahead/diverged prints the reason and returns 1.
+# Sets FRESH_NOTE when it changed something worth reporting.
+FRESH_NOTE=""
+fresh() {
+	local s="$1" lsha remote mb wt
+	FRESH_NOTE=""
+	[ "$HAS_ORIGIN" = 1 ] || return 0
+	g rev-parse -q --verify "refs/remotes/origin/$s" >/dev/null || return 0	# never pushed: nothing to compare
+	if ! g rev-parse -q --verify "refs/heads/$s" >/dev/null; then
+		g branch -q --track "$s" "origin/$s"	# no local ref yet: create it level
+		return 0
+	fi
+	lsha="$(g rev-parse "$s")"; remote="$(g rev-parse "origin/$s")"; mb="$(g merge-base "$s" "origin/$s")"
+	if [ "$lsha" = "$remote" ]; then
+		return 0
+	elif [ "$lsha" = "$mb" ]; then
+		wt="${WT_PATH[$s]:-}"
+		if [ -z "$wt" ]; then
+			g fetch -q origin "$s:$s"
+			FRESH_NOTE="local $s fast-forwarded to origin"
+		elif clean "$wt"; then
+			git -C "$wt" merge -q --ff-only "origin/$s"
+			FRESH_NOTE="local $s fast-forwarded to origin"
+		else
+			FRESH_NOTE="local checkout at $wt is behind origin/$s (dirty; left alone)"
+		fi
+		return 0
+	elif [ "$remote" = "$mb" ]; then
+		printf 'local %s is ahead of origin/%s (unpushed commits: %s) — reconcile it first\n' "$s" "$s" "$(g rev-list --count "origin/$s..$s")"
+		return 1
+	else
+		printf 'local %s and origin/%s have diverged (local %s, origin %s) — reconcile it first\n' "$s" "$s" "${lsha:0:7}" "${remote:0:7}"
+		return 1
+	fi
+}
+
+# ── direct mode ─────────────────────────────────────────────────────────────────
+# sync_direct <lower> <upper> — merge upper into lower (ff when possible), push.
+sync_direct() {
+	local lower="$1" upper="$2" lref uref wt note outcome tmp msg
+	if ! note="$(fresh "$lower")"; then row "$lower" stopped "$note"; return 1; fi
+	note="$FRESH_NOTE"
+	lref="$(stage_ref "$lower")"; uref="$(stage_ref "$upper")"
+
+	if g merge-base --is-ancestor "$uref" "$lref"; then
+		row "$lower" already-level "$lower already contains $upper${note:+; $note}"
+		return 0
+	fi
+	if g merge-base --is-ancestor "$lref" "$uref"; then outcome=fast-forwarded; else outcome=merged; fi
+	msg="Sync $upper back into $lower"
+	wt="${WT_PATH[$lower]:-}"
+
+	if [ -n "$wt" ] && clean "$wt" && { [ "$HAS_ORIGIN" = 0 ] || [ "$(g rev-parse "$lower")" = "$(g rev-parse "$lref")" ]; }; then
+		# The checkout holding <lower> is clean and level: merge right there.
+		if ! git -C "$wt" merge -q --ff -m "$msg" "$uref" >/dev/null 2>&1; then
+			git -C "$wt" merge --abort 2>/dev/null || true
+			row "$lower" stopped "conflict merging $upper into $lower (aborted; nothing changed)"
+			return 1
+		fi
+		if [ "$HAS_ORIGIN" = 1 ] && ! git -C "$wt" push -q origin "$lower" 2>/dev/null; then
+			row "$lower" stopped "merged locally but push of $lower was rejected — reconcile by hand"
+			return 1
+		fi
+	else
+		# <lower> is not checked out, or its checkout is dirty: merge in a throwaway
+		# worktree forked from the tip we just measured, push the result explicitly.
+		[ "$HAS_ORIGIN" = 1 ] || [ -z "$wt" ] || { row "$lower" stopped "checkout at $wt is dirty and there is no origin to push through"; return 1; }
+		tmp="$(mktemp -d "${TMPDIR:-/tmp}/flight-sync-$lower-XXXXXX")"
+		rmdir "$tmp"
+		g worktree add -q --detach "$tmp" "$lref" 2>/dev/null
+		if ! git -C "$tmp" merge -q --ff -m "$msg" "$uref" >/dev/null 2>&1; then
+			git -C "$tmp" merge --abort 2>/dev/null || true
+			g worktree remove --force "$tmp" 2>/dev/null || true
+			row "$lower" stopped "conflict merging $upper into $lower (aborted; nothing changed)"
+			return 1
+		fi
+		if [ "$HAS_ORIGIN" = 1 ]; then
+			if ! git -C "$tmp" push -q origin "HEAD:$lower" 2>/dev/null; then
+				g worktree remove --force "$tmp" 2>/dev/null || true
+				row "$lower" stopped "push of $lower was rejected (origin moved?) — nothing changed locally"
+				return 1
+			fi
+			if [ -z "$wt" ]; then
+				g fetch -q origin "$lower:$lower"
+			else
+				note="${note:+$note; }local checkout at $wt is behind origin/$lower (dirty; left alone — it fast-forwards at the next freshness check)"
+			fi
+		else
+			g branch -f "$lower" "$(git -C "$tmp" rev-parse HEAD)"
+		fi
+		g worktree remove --force "$tmp" 2>/dev/null || true
+	fi
+	row "$lower" "$outcome" "$upper → $lower${note:+; $note}"
+	return 0
+}
+
+# ── pr mode ─────────────────────────────────────────────────────────────────────
+# sync_pr <lower> <upper> — open a PR upper → lower, watch CI, merge on green with
+# the `merge` method (never the stage's promotion strategy: squashing a back-merge
+# re-diverges the branches). Red CI, a timeout or a refused merge leaves the PR open.
+sync_pr() {
+	local lower="$1" upper="$2" note pr num body watch status wt
+	[ "$HAS_ORIGIN" = 1 ] || { row "$lower" stopped "syncDown: pr needs an 'origin' remote"; return 1; }
+	if ! note="$(fresh "$lower")"; then row "$lower" stopped "$note"; return 1; fi
+	note="$FRESH_NOTE"
+	if g merge-base --is-ancestor "$(stage_ref "$upper")" "$(stage_ref "$lower")"; then
+		row "$lower" already-level "$lower already contains $upper${note:+; $note}"
+		return 0
+	fi
+	body="$(mktemp "${TMPDIR:-/tmp}/flight-sync-body-XXXXXX")"
+	cat >"$body" <<EOF
+## Summary
+
+Sync-down after a promotion into \`$upper\`: merge \`$upper\` back into \`$lower\` so the lower stage stays level (ADR 0002).
+
+No issue lifecycle changes — the promotion that produced \`$upper\`'s tip already handled them.
+EOF
+	if ! pr="$("$FLIGHT_SELF" pr open --head "$upper" --base "$lower" --title "Sync $upper back into $lower" --body-file "$body")"; then
+		rm -f "$body"
+		row "$lower" stopped "could not open the $upper → $lower PR (see errors above)"
+		return 1
+	fi
+	rm -f "$body"
+	num="$(printf '%s' "$pr" | cut -f1)"
+	[ -n "$num" ] || { row "$lower" stopped "pr open returned no PR number"; return 1; }
+
+	if ! watch="$("$FLIGHT_SELF" ci watch --pr "$num")"; then
+		row "$lower" stopped "PR #$num left open — ci watch failed or timed out"
+		return 1
+	fi
+	status="$(printf '%s\n' "$watch" | sed -n 's/.*status=\([a-z]*\).*/\1/p' | tail -n1)"
+	if [ "$status" != success ]; then
+		row "$lower" stopped "PR #$num left open — CI ${status:-reported no run}"
+		return 1
+	fi
+	if ! "$FLIGHT_SELF" pr merge --number "$num" --strategy merge; then
+		row "$lower" stopped "PR #$num left open — merge was refused (conflict or protection?)"
+		return 1
+	fi
+	# Bring the local ref in line with what the backend just wrote.
+	g fetch -q origin "$lower"
+	wt="${WT_PATH[$lower]:-}"
+	if [ -z "$wt" ]; then
+		g fetch -q origin "$lower:$lower"
+	elif clean "$wt"; then
+		git -C "$wt" merge -q --ff-only "origin/$lower" 2>/dev/null || note="${note:+$note; }local checkout at $wt did not fast-forward"
+	else
+		note="${note:+$note; }local checkout at $wt is behind origin/$lower (dirty; left alone)"
+	fi
+	row "$lower" pr-merged "#$num $upper → $lower${note:+; $note}"
+	return 0
+}
+
+# ── the cascade ─────────────────────────────────────────────────────────────────
+rc=0
+for ((j = from_idx - 1; j >= 0; j--)); do
+	lower="${STAGES[$j]}"; upper="${STAGES[$((j + 1))]}"
+	case "$(mode "$j")" in
+		none)   row "$lower" skipped "syncDown: none on $lower stops the cascade here"; break ;;
+		direct) sync_direct "$lower" "$upper" || { rc=1; break; } ;;
+		pr)     sync_pr "$lower" "$upper" || { rc=1; break; } ;;
+	esac
+done
+exit "$rc"

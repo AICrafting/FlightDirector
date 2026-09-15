@@ -41,6 +41,15 @@ earlier instructions were summarized away or the model changed mid-session:
 - Keep the issue's status label honest at every transition
   (in-progress → to-test → …) via `flight issues set-status`.
 
+### Prompt logging (the cost ledger)
+
+Each agent turn is logged — prompt, model, tokens, estimated cost — to a git-ignored
+`.flightdirector/prompt-log.jsonl`, by the **flight plugin's bundled hooks**. Claude Code and
+Codex write the same file with the same schema, so the work-ledger comment on a finished issue
+is measured with `flight prompt-log summary --session <id>` rather than guessed. The switch is
+`code.promptLog.enabled` in `.flightdirector/config.json`; the record format, pricing, and
+semantics are documented once in `flight/references/prompt-log.md` — don't duplicate them here.
+
 ## Additional local notes
 
 Claude:
