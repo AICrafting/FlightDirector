@@ -161,5 +161,23 @@ check "json aggregate lists unpriced_models with row counts" "$(jq -e '.unpriced
 MD5="$(cd "$R" && "$DISP" prompt-log summary --session S1)"
 check "no unpriced note when every measured row is priced" "$(grep -q 'No pricing for' <<<"$MD5" && echo 0 || echo 1)"
 
+# --- zero-cost 'unknown' model rows are trimmed from the rendered table (#121) ---
+cat >>"$R/.flightdirector/prompt-log.jsonl" <<'EOF'
+{"timestamp":"2026-09-06T12:08:00+00:00","provider":"anthropic","harness":"claude","session_id":"S4","turn_id":"k1","prompt":"real","model":"claude-fable-5-1","input_tokens":100,"output_tokens":10,"reasoning_output_tokens":0,"cache_creation_tokens":0,"cache_read_tokens":0,"cost_usd":0.01,"cost_basis":"api-equivalent","duration_seconds":1}
+{"timestamp":"2026-09-06T12:09:00+00:00","provider":"anthropic","harness":"claude","session_id":"S4","turn_id":"k2","prompt":"hook-only","model":"unknown","input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"cache_creation_tokens":0,"cache_read_tokens":0,"cost_usd":0.0,"cost_basis":"api-equivalent","duration_seconds":1}
+{"timestamp":"2026-09-06T12:10:00+00:00","provider":"anthropic","harness":"claude","session_id":"S4","turn_id":"k3","prompt":"hook-only","model":"unknown","input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"cache_creation_tokens":0,"cache_read_tokens":0,"cost_usd":0.0,"cost_basis":"api-equivalent","duration_seconds":1}
+{"timestamp":"2026-09-06T12:11:00+00:00","provider":"anthropic","harness":"claude","session_id":"S5","turn_id":"m1","prompt":"real","model":"claude-fable-5-1","input_tokens":100,"output_tokens":10,"reasoning_output_tokens":0,"cache_creation_tokens":0,"cache_read_tokens":0,"cost_usd":0.01,"cost_basis":"api-equivalent","duration_seconds":1}
+{"timestamp":"2026-09-06T12:12:00+00:00","provider":"anthropic","harness":"claude","session_id":"S5","turn_id":"m2","prompt":"unpriced","model":"unknown","input_tokens":100,"output_tokens":10,"reasoning_output_tokens":0,"cache_creation_tokens":0,"cache_read_tokens":0,"cost_usd":null,"cost_basis":null,"duration_seconds":1}
+EOF
+MD6="$(cd "$R" && "$DISP" prompt-log summary --session S4)"
+check "zero-cost 'unknown' model rows are dropped from the table" "$(grep -q '| claude | unknown |' <<<"$MD6" && echo 0 || echo 1)"
+check "…the Total line still counts every row" "$(grep -q '^| \*\*Total\*\* | | 3 |' <<<"$MD6" && echo 1 || echo 0)"
+check "…and a note says how many turns had no model recorded" "$(grep -q '2 turn(s) recorded no model and cost nothing (omitted from the table)' <<<"$MD6" && echo 1 || echo 0)"
+J6="$(cd "$R" && "$DISP" prompt-log summary --session S4 --json)"
+check "json output still carries the 'unknown' group (trimming is render-only)" "$(jq -e '(.groups|length)==2 and (.groups[]|select(.model=="unknown")|.rows)==2' <<<"$J6" >/dev/null && echo 1 || echo 0)"
+MD7="$(cd "$R" && "$DISP" prompt-log summary --session S5)"
+check "an 'unknown' row with tokens but no price is kept, marked unpriced" "$(grep -q '| claude | unknown | 1 | .* (+1 unpriced) |' <<<"$MD7" && echo 1 || echo 0)"
+check "…and no omitted-turns note is emitted for it" "$(grep -q 'recorded no model' <<<"$MD7" && echo 0 || echo 1)"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
