@@ -21,21 +21,50 @@ SITE="${LS_API%/}"
 REPO_API="${SITE}/repos/${LS_OWNER}/${LS_REPO}"
 HDRS=(-H "Authorization: token ${LS_TOKEN}")
 
-# 1. Identity.
+# 1. Identity — probed first, judged after the repository probe (below).
+#
+# `GET /user` needs the `read:user` scope, and Forgejo will not mint a token
+# that is BOTH restricted to one repository AND carries `read:user`. The token
+# backends.md recommends (single repo, write:repository + write:issue) therefore
+# always gets a 403 here — a scope limitation, not a bad token. So: a 403 that
+# names the scope, alongside a repository probe that succeeds, is reported as
+# informational; a 401 (bad/expired token), or a 403 with a failing repository
+# probe, stays a failure.
+identity_ok=0; identity_scope=0; identity_why=""; login=""; uid=""
 if probe GET "${SITE}/user"; then
+	identity_ok=1
 	login="$(body_field '.login // .username // "?"')"
 	uid="$(body_field '.id // "?"')"
-	pass "authenticates" "$login (id $uid) — token $(mask "$LS_TOKEN")"
 else
-	fail "authenticates" "$(why)"
-	hint "Forgejo tokens are created at <instance>/user/settings/applications"
+	identity_why="$(why)"
+	if [ "$PROBE_CODE" = 403 ] && [ "${identity_why#*read:user}" != "$identity_why" ]; then
+		identity_scope=1
+	fi
 fi
 
 # 2. The repository named in config.json.
+repo_ok=0; repo_name=""; repo_url=""; repo_why=""
 if probe GET "$REPO_API"; then
-	pass "repository" "$(body_field '.full_name // "?"') — $(body_field '.html_url // ""')"
+	repo_ok=1
+	repo_name="$(body_field '.full_name // "?"')"
+	repo_url="$(body_field '.html_url // ""')"
 else
-	fail "repository" "$(why) — ${LS_OWNER}/${LS_REPO} (check owner/repo/api in config.json, and that the token is not restricted to a different repository)"
+	repo_why="$(why)"
+fi
+
+if [ "$identity_ok" = 1 ]; then
+	pass "authenticates" "$login (id $uid) — token $(mask "$LS_TOKEN")"
+elif [ "$identity_scope" = 1 ] && [ "$repo_ok" = 1 ]; then
+	note "authenticates" "identity not exposed to a repo-scoped token (needs read:user, which Forgejo cannot grant per-repository) — token $(mask "$LS_TOKEN"); repository access below proves it works"
+else
+	fail "authenticates" "$identity_why"
+	hint "Forgejo tokens are created at <instance>/user/settings/applications"
+fi
+
+if [ "$repo_ok" = 1 ]; then
+	pass "repository" "$repo_name — $repo_url"
+else
+	fail "repository" "$repo_why — ${LS_OWNER}/${LS_REPO} (check owner/repo/api in config.json, and that the token is not restricted to a different repository)"
 fi
 
 # 3. Read probes, one per capability group the skills exercise.
