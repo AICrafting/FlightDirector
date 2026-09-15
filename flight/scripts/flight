@@ -219,10 +219,13 @@ fi
 # backend need — the merged-PR fallback for squash/rebase hops — recurses through this
 # same dispatcher as `pr list`, so the adapter contract still owns every HTTP request.
 # Anchored to $repo_root, the MAIN checkout, so it behaves the same from a linked worktree.
+# `sync-down` lives beside it: the post-promotion back-merge cascade (ADR 0002) is
+# git-local too, and its `pr` mode recurses through this dispatcher for the PR/CI verbs.
 if [ "$group" = "branches" ]; then
-  case "$verb" in list|prune) ;; *) die "unknown verb '$verb' (branches: list prune)" ;; esac
+  case "$verb" in list|prune|sync-down) ;; *) die "unknown verb '$verb' (branches: list prune sync-down)" ;; esac
   [ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
   export FLIGHT_REPO_ROOT="$repo_root" FLIGHT_CONFIG="$cfg" FLIGHT_SELF="$SELF_DIR/flight"
+  [ "$verb" = "sync-down" ] && exec "$SELF_DIR/sync-down" "$@"
   exec "$SELF_DIR/branches" "$verb" "$@"
 fi
 
