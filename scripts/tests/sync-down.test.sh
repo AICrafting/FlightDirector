@@ -111,7 +111,7 @@ run() {
 }
 out() { cat "$SANDBOX/out"; }
 err() { cat "$SANDBOX/err"; }
-line() { grep -P "^$1\t" "$SANDBOX/out" || true; }	# the output row for a stage
+line() { grep $'^'"$1"$'\t' "$SANDBOX/out" || true; }	# the output row for a stage (plain grep — BusyBox has no -P)
 
 # ── 1. direct, one hop: develop fast-forwards to qa's tip, no new commit ─────
 echo "── direct: one hop"
