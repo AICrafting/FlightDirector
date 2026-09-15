@@ -222,6 +222,16 @@ lands in the final stage.
 If you don't say, it's `merge`. (This applies to `pr` hops only — a `direct` hop like
 feature → `develop` always merges with `--no-ff` and has no strategy option.)
 
+**After a stage-to-stage promotion, the lower stages are synced back down.** Once `develop → qa`
+(or `qa → main`) lands, **promoting-a-branch** merges the target back into the source and cascades
+to the bottom of the pipeline, so `develop` is never left one merge commit behind `qa`, release
+tags on `main` are visible from `develop`, and a squash or rebase hop doesn't re-present the same
+changes next time. Each stage decides how it receives that back-merge with `syncDown` (`direct`,
+`pr`, or `none`), defaulting to its own `merge` setting — so a PR-only stage gets a small
+"Sync qa back into develop" PR that auto-merges on green CI, and a direct stage just gets a push.
+Put `"syncDown": "none"` on a stage to opt it out (the cascade stops there). A conflict or red CI
+on the sync stops and reports; nothing is ever squashed, rebased, or reset on a stage branch.
+
 That's the full loop: **file → triage → work (in a worktree, behind a merge gate) → promote up
 the pipeline** — all without leaving the session.
 
