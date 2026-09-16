@@ -75,7 +75,7 @@ check "new-branch push verifies local --not --remotes=<remote>" \
 printf '(delete) %s refs/heads/feature/1-x %s\nrefs/heads/develop %s refs/heads/develop %s\n' \
 	"$ZERO" "$SHA_A" "$SHA_B" "$SHA_A" | run_hook && rc=0 || rc=$?
 check "mixed delete + update verifies only the update and runs the checks" \
-	"$([ "$rc" = 0 ] && [ "$(verify_args | wc -l)" = 1 ] && checks_ran && echo 1 || echo 0)"
+	"$([ "$rc" = 0 ] && [ "$(verify_args | wc -l)" -eq 1 ] && checks_ran && echo 1 || echo 0)"
 
 # --- failures propagate ---
 STUB_CHECKS_RC=3 bash -c 'cd "$3" && printf "refs/heads/develop %s refs/heads/develop %s\n" "$1" "$2" | ./.githooks/pre-push origin' \

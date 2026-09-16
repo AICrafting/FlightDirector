@@ -72,3 +72,34 @@ jobs:
           for t in git jq python3 sed awk paste wc mktemp shellcheck yamllint brew; do
             printf '%s -> %s\n' "$t" "$(command -v "$t" || echo MISSING)"
           done
+
+  # Does the suite stand a chance on Windows at all? Git Bash is 5.3 so this cannot
+  # test #127's bug, but it is the only way to find out what MSYS actually breaks.
+  # jq is absent on the runner and flight requires it, so fetch a static binary.
+  # python3 is absent too and there is no package manager, so the prompt-logger
+  # tests are expected to fail; the point is to see the shape of the damage.
+  probe-windows-suite:
+    name: probe windows suite
+    runs-on: windows
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        continue-on-error: true
+        uses: actions/checkout@v6
+
+      - name: Install jq
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -sSL -o "$HOME/bin/jq.exe" \
+            https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe
+          "$HOME/bin/jq.exe" --version
+
+      - name: Run the suite and report the profile
+        continue-on-error: true
+        shell: bash
+        run: |
+          export PATH="$HOME/bin:$PATH"
+          command -v jq; jq --version || true
+          bash scripts/run-tests.sh 2>&1 | tail -80 || true

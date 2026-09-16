@@ -53,3 +53,29 @@ jobs:
       - name: Run script tests
         run: |
           bash scripts/run-tests.sh
+
+  # The other half of "does it work on a Mac": BSD userland. The Linux legs above
+  # cover the interpreter but run GNU coreutils, so they cannot see a BSD `wc`
+  # padding its count, `paste` demanding an explicit operand, or `sed -i` reading
+  # the next token as a backup suffix.
+  #
+  # No `container:` here — only the docker-labelled Linux runners can take one, and
+  # the point of this leg is the host's own tools. The runner has stock bash 3.2.57
+  # (no Homebrew bash), plus git, jq and python3, so nothing needs installing.
+  script-tests-macos:
+    name: script tests (macOS, BSD userland)
+    runs-on: macos-arm64
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Show the interpreter under test
+        run: |
+          sw_vers
+          command -v bash
+          bash --version | head -1
+
+      - name: Run script tests
+        run: |
+          bash scripts/run-tests.sh
