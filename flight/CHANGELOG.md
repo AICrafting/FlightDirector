@@ -13,7 +13,20 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **`flight branches` and `flight branches sync-down` now run on macOS** (#127). Both used
+  `mapfile` and `declare -A`, which are bash 4 builtins; macOS ships bash 3.2 and nothing newer,
+  so on a stock Mac each died before doing any work. That took `cleaning-up-branches` and
+  `promoting-a-branch`'s sync-down step (0.14.0) with it, and made the README's "Nothing to
+  install or run" untrue for every macOS user. Both scripts now use `while IFS= read -r` and
+  newline-delimited branch-keyed containers, which behave identically on bash 3.2 and bash 5.
+
+- **`flight branches prune` no longer skips every worktree on a symlinked repo path** (#127).
+  The `.worktrees/` check compared `git worktree list`'s resolved path against an unresolved
+  repo root, so under macOS's `/var` and `/tmp` (both symlinks into `/private`) no worktree ever
+  matched and `prune` reported each one as "checked out elsewhere". The root is now resolved
+  with `pwd -P` before the comparison.
 
 ## [0.14.0] - 2026-09-15
 

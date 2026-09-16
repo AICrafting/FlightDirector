@@ -66,7 +66,11 @@ if [ ${#revs[@]} -eq 0 ]; then
 	revs=(-n "$count" HEAD)
 fi
 
-mapfile -t shas < <(git rev-list "${revs[@]}")
+# `while read`, not `mapfile`: macOS ships bash 3.2, which has no `mapfile`, and this
+# script gates the pre-push hook — an exit 127 here blocks every push from a Mac.
+shas=()
+while IFS= read -r _sha; do [ -n "$_sha" ] && shas+=("$_sha"); done \
+	< <(git rev-list "${revs[@]}")
 count=${#shas[@]}
 if [ "$count" -eq 0 ]; then
 	printf '%sNo commits to verify.%s\n' "$green" "$reset"
