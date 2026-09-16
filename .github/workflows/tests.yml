@@ -65,7 +65,7 @@ jobs:
   script-tests-macos:
     name: script tests (macOS, BSD userland)
     runs-on: macos-arm64
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       # actions/checkout is a JavaScript action and this runner has no node, so it
       # fails before the tests run ("Cannot find: node in PATH"). Check out with git
@@ -78,13 +78,18 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
         run: |
+          # Never let git block on a credential prompt: with no tty it hangs until
+          # the job timeout instead of failing, which reports as a timeout and hides
+          # the real cause. Fail immediately instead, and keep pagers out of it.
+          export GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat GIT_ASKPASS=/usr/bin/true
+          [ -n "$TOKEN" ] || { echo "no token in github.token — cannot fetch"; exit 1; }
           git init -q .
           git remote add origin "$SERVER/$REPO.git"
           AUTH="$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"
-          git -c http.extraheader="AUTHORIZATION: basic $AUTH" \
-              fetch -q --depth 1 origin "$SHA"
+          git -c credential.helper= -c http.extraheader="AUTHORIZATION: basic $AUTH" \
+              fetch --no-tags --depth 1 origin "$SHA"
           git checkout -q FETCH_HEAD
-          git log --oneline -1
+          git --no-pager log --oneline -1
 
       - name: Show the interpreter under test
         run: |
