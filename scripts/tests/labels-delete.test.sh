@@ -44,8 +44,8 @@ export LS_API=https://example.invalid/api LS_OWNER=acme LS_REPO=widget LS_TOKEN=
 export CURL_LOG="$SANDBOX/curl.log"
 
 pass=0; fail=0
-ok()     { pass=$((pass+1)); printf '  ✓ %s\n' "$1"; }
-not_ok() { fail=$((fail+1)); printf '  ✗ %s\n' "$1"; }
+ok()     { pass=$((pass+1)); printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; }
+not_ok() { fail=$((fail+1)); printf '\033[0;31m  ✗ %s\033[0m\n' "$1"; }
 check()  { if [ "$2" = 1 ]; then ok "$1"; else not_ok "$1"; fi; }
 
 run() { # backend args… → sets RC, ERR

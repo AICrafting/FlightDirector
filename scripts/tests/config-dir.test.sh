@@ -15,8 +15,8 @@ trap 'rm -rf "$SANDBOX"' EXIT
 
 pass=0; fail=0
 check() {
-	if [ "$2" = 1 ]; then pass=$((pass + 1)); printf '  ✓ %s\n' "$1"
-	else fail=$((fail + 1)); printf '  ✗ %s\n' "$1"; fi
+	if [ "$2" = 1 ]; then pass=$((pass + 1)); printf '\033[0;32m  ✓ %s\033[0m\n' "$1"
+	else fail=$((fail + 1)); printf '\033[0;31m  ✗ %s\033[0m\n' "$1"; fi
 }
 
 [ -x "$DISP" ]; [ -x "$LEGACY_BIN" ]; [ -x "$NEW_BIN" ]
