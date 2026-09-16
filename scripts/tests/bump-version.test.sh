@@ -180,6 +180,7 @@ check "still bumps despite empty Unreleased" \
 	"$(json_version "$SANDBOX/other/.claude-plugin/plugin.json" | grep -qx '9.10.0' && echo 1 || echo 0)"
 
 # --- summary ----------------------------------------------------------------
-printf '\033[1m────────────────────────────\033[0m\n'
-printf '\033[0;32mPassed: %d\033[0m  \033[0;31mFailed: %d\033[0m\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]

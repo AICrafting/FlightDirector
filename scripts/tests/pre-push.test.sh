@@ -94,5 +94,7 @@ check "exits 0 without verifying when run-checks.sh is not executable" \
 	"$([ "$rc" = 0 ] && [ -z "$(verify_args)" ] && echo 1 || echo 0)"
 chmod +x "$SANDBOX/scripts/run-checks.sh"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]

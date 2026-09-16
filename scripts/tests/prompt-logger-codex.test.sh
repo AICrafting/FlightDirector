@@ -12,12 +12,12 @@ pass=0
 fail=0
 
 ok() {
-	printf '  ✓ %s\n' "$1"
+	printf '\033[0;32m  ✓ %s\033[0m\n' "$1"
 	pass=$((pass + 1))
 }
 
 not_ok() {
-	printf '  ✗ %s\n' "$1"
+	printf '\033[0;31m  ✗ %s\033[0m\n' "$1"
 	fail=$((fail + 1))
 }
 
@@ -181,5 +181,7 @@ else
 	not_ok "Codex manifest bundles all four plugin-root hooks"
 fi
 
-printf '\nPassed: %d  Failed: %d\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]
