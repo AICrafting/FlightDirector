@@ -104,5 +104,7 @@ export LS_EMAIL=dev@example.invalid LS_PROJECT=ACME
 run jira --name model/gpt-5
 check "jira: always errors and points at issues label-remove" "$([ "$RC" = 1 ] && printf '%s' "$ERR" | grep -q 'label-remove' && [ ! -s "$CURL_LOG" ] && echo 1 || echo 0)"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]

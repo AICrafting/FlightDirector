@@ -179,5 +179,7 @@ MD7="$(cd "$R" && "$DISP" prompt-log summary --session S5)"
 check "an 'unknown' row with tokens but no price is kept, marked unpriced" "$(grep -q '| claude | unknown | 1 | .* (+1 unpriced) |' <<<"$MD7" && echo 1 || echo 0)"
 check "…and no omitted-turns note is emitted for it" "$(grep -q 'recorded no model' <<<"$MD7" && echo 0 || echo 1)"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]

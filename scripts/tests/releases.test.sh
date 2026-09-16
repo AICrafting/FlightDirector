@@ -153,5 +153,7 @@ check "unknown plugin errors" "$([ "$rc" = 1 ] && grep -q "nosuch" "$T/plug.err"
 if run flight --bogus >/dev/null 2>&1; then rc=0; else rc=$?; fi
 check "unknown option errors" "$([ "$rc" != 0 ] && echo 1 || echo 0)"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]

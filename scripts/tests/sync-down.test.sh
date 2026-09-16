@@ -305,5 +305,7 @@ check "flight branches sync-down --from qa routes to the script" "$([ "$rc" = 0 
 out="$(cd "$R" && "$DISPATCH" branches bogus 2>&1)"; rc=$?
 check "unknown branches verb lists sync-down in the usage" "$([ "$rc" != 0 ] && grep -q 'sync-down' <<<"$out" && echo 1 || echo 0)" "$out"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]
