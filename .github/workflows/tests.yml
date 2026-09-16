@@ -67,8 +67,24 @@ jobs:
     runs-on: macos-arm64
     timeout-minutes: 15
     steps:
+      # actions/checkout is a JavaScript action and this runner has no node, so it
+      # fails before the tests run ("Cannot find: node in PATH"). Check out with git
+      # directly instead. The token goes through env and is never interpolated into
+      # the script body, and extraheader keeps it out of the on-disk remote config.
       - name: Checkout
-        uses: actions/checkout@v6
+        env:
+          TOKEN: ${{ github.token }}
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          git init -q .
+          git remote add origin "$SERVER/$REPO.git"
+          AUTH="$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" \
+              fetch -q --depth 1 origin "$SHA"
+          git checkout -q FETCH_HEAD
+          git log --oneline -1
 
       - name: Show the interpreter under test
         run: |
