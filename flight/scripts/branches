@@ -50,6 +50,10 @@ $2
 }
 
 # map_get <map> <key> — prints the value; prints nothing when the key is absent.
+# ALWAYS returns 0 — test the output, not the status. Every caller reads it as
+# `x="$(map_get …)"`, and under `set -e` a non-zero return would fail the *assignment*
+# and kill the script. A miss is the common case here (a branch with no worktree, a
+# stage checked out nowhere), so a `return 1` on miss would be worse than no signal.
 map_get() {
 	local line
 	while IFS= read -r line; do
