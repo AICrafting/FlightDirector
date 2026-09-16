@@ -1,0 +1,56 @@
+---
+# THROWAWAY (#127). Reports what the `windows` runner actually has so a real
+# Windows leg can be written against facts rather than guesses. Read-only: every
+# step only prints versions and tool locations. Delete before this PR merges.
+name: probe-windows
+on:
+  workflow_dispatch:
+  pull_request: {}
+
+jobs:
+  probe:
+    name: probe windows runner
+    runs-on: windows
+    timeout-minutes: 5
+    steps:
+      # Each shell is tried independently: whichever ones exist will report, and
+      # the ones that don't fail the step without aborting the job.
+      - name: via cmd
+        continue-on-error: true
+        shell: cmd
+        run: |
+          ver
+          echo PROCESSOR_ARCHITECTURE=%PROCESSOR_ARCHITECTURE%
+          where bash
+          where git
+          where jq
+          where curl
+          where python3
+          where python
+
+      - name: via powershell
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $PSVersionTable | Out-String
+          foreach ($t in 'bash', 'git', 'jq', 'curl', 'python3', 'sed', 'awk') {
+            $c = Get-Command $t -ErrorAction SilentlyContinue
+            if ($c) { "FOUND $t -> $($c.Source)" } else { "MISSING $t" }
+          }
+
+      - name: via bash
+        continue-on-error: true
+        shell: bash
+        run: |
+          uname -a
+          echo "BASH_VERSION=$BASH_VERSION"
+          bash --version | head -1
+          for t in git jq curl python3 sed awk paste wc mktemp; do
+            printf '%s -> %s\n' "$t" "$(command -v "$t" || echo MISSING)"
+          done
+          echo "--- process substitution ---"
+          while IFS= read -r l; do echo "procsub ok: $l"; done < <(printf 'yes\n')
+          echo "--- mktemp -d ---"
+          d="$(mktemp -d)" && echo "mktemp -d -> $d"
+          echo "--- git worktree ---"
+          git --version
