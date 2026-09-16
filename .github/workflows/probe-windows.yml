@@ -2,7 +2,7 @@
 # THROWAWAY (#127). Reports what the `windows` runner actually has so a real
 # Windows leg can be written against facts rather than guesses. Read-only: every
 # step only prints versions and tool locations. Delete before this PR merges.
-name: probe-windows
+name: probe-runners
 on:
   workflow_dispatch:
   pull_request: {}
@@ -54,3 +54,21 @@ jobs:
           d="$(mktemp -d)" && echo "mktemp -d -> $d"
           echo "--- git worktree ---"
           git --version
+
+  probe-macos:
+    name: probe macos runner
+    runs-on: macos-arm64
+    timeout-minutes: 5
+    steps:
+      - name: identity and tools
+        continue-on-error: true
+        run: |
+          uname -a
+          sw_vers || true
+          echo "default bash: $(command -v bash)"
+          bash --version | head -1
+          echo "--- /bin/bash (the one a shebang gets without brew) ---"
+          /bin/bash --version | head -1
+          for t in git jq python3 sed awk paste wc mktemp shellcheck yamllint brew; do
+            printf '%s -> %s\n' "$t" "$(command -v "$t" || echo MISSING)"
+          done
