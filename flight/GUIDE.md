@@ -110,8 +110,9 @@ That triggers **`setting-up-a-repo`**, which walks you through setup:
 
 1. **Coordinates** — it reads your git remote to detect the backend (Forgejo/Gitea, GitHub, or
    GitLab), propose the `owner/repo` and the API base, and asks you to confirm.
-2. **Token** — it asks for the per-repo token, adds `.flightdirector/secrets*` **and**
-   `.worktrees/` to your `.gitignore`, writes the token to the gitignored secrets file, and
+2. **Token** — it asks for the per-repo token, adds `.flightdirector/secrets*`,
+   `.flightdirector/config.local.json` **and** `.worktrees/` to your `.gitignore`, writes the
+   token to the gitignored secrets file, and
    verifies it with `flight auth check` (identity, repo access, per-capability permissions,
    expiry) before going further.
 3. **Pipeline preset** — it asks which stage pipeline you want:
@@ -128,7 +129,9 @@ That triggers **`setting-up-a-repo`**, which walks you through setup:
 When it's done you'll have two files in the `.flightdirector/` folder: a committable **`.flightdirector/config.json`**
 (coordinates, the `stages` pipeline, and your label names) and a gitignored
 **`.flightdirector/secrets.json`** (the token). Every other skill reads `.flightdirector/config.json`, so they
-all speak your repo's conventions.
+all speak your repo's conventions. A third, optional file — a gitignored
+**`.flightdirector/config.local.json`** — holds per-machine overrides; see
+[Where your config lives](#where-your-config-lives).
 
 ---
 
@@ -262,6 +265,14 @@ deleted until you say go, and deleting on **origin** is a separate yes from dele
   file tracked by git, it warns you on every run. Rotating a token? Write the new one to
   `.flightdirector/secrets-new.json`, run `flight auth check --secrets .flightdirector/secrets-new.json`,
   and move it into place only once every line is a `✓`.
+- **`.flightdirector/config.local.json`** (gitignored, optional) — per-machine overrides of
+  `config.json`: a fork's `owner`, a self-hosted `api`, `promptLog.enabled`, a `ciWatchTimeout`.
+  It is layered over the committed file on every read, the way Claude Code layers
+  `settings.local.json` over `settings.json`. Only list the keys you change — nested objects
+  merge key by key, while scalars **and arrays** replace wholesale (a local `code.stages`
+  replaces the whole pipeline). `reconcile` never writes local values into `config.json`, an
+  invalid local file is an error, and a tracked one warns on every run. Merge rules in full:
+  [flight-setup.md](references/flight-setup.md#flightdirectorconfiglocaljson--optional-gitignored).
 
 Want a different pipeline later? Edit `code.stages` in `.flightdirector/config.json` — e.g. add a `qa`
 stage between `develop` and `main`. The skills pick it up immediately. For worked setups at 1, 2, 3,
