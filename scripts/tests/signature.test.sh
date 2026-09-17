@@ -46,8 +46,12 @@ check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=
 			else printf '\033[0;31m  ✗ %s\033[0m  %s\n' "$1" "${3:-}"; fail=$((fail+1)); fi; }
 
 mkrepo() { # $1 name, $2 extra config JSON merged into .code → prints path
-	local r="$SANDBOX/$1"; mkdir -p "$r/.flightdirector"; git -C "$r" init -q
-	jq -n --argjson extra "${2:-{\}}" '{code:({backend:"forgejo",owner:"acme",repo:"widget",api:"https://example.invalid/api/v1",stages:[{name:"develop"}]} + $extra)}' >"$r/.flightdirector/config.json"
+	local r="$SANDBOX/$1" extra="${2:-}"; mkdir -p "$r/.flightdirector"; git -C "$r" init -q
+	# Spelled out rather than "${2:-{\}}": bash 3.2 (macOS) mis-parses the braces in
+	# that default and hands jq an invalid object, which is how this test went red on
+	# the bash 3.2 CI leg. `[ -n ] || extra='{}'` reads the same on every bash.
+	[ -n "$extra" ] || extra='{}'
+	jq -n --argjson extra "$extra" '{code:({backend:"forgejo",owner:"acme",repo:"widget",api:"https://example.invalid/api/v1",stages:[{name:"develop"}]} + $extra)}' >"$r/.flightdirector/config.json"
 	printf '%s\n' "$r"
 }
 # run <repo> <group> <verb> [args…] → payload body of the last write, in $BODY; rc in $RC
