@@ -24,6 +24,11 @@ check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=
 
 SANDBOX="$(cd "$(mktemp -d)" && pwd -P)"; trap 'rm -rf "$SANDBOX"' EXIT
 
+# norm_path <path> — the spelling git uses, so an expected path can be compared
+# against what the dispatcher reports. On Windows the shell says /c/src while git
+# says C:/src; cygpath converts, and is absent elsewhere so this is identity there.
+norm_path() { cygpath -m -- "$1" 2>/dev/null || printf '%s\n' "$1"; }
+
 # ── a stub dispatcher: answers only `pr list`, from $PR_ROWS ──────────────────
 STUB="$SANDBOX/flight-stub"
 cat >"$STUB" <<'EOF'
@@ -129,7 +134,7 @@ check "no stage branch is ever listed" \
 check "row is branch⇥where⇥stage⇥pr⇥issue⇥worktree" \
 	"$(grep -q '^feature/1-merged	local+remote	develop	-	1	-$' <<<"$out" && echo 1 || echo 0)" "out=$out"
 check "a branch with a worktree reports its path" \
-	"$(grep -q "^feature/7-worktree	local+remote	develop	-	7	$R/.worktrees/7-worktree\$" <<<"$out" && echo 1 || echo 0)" "out=$out"
+	"$(grep -q "^feature/7-worktree	local+remote	develop	-	7	$(norm_path "$R")/.worktrees/7-worktree\$" <<<"$out" && echo 1 || echo 0)" "out=$out"
 
 check "--merged-into narrows to that one stage" \
 	"$(out2="$(run list --merged-into develop)"; grep -q '^bugfix/3-merged' <<<"$out2" && echo 0 || echo 1)" \
