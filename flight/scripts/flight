@@ -10,6 +10,10 @@
 # ../references/adapter-contract.md and docs/adr/0001-*.
 set -euo pipefail
 
+# Windows shims (jq CRLF, path form); a no-op elsewhere.
+# shellcheck source-path=SCRIPTDIR source=_portable.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 ADAPTERS_DIR="$SELF_DIR/adapters"
 

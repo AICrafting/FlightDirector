@@ -14,6 +14,10 @@
 # Read-only by contract: adapters here probe GET endpoints only.
 # shellcheck shell=bash
 
+# Windows shims (jq CRLF, path form); a no-op elsewhere.
+# shellcheck source-path=SCRIPTDIR source=../_portable.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_portable.sh"
+
 command -v curl >/dev/null 2>&1 || { echo "auth adapter: curl is required" >&2; exit 1; }
 command -v jq   >/dev/null 2>&1 || { echo "auth adapter: jq is required" >&2; exit 1; }
 

@@ -15,6 +15,10 @@
 # See ../references/adapter-contract.md and ../skills/cleaning-up-branches/SKILL.md.
 set -euo pipefail
 
+# Windows shims (jq CRLF, path form); a no-op elsewhere.
+# shellcheck source-path=SCRIPTDIR source=_portable.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+
 die() { echo "flight branches: $*" >&2; exit 1; }
 warn() { echo "flight branches: $*" >&2; }
 
@@ -27,7 +31,9 @@ warn() { echo "flight branches: $*" >&2; }
 # (the dispatcher builds it with a logical `pwd`), so on any repo reached through one —
 # every repo under macOS's /var or /tmp, both symlinks into /private — an unresolved
 # $ROOT never prefix-matches and `prune` skips every worktree it should have handled.
-ROOT="$(cd "$FLIGHT_REPO_ROOT" && pwd -P)"
+# Windows disagrees a second way: MSYS bash says /c/src/repo where git says
+# C:/src/repo, so the form is normalised too. Both are no-ops on Linux.
+ROOT="$(flight_path_norm "$(cd "$FLIGHT_REPO_ROOT" && pwd -P)")"
 CFG="$FLIGHT_CONFIG"
 
 # Every git command is anchored to the MAIN checkout: branch refs and the worktree
@@ -144,7 +150,8 @@ MAIN_WT=""
 _wt=""
 while IFS= read -r line; do
 	case "$line" in
-		"worktree "*) _wt="${line#worktree }"; [ -n "$MAIN_WT" ] || MAIN_WT="$_wt" ;;
+		"worktree "*) _wt="$(flight_path_norm "${line#worktree }")"
+			[ -n "$MAIN_WT" ] || MAIN_WT="$_wt" ;;
 		"branch refs/heads/"*) WT_PATH="$WT_PATH${line#branch refs/heads/}	$_wt
 " ;;
 	esac
