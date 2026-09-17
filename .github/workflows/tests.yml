@@ -154,10 +154,10 @@ jobs:
           done
           # TEMP (#130): the two path spellings this platform produces, so a
           # mismatch in the .worktrees/ test is diagnosable rather than guessed at.
-          d="$(mktemp -d)"; git -C "$d" init -q .; git -C "$d" commit -q --allow-empty -m x
-          echo "pwd -P   : $(cd "$d" && pwd -P)"
-          echo "cygpath  : $(cygpath -m -- "$(cd "$d" && pwd -P)")"
-          echo "git says : $(git -C "$d" worktree list --porcelain | head -1)"
+          # Uses the checkout itself: no scratch repo, nothing that can fail the step.
+          echo "pwd -P   : $(pwd -P)"
+          echo "cygpath  : $(cygpath -m -- "$(pwd -P)")"
+          echo "git says : $(git worktree list --porcelain | head -1)"
 
       - name: Run script tests
         shell: bash
