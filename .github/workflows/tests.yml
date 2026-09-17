@@ -152,12 +152,6 @@ jobs:
           for t in sort jq git python3; do
             printf '%s -> %s\n' "$t" "$(command -v "$t" || echo MISSING)"
           done
-          # TEMP (#130): the two path spellings this platform produces, so a
-          # mismatch in the .worktrees/ test is diagnosable rather than guessed at.
-          # Uses the checkout itself: no scratch repo, nothing that can fail the step.
-          echo "pwd -P   : $(pwd -P)"
-          echo "cygpath  : $(cygpath -m -- "$(pwd -P)")"
-          echo "git says : $(git worktree list --porcelain | head -1)"
 
       - name: Run script tests
         shell: bash
