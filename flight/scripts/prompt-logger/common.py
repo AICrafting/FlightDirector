@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -10,7 +9,16 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any
+
+# `fcntl` is Unix-only. On Windows the equivalent is msvcrt's byte-range lock, so
+# pick whichever exists here and hide the difference in _lock_exclusive below.
+try:
+	import fcntl
+except ModuleNotFoundError:  # Windows
+	fcntl = None  # type: ignore[assignment]
+	import msvcrt
 
 
 REQUIRED_RECORD_FIELDS = {
@@ -133,7 +141,7 @@ def append_record(repo_root: Path, record: dict[str, Any], record_key: str) -> b
 	done_path = state_directory() / f"done-{stable_key(log_path, record_key)}"
 
 	with lock_path.open("a", encoding="utf-8") as lock:
-		fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+		_lock_exclusive(lock)
 		if done_path.exists():
 			return False
 		with log_path.open("a", encoding="utf-8") as output:
@@ -143,6 +151,32 @@ def append_record(repo_root: Path, record: dict[str, Any], record_key: str) -> b
 			os.fsync(output.fileno())
 		write_json_atomic(done_path, {"record_key": record_key})
 	return True
+
+
+def _lock_exclusive(handle, timeout: float = 60.0) -> None:
+	"""Block until this process holds an exclusive lock on `handle`.
+
+	The ledger is appended to by concurrent hook invocations, so this has to be a
+	real lock rather than a best effort. `fcntl.flock` waits indefinitely; msvcrt
+	has no whole-file flock, only a byte-range lock that gives up after about ten
+	seconds, so it is retried rather than allowed to surface as a lost row.
+	"""
+	if fcntl is not None:
+		fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+		return
+
+	# Windows: lock one byte at a fixed offset so every writer contends for the
+	# same region. Locking past EOF is allowed, so the lock file can stay empty.
+	handle.seek(0)
+	deadline = time.monotonic() + timeout
+	while True:
+		try:
+			msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+			return
+		except OSError:
+			if time.monotonic() >= deadline:
+				raise
+			time.sleep(0.05)
 
 
 def _merged_pricing(repo_root: Path) -> dict[str, Any] | None:

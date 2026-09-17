@@ -15,6 +15,7 @@ HOOK_SRC="$REPO_ROOT/.githooks/pre-push"
 pass=0; fail=0
 check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=$((pass+1));
 			else printf '\033[0;31m  ✗ %s\033[0m\n' "$1"; fail=$((fail+1)); fi; }
+skip() { printf '\033[2m  – %s (skipped: %s)\033[0m\n' "$1" "$2"; }
 
 # Sandbox: a real git repo (the hook resolves REPO_ROOT via rev-parse) holding
 # the hook plus stub run-checks.sh / verify-git-logs.sh that record their calls.
@@ -88,10 +89,20 @@ STUB_VERIFY_RC=1 bash -c 'cd "$3" && printf "refs/heads/develop %s refs/heads/de
 check "a bad signature fails the hook before the checks run" "$([ "$rc" != 0 ] && ! checks_ran && echo 1 || echo 0)"
 
 # --- sibling worktrees on branches without scripts/ are left alone ---
+# Windows has no executable bit, so `chmod -x` is a no-op and the hook stays
+# runnable — the precondition this assertion needs simply does not exist there.
+# Test for the capability rather than the platform: that is the thing actually
+# required, and it covers any filesystem that behaves the same way (a FAT or
+# exFAT mount on Linux, say) rather than just naming an OS.
 chmod -x "$SANDBOX/scripts/run-checks.sh"
-printf 'refs/heads/develop %s refs/heads/develop %s\n' "$SHA_B" "$SHA_A" | run_hook && rc=0 || rc=$?
-check "exits 0 without verifying when run-checks.sh is not executable" \
-	"$([ "$rc" = 0 ] && [ -z "$(verify_args)" ] && echo 1 || echo 0)"
+if [ -x "$SANDBOX/scripts/run-checks.sh" ]; then
+	skip "exits 0 without verifying when run-checks.sh is not executable" \
+		"this filesystem has no executable bit"
+else
+	printf 'refs/heads/develop %s refs/heads/develop %s\n' "$SHA_B" "$SHA_A" | run_hook && rc=0 || rc=$?
+	check "exits 0 without verifying when run-checks.sh is not executable" \
+		"$([ "$rc" = 0 ] && [ -z "$(verify_args)" ] && echo 1 || echo 0)"
+fi
 chmod +x "$SANDBOX/scripts/run-checks.sh"
 
 # Summary: plain when nothing failed, red when something did (#123).

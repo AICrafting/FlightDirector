@@ -128,8 +128,16 @@ check "no stage branch is ever listed" \
 	"$(grep -qE '^(develop|qa|main)	' <<<"$out" && echo 0 || echo 1)" "out=$out"
 check "row is branch⇥where⇥stage⇥pr⇥issue⇥worktree" \
 	"$(grep -q '^feature/1-merged	local+remote	develop	-	1	-$' <<<"$out" && echo 1 || echo 0)" "out=$out"
+# Ask git for the path rather than composing one from $R. The two spell it
+# differently on Windows (the shell says /c/src, git says C:/src) and git's is
+# what the dispatcher reports, so composing one only re-implements the bug. The
+# suffix test keeps this honest: it still has to be the .worktrees/ entry.
+wt7="$(git -C "$R" worktree list --porcelain \
+	| awk '/^worktree /{p=substr($0,10)} /^branch refs\/heads\/feature\/7-worktree$/{print p; exit}')"
 check "a branch with a worktree reports its path" \
-	"$(grep -q "^feature/7-worktree	local+remote	develop	-	7	$R/.worktrees/7-worktree\$" <<<"$out" && echo 1 || echo 0)" "out=$out"
+	"$([ -n "$wt7" ] && [ "${wt7%/.worktrees/7-worktree}" != "$wt7" ] \
+		&& grep -q "^feature/7-worktree	local+remote	develop	-	7	$wt7\$" <<<"$out" \
+		&& echo 1 || echo 0)" "out=$out; wt7=$wt7"
 
 check "--merged-into narrows to that one stage" \
 	"$(out2="$(run list --merged-into develop)"; grep -q '^bugfix/3-merged' <<<"$out2" && echo 0 || echo 1)" \

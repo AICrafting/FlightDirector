@@ -100,3 +100,61 @@ jobs:
       - name: Run script tests
         run: |
           bash scripts/run-tests.sh
+
+  # Windows, via Git Bash (MSYS). Not a third interpreter test: Git Bash is bash
+  # 5.3, so this leg is about MSYS userland and Windows path form, the same way
+  # the macOS leg is about BSD userland.
+  #
+  # Two things have to be set up rather than assumed, and both are why a plain
+  # `runs-on: windows` leg fails for reasons that look like code bugs:
+  #   PATH  C:\Windows\System32\sort.exe shadows the POSIX sort. It has no -u,
+  #         and reports the flag as a missing file, so `branches` fails with
+  #         "out=-uThe system cannot find the file specified." Put /usr/bin first.
+  #   jq    absent on the runner. Installed below; the CRLF its native build
+  #         writes is handled in flight/scripts/_portable.sh, not here, because a
+  #         user installing jq from winget or scoop gets exactly the same build.
+  script-tests-windows:
+    name: script tests (Windows, MSYS)
+    runs-on: windows
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # python3 for the prompt-logger producers and their tests. winget is not
+      # usable here (the runner is a service account with no interactive source
+      # agreement), so use the action; node is present on this runner, unlike the
+      # macOS one, so JS actions do run.
+      - name: Set up python3
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install jq
+        shell: bash
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -sSL -o "$HOME/bin/jq.exe" \
+            https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe
+          "$HOME/bin/jq.exe" --version
+          # setup-python installs `python`; the scripts invoke `python3`.
+          if ! command -v python3 >/dev/null 2>&1 && command -v python >/dev/null 2>&1; then
+            printf '#!/bin/bash\nexec python "$@"\n' >"$HOME/bin/python3"
+            chmod +x "$HOME/bin/python3"
+          fi
+
+      - name: Show the environment under test
+        shell: bash
+        run: |
+          export PATH="/usr/bin:$HOME/bin:$PATH"
+          uname -a
+          bash --version | head -1
+          for t in sort jq git python3; do
+            printf '%s -> %s\n' "$t" "$(command -v "$t" || echo MISSING)"
+          done
+
+      - name: Run script tests
+        shell: bash
+        run: |
+          export PATH="/usr/bin:$HOME/bin:$PATH"
+          bash scripts/run-tests.sh
