@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.15.0] - 2026-09-17
+
 ### Added
 
 - **Every body flight writes is signed** (#132). Issue bodies, comments (so every work-ledger
