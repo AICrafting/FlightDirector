@@ -311,7 +311,12 @@ while IFS=$'\t' read -r b where stage pr issue wt; do
 
 	# A branch checked out in the MAIN checkout (or any worktree outside .worktrees/)
 	# is someone's working copy, not leftovers — never touch it, at any flag level.
-	if [ "$wt" != "-" ] && { [ "$wt" = "$MAIN_WT" ] || [ "${wt#"$ROOT"/.worktrees/}" = "$wt" ]; }; then
+	# Compare keys, not paths: on Windows the same directory can come back
+	# spelled with different case from git and from cygpath. $wt itself stays
+	# untouched, because it is what gets reported to the user below.
+	_wt_key="$(flight_path_key "$wt")"; _root_key="$(flight_path_key "$ROOT")"
+	if [ "$wt" != "-" ] && { [ "$_wt_key" = "$(flight_path_key "$MAIN_WT")" ] \
+		|| [ "${_wt_key#"$_root_key"/.worktrees/}" = "$_wt_key" ]; }; then
 		act skip "$b" "checked out at $wt (not a .worktrees/ entry)"
 		continue
 	fi

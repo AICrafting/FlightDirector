@@ -40,3 +40,17 @@ flight_path_norm() {
 		*) printf '%s\n' "$1" ;;
 	esac
 }
+
+# flight_path_key <path> — a form safe to STRING-COMPARE two paths with.
+#
+# Windows filesystems are case-insensitive but shell string compares are not, and
+# the two sources disagree in practice: git may print C:/Windows/Temp/... while
+# cygpath resolves the same directory to C:/WINDOWS/Temp/... . Compare keys, not
+# the paths themselves, and keep the original for anything shown to the user.
+# Identity off Windows, where case is significant and must stay so.
+flight_path_key() {
+	case "${OSTYPE:-}" in
+		msys* | cygwin* | win32) flight_path_norm "$1" | tr '[:upper:]' '[:lower:]' ;;
+		*) printf '%s\n' "$1" ;;
+	esac
+}

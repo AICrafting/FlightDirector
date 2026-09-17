@@ -121,19 +121,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install jq and python3
+      # python3 for the prompt-logger producers and their tests. winget is not
+      # usable here (the runner is a service account with no interactive source
+      # agreement), so use the action; node is present on this runner, unlike the
+      # macOS one, so JS actions do run.
+      - name: Set up python3
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install jq
         shell: bash
         run: |
           mkdir -p "$HOME/bin"
           curl -sSL -o "$HOME/bin/jq.exe" \
             https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe
           "$HOME/bin/jq.exe" --version
-          # python3: the prompt-logger producers and their tests. Git Bash has no
-          # package manager, so take it from the Windows package manager and
-          # expose it under the name the scripts use.
-          if ! command -v python3 >/dev/null 2>&1; then
-            winget install --id Python.Python.3.13 --silent --accept-source-agreements \
-              --accept-package-agreements --scope machine || true
+          # setup-python installs `python`; the scripts invoke `python3`.
+          if ! command -v python3 >/dev/null 2>&1 && command -v python >/dev/null 2>&1; then
+            printf '#!/bin/bash\nexec python "$@"\n' >"$HOME/bin/python3"
+            chmod +x "$HOME/bin/python3"
           fi
 
       - name: Show the environment under test
@@ -145,6 +152,12 @@ jobs:
           for t in sort jq git python3; do
             printf '%s -> %s\n' "$t" "$(command -v "$t" || echo MISSING)"
           done
+          # TEMP (#130): the two path spellings this platform produces, so a
+          # mismatch in the .worktrees/ test is diagnosable rather than guessed at.
+          d="$(mktemp -d)"; git -C "$d" init -q .; git -C "$d" commit -q --allow-empty -m x
+          echo "pwd -P   : $(cd "$d" && pwd -P)"
+          echo "cygpath  : $(cygpath -m -- "$(cd "$d" && pwd -P)")"
+          echo "git says : $(git -C "$d" worktree list --porcelain | head -1)"
 
       - name: Run script tests
         shell: bash
