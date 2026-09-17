@@ -53,5 +53,7 @@ check "empty rev-list selection exits 0" "$([ "$rc" = 0 ] && grep -q 'No commits
 "$VERIFY" 0 >/dev/null 2>&1 && rc=0 || rc=$?
 check "count of 0 is rejected with exit 2" "$([ "$rc" = 2 ] && echo 1 || echo 0)"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -49,7 +49,10 @@ for branch in "${BRANCHES[@]}"; do
 	mirror="$(git -C "$REPO_ROOT" rev-parse --verify -q "refs/remotes/$REMOTE/$branch" 2>/dev/null || true)"
 
 	# Tags at this head — release tags ride along with the branch they belong to.
-	mapfile -t tags < <(git -C "$REPO_ROOT" tag --points-at "$src")
+	# `while read`, not `mapfile`, which is a bash 4 builtin absent on macOS's bash 3.2.
+	tags=()
+	while IFS= read -r _tag; do [ -n "$_tag" ] && tags+=("$_tag"); done \
+		< <(git -C "$REPO_ROOT" tag --points-at "$src")
 
 	if [ -n "$mirror" ] && [ "$mirror" = "$src" ]; then
 		say "$REMOTE/$branch already at $short"
@@ -68,7 +71,9 @@ for branch in "${BRANCHES[@]}"; do
 		fi
 	fi
 
-	for tag in "${tags[@]}"; do
+	# `${tags[@]}` on an EMPTY array trips `set -u` on bash 3.2 (macOS), and a head with
+	# no tags is the normal case — so guard the loop rather than expanding blind.
+	for tag in ${tags[@]+"${tags[@]}"}; do
 		if git -C "$REPO_ROOT" ls-remote --exit-code --tags "$REMOTE" "refs/tags/$tag" >/dev/null 2>&1; then
 			say "tag $tag already on $REMOTE"
 		elif [ "$DRY" = 1 ]; then

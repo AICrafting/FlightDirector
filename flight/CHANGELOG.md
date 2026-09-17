@@ -15,6 +15,64 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 _Nothing yet._
 
+## [0.15.0] - 2026-09-17
+
+### Added
+
+- **Every body flight writes is signed** (#132). Issue bodies, comments (so every work-ledger
+  entry) and PR bodies (promotions and sync-down PRs alike) now end with a `---` rule and
+  `via FlightDirector:flight@<version> with <Model/ver>` — the model clause when the skill passed
+  the new dispatcher-owned `--model <id>` flag (or `FLIGHT_MODEL` is set), omitted otherwise.
+  Done once in the dispatcher for all four backends; adapters are unchanged, except that the
+  Jira ADF shim now renders a `---` line as a rule. An update replaces an existing signature
+  rather than stacking one. Opt out per repo with `code.signature.enabled: false`, or per call
+  with `--no-signature`.
+
+- **Windows is a supported platform** (#130, via Git Bash / MSYS). A new `flight/scripts/_portable.sh`
+  shim, sourced by the dispatcher, `branches`, `sync-down`, `batch-manifest` and every adapter, is a
+  no-op off Windows and on it (a) wraps `jq` so a native `jq.exe` (what winget, scoop and choco
+  install) no longer leaks `\r` into every comparison, and (b) normalises path form with `cygpath`
+  so `branches prune` recognises `.worktrees/` entries whether git says `C:/…` or bash says
+  `/c/…` (case-insensitively). The prompt ledger's append lock falls back to `msvcrt` where
+  `fcntl` does not exist. Extensionless scripts (the dispatcher, adapters, `bin/*`, hooks) are
+  pinned to LF in `.gitattributes` so a Windows checkout no longer dies at `env: bash\r`. If
+  `sort -u` fails oddly in Git Bash, put `/usr/bin` ahead of `System32` on `PATH`.
+
+- **Every PR is now tested on four platforms.** The `tests` workflow runs bash 5 (Alpine), bash
+  3.2.57 (the interpreter macOS ships), macOS itself (BSD userland) and Windows (MSYS); all four
+  block. So "works on my Linux box" no longer ships a plugin that dies on a stock Mac or a
+  Windows checkout (#127, #130).
+
+- **Per-machine config override** (#129). An optional, gitignored
+  `.flightdirector/config.local.json` is now merged over `config.json` for every read, with
+  jq's recursive-merge rules: nested objects merge key by key, scalars and arrays replace
+  wholesale. Use it for a fork's `owner`, a self-hosted `api`, `promptLog.enabled`, or a
+  `ciWatchTimeout` without touching the committed file. `flight reconcile` keeps writing the
+  tracked `config.json` only. An invalid local file is an error; a git-tracked one warns on
+  every run. `setting-up-a-repo` now lists it among the paths to gitignore.
+
+### Changed
+
+- **Summary lines in the repo's own tests and checks are consistent** (#123). Every counter-based
+  `scripts/tests/*.test.sh` and `scripts/checks/lint.sh` ends with the same `Passed: N  Failed: N`
+  line — plain when nothing failed, red otherwise — and every per-check ✓/✗ is green/red.
+  Dev-facing only; nothing a consuming repo sees.
+
+### Fixed
+
+- **`flight branches` and `flight branches sync-down` now run on macOS** (#127). Both used
+  `mapfile` and `declare -A`, which are bash 4 builtins; macOS ships bash 3.2 and nothing newer,
+  so on a stock Mac each died before doing any work. That took `cleaning-up-branches` and
+  `promoting-a-branch`'s sync-down step (0.14.0) with it, and made the README's "Nothing to
+  install or run" untrue for every macOS user. Both scripts now use `while IFS= read -r` and
+  newline-delimited branch-keyed containers, which behave identically on bash 3.2 and bash 5.
+
+- **`flight branches prune` no longer skips every worktree on a symlinked repo path** (#127).
+  The `.worktrees/` check compared `git worktree list`'s resolved path against an unresolved
+  repo root, so under macOS's `/var` and `/tmp` (both symlinks into `/private`) no worktree ever
+  matched and `prune` reported each one as "checked out elsewhere". The root is now resolved
+  with `pwd -P` before the comparison.
+
 ## [0.14.0] - 2026-09-15
 
 ### Added

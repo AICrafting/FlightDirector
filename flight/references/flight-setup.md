@@ -13,7 +13,20 @@ API with `curl`. There is no MCP server, and no token handling in the skills the
   (`code.promptLog.enabled`); nothing else in flight needs it.
 - A per-repo API token (least privilege — see below). Nothing to install or run.
 
-## Two config files in the `.flightdirector/` folder
+## Platforms
+
+Linux, macOS and Windows are all supported and CI-tested on every change (bash 5, bash 3.2.57,
+macOS/BSD userland, Windows/MSYS legs on the `tests` workflow).
+
+- **macOS** — stock bash 3.2 and BSD tools are enough; nothing to install (#127).
+- **Windows** — Git Bash / MSYS. `flight/scripts/_portable.sh`, sourced by every entrypoint and
+  adapter, is a no-op elsewhere and on Windows wraps `jq` to strip the `\r` a native `jq.exe`
+  emits and normalises path form with `cygpath` so `branches prune` matches `.worktrees/` entries.
+  Keep `/usr/bin` ahead of `System32` on `PATH` (interactive Git Bash already does) or
+  `sort -u` in `branches` hits Windows' own `sort.exe`. The prompt ledger's lock uses `msvcrt`
+  where `fcntl` is absent (#130).
+
+## The config files in the `.flightdirector/` folder
 
 > **Renamed folder.** Before the plugin was renamed from `lightspeed` to `flight` this folder was
 > `.lightspeed/`. The dispatcher still reads a legacy `.lightspeed/config.json` when
@@ -184,6 +197,18 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
   `.flightdirector/agent-rules.md`; if that file is absent, workers run with the skill's built-in
   safety rules only (no project-specific rules).
 
+### Body signature (on by default)
+
+```jsonc
+"code": { "signature": { "enabled": true } }
+```
+
+- `code.signature.enabled` — when `true` (the default, and absent counts as `true`) the
+  dispatcher ends every issue body, comment and PR body it writes with a `---` rule and
+  `via FlightDirector:flight@<version> with <Model/ver>` (the model clause only when the skill passed
+  `--model`). Set `false` to write bare bodies; `--no-signature` does the same for one call.
+  Details: [adapter-contract.md](adapter-contract.md) → **Body signature**.
+
 ### Prompt ledger (optional, off by default)
 
 ```jsonc
@@ -283,6 +308,29 @@ your `.gitignore` — ignoring the whole family (`secrets.local.json`, `secrets.
 Token precedence: `LS_TOKEN` or `FLIGHT_TOKEN` in the environment override everything
 (`FORGEJO_TOKEN` is still honoured as the legacy name); otherwise the secrets file (the axis's
 token, inheriting `code`'s).
+
+### `.flightdirector/config.local.json` — optional, gitignored
+
+A per-machine / per-person override of `config.json`, on the same footing as Claude Code's
+`settings.local.json`: the committed file is the shared baseline, the local file holds what
+differs on *this* machine — a different `owner` for a fork, a self-hosted `api` host,
+`code.promptLog.enabled`, a `ciWatchTimeout`. Absent → nothing changes.
+
+The dispatcher merges it over `config.json` with jq's recursive `*` for every **read**
+(`cfg_get`, `flight config`, and the merged view handed to `branches`, `sync-down`, and the
+adapters). The rules are jq's:
+
+- **Nested objects merge key by key**, so the local file only needs the keys it changes:
+  `{ "code": { "owner": "me" } }` overrides `code.owner` and leaves `code.repo`, `code.stages`
+  and everything else alone.
+- **Scalars and arrays replace wholesale.** A local `code.stages` replaces the *whole* pipeline;
+  it does not patch one entry.
+- A `null` in the local file overrides too; there is no "delete this key" spelling.
+
+`flight reconcile` is the one writer and always writes the **tracked** `config.json` — local
+values are never baked into the committed file. An invalid local file is a hard error (not a
+silent fallback), and one that git tracks earns a warning on every run, like a tracked
+`secrets.json`. Add `.flightdirector/config.local.json` to `.gitignore` next to `secrets*`.
 
 ## Least-privilege tokens
 

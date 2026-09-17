@@ -48,6 +48,16 @@ Jenkinsfile text
 # Declare files that will always have LF line endings on checkout.
 *.sh text eol=lf
 
+# Shell scripts without a .sh extension: the flight dispatcher, its adapters, the
+# bin/ entrypoints and the git hooks. `* text=auto` above would give these NATIVE
+# line endings, so a Windows checkout gets CRLF and the shebang dies outright:
+#   env: bash\r: No such file or directory
+# They are shell scripts regardless of the missing extension, so pin them to LF.
+.githooks/** text eol=lf
+flight/bin/** text eol=lf
+flight/scripts/** text eol=lf
+scripts/** text eol=lf
+
 # Denote all files that are truly binary and should not be modified.
 # - images
 *.ico binary

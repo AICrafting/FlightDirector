@@ -58,5 +58,7 @@ check "FLIGHT_TOKEN wins over FORGEJO_TOKEN" \
 check "LS_TOKEN wins over both" \
 	"$([ "$(run LS_TOKEN=from-ls FLIGHT_TOKEN=from-flight FORGEJO_TOKEN=from-forgejo)" = from-ls ] && echo 1 || echo 0)"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]
