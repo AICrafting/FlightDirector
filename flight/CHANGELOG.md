@@ -17,7 +17,7 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 - **Every body flight writes is signed** (#132). Issue bodies, comments (so every work-ledger
   entry) and PR bodies (promotions and sync-down PRs alike) now end with a `---` rule and
-  `FlightDirector:flight@<version> with <Model/ver>` — the model clause when the skill passed
+  `via FlightDirector:flight@<version> with <Model/ver>` — the model clause when the skill passed
   the new dispatcher-owned `--model <id>` flag (or `FLIGHT_MODEL` is set), omitted otherwise.
   Done once in the dispatcher for all four backends; adapters are unchanged, except that the
   Jira ADF shim now renders a `---` line as a rule. An update replaces an existing signature

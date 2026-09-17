@@ -11,7 +11,7 @@ Every Flight skill performs this cheap preflight before its first dispatcher cal
    normal runs; it updates compatibility metadata only when the installed plugin version changed.
 4. Know your own model id (e.g. `claude-fable-5-1`, `gpt-5.6-sol`) and pass it as
    `--model <id>` on every body-writing verb — `issues create|update|comment`, `pr open|update`.
-   The dispatcher signs each body it writes (`---` then `FlightDirector:flight@<version> with
+   The dispatcher signs each body it writes (`---` then `via FlightDirector:flight@<version> with
    <Model/ver>`); it cannot discover the model itself, so without `--model` the signature simply
    omits the "with …" clause. `FLIGHT_MODEL=<id>` in the environment is the equivalent for a
    shell that persists it. See [adapter-contract.md](adapter-contract.md) → **Body signature**.

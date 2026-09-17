@@ -128,7 +128,7 @@ flight issues create \
 ```
 
 `--model` (your own model id, e.g. `claude-fable-5-1`) lets the dispatcher sign the body
-`FlightDirector:flight@<version> with <Model/ver>`; pass it on `update` and `comment` too.
+`via FlightDirector:flight@<version> with <Model/ver>`; pass it on `update` and `comment` too.
 It prints the new issue `number`. Report: *"Created #N: [title]"*.
 
 ## Step 7: Attach images (if any were shared)

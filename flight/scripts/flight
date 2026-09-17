@@ -336,7 +336,7 @@ fi
 
 # Signature (#132). Every body flight writes ends with
 #     ---
-#     FlightDirector:flight@<version>[ with <Model/ver>]
+#     via FlightDirector:flight@<version>[ with <Model/ver>]
 # appended HERE, once, for every backend — adapters never learn about it. On
 # update an existing trailing signature is replaced, not stacked (matched on
 # shape, so a newer plugin re-signs an older body cleanly). The model is not
@@ -361,12 +361,12 @@ case "$group/$verb" in
         [ -f "$sig_body_file" ] || die "$group $verb: --body-file '$sig_body_file' not found"
         sig_body="$(cat "$sig_body_file")"
       fi
-      sig_line="FlightDirector:flight@$(jq -r '.version // "unknown"' "$(plugin_manifest)")"
+      sig_line="via FlightDirector:flight@$(jq -r '.version // "unknown"' "$(plugin_manifest)")"
       [ -n "$sig_model" ] && sig_line="$sig_line with $(model_display "$sig_model")"
       sig_tmp="$(mktemp "${TMPDIR:-/tmp}/flight-body.XXXXXX")"
       printf '%s' "$sig_body" \
         | jq -Rrs --arg sig "$sig_line" '
-            sub("\\s*\\n---\\nFlightDirector:flight@[^\\n]*\\s*$"; "")   # drop an old signature
+            sub("\\s*\\n---\\n(via )?FlightDirector:flight@[^\\n]*\\s*$"; "")   # drop an old signature (either shape)
             | sub("\\s+$"; "")                                         # trim trailing whitespace
             | . + "\n\n---\n" + $sig + "\n"' >"$sig_tmp"
       sig_args+=(--body-file "$sig_tmp")

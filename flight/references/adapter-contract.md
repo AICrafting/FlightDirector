@@ -192,10 +192,10 @@ Safety is in the verb, not in the caller:
 
   ```
   ---
-  FlightDirector:flight@0.14.0 with Fable/5.1
+  via FlightDirector:flight@0.14.0 with Fable/5.1
   ```
 
-  A blank line, a rule, then `FlightDirector:flight@<installed version>`, plus ` with
+  A blank line, a rule, then `via FlightDirector:flight@<installed version>`, plus ` with
   <Model/ver>` when the model is known. The model comes from the dispatcher-owned `--model <id>`
   flag (stripped before the adapter sees the args) or `FLIGHT_MODEL` / `LS_MODEL` in the env,
   rendered as `Fable/5.1` from `claude-fable-5-1`, `Sol/5.6` from `gpt-5.6-sol`, `GPT/5` from
