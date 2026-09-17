@@ -24,6 +24,21 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   rather than stacking one. Opt out per repo with `code.signature.enabled: false`, or per call
   with `--no-signature`.
 
+- **Windows is a supported platform** (#130, via Git Bash / MSYS). A new `flight/scripts/_portable.sh`
+  shim, sourced by the dispatcher, `branches`, `sync-down`, `batch-manifest` and every adapter, is a
+  no-op off Windows and on it (a) wraps `jq` so a native `jq.exe` (what winget, scoop and choco
+  install) no longer leaks `\r` into every comparison, and (b) normalises path form with `cygpath`
+  so `branches prune` recognises `.worktrees/` entries whether git says `C:/…` or bash says
+  `/c/…` (case-insensitively). The prompt ledger's append lock falls back to `msvcrt` where
+  `fcntl` does not exist. Extensionless scripts (the dispatcher, adapters, `bin/*`, hooks) are
+  pinned to LF in `.gitattributes` so a Windows checkout no longer dies at `env: bash\r`. If
+  `sort -u` fails oddly in Git Bash, put `/usr/bin` ahead of `System32` on `PATH`.
+
+- **Every PR is now tested on four platforms.** The `tests` workflow runs bash 5 (Alpine), bash
+  3.2.57 (the interpreter macOS ships), macOS itself (BSD userland) and Windows (MSYS); all four
+  block. So "works on my Linux box" no longer ships a plugin that dies on a stock Mac or a
+  Windows checkout (#127, #130).
+
 - **Per-machine config override** (#129). An optional, gitignored
   `.flightdirector/config.local.json` is now merged over `config.json` for every read, with
   jq's recursive-merge rules: nested objects merge key by key, scalars and arrays replace

@@ -48,7 +48,10 @@ flight issues list --state open --limit 50
 
 ## Prerequisites
 
-- `curl` and `jq` on `PATH`.
+- Linux, macOS (stock bash 3.2 is fine), or Windows via Git Bash / MSYS — all three are tested
+  in CI on every change.
+- `curl` and `jq` on `PATH` (on Windows a native `jq.exe` is fine; keep `/usr/bin` ahead of
+  `System32`). `python3` (standard library only) if you turn on the prompt ledger.
 - A per-repo, least-privilege API token. Nothing to install or run.
 - In Codex, permission for the forge hostname and confirmation for network, push, and merge
   operations as required by the active sandbox profile. `queue-batches` additionally requires

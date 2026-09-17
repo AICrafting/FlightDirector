@@ -13,6 +13,19 @@ API with `curl`. There is no MCP server, and no token handling in the skills the
   (`code.promptLog.enabled`); nothing else in flight needs it.
 - A per-repo API token (least privilege — see below). Nothing to install or run.
 
+## Platforms
+
+Linux, macOS and Windows are all supported and CI-tested on every change (bash 5, bash 3.2.57,
+macOS/BSD userland, Windows/MSYS legs on the `tests` workflow).
+
+- **macOS** — stock bash 3.2 and BSD tools are enough; nothing to install (#127).
+- **Windows** — Git Bash / MSYS. `flight/scripts/_portable.sh`, sourced by every entrypoint and
+  adapter, is a no-op elsewhere and on Windows wraps `jq` to strip the `\r` a native `jq.exe`
+  emits and normalises path form with `cygpath` so `branches prune` matches `.worktrees/` entries.
+  Keep `/usr/bin` ahead of `System32` on `PATH` (interactive Git Bash already does) or
+  `sort -u` in `branches` hits Windows' own `sort.exe`. The prompt ledger's lock uses `msvcrt`
+  where `fcntl` is absent (#130).
+
 ## The config files in the `.flightdirector/` folder
 
 > **Renamed folder.** Before the plugin was renamed from `lightspeed` to `flight` this folder was

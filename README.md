@@ -65,7 +65,9 @@ a worked example, is in the **[Flight User Guide](flight/GUIDE.md)**; here is wh
   which may be a different repo or backend), and execs a pure `curl` + `jq` adapter for that
   backend. Forgejo/Gitea, GitHub, and GitLab at full parity; Jira for the issues axis. Your only
   secret is a per-repo, least-privilege token, and per-machine differences live in a gitignored
-  `config.local.json` layered over the committed config.
+  `config.local.json` layered over the committed config. Everything flight writes to the tracker
+  is signed `via FlightDirector:flight@<version> with <Model/ver>`, so provenance is on the
+  record. Runs on Linux, stock macOS, and Windows (Git Bash), all three CI-tested on every change.
   → [backends.md](flight/references/backends.md) · [adapter-contract.md](flight/references/adapter-contract.md)
   · [ADR 0001: why curl over MCP](docs/adr/0001-curl-over-mcp-and-adapter-architecture.md)
 - **Same skills in Claude Code and Codex.** One package, two harnesses; natural-language triggers

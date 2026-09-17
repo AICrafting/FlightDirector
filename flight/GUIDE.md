@@ -41,6 +41,10 @@ the whole lifecycle into the session:
 ## What you need
 
 - **Claude Code or Codex** (the same package supplies skills to both harnesses).
+- **Linux, macOS, or Windows.** Stock macOS (bash 3.2, BSD tools) and Windows via Git Bash /
+  MSYS both work as shipped and are tested in CI on every change, alongside Linux. On Windows a
+  native `jq.exe` from winget, scoop or choco is fine; keep `/usr/bin` ahead of `System32` on
+  `PATH`, which an interactive Git Bash already does.
 - **`curl`** and **`jq`** on your `PATH` (plus **`python3`**, standard library only, if you turn
   on the optional [cost ledger](#cost-ledger-optional)).
 - A repo you can push to on a **supported backend** — Forgejo/Gitea (self-hosted), GitHub, or
@@ -200,6 +204,20 @@ work, so later follow-ups and QA each add their own), adds the `model/…` label
 **#42** here: an issue's status label and whether it closes are driven by the **stage** it lands
 in (see step 4).
 
+**What you'll see on the tracker.** Everything flight writes there — the issue body it filed, the
+work-ledger comment, the PR description — ends with a small signature, so you can always tell
+what came through the workflow and from which version:
+
+```
+---
+via FlightDirector:flight@0.15.0 with Fable/5.1
+```
+
+The `with …` part names the model the skill was running (it passes its own id as `--model`);
+the plugin version comes from the installed package. Editing a body re-signs it rather than
+stacking a second line. Don't want it? Set `"signature": { "enabled": false }` under `code` in
+`.flightdirector/config.json`, or add `--no-signature` to one call.
+
 ### 4. Promote toward release
 
 Later, with several issues integrated on `develop`, you ship them upward:
@@ -273,6 +291,9 @@ deleted until you say go, and deleting on **origin** is a separate yes from dele
   replaces the whole pipeline). `reconcile` never writes local values into `config.json`, an
   invalid local file is an error, and a tracked one warns on every run. Merge rules in full:
   [flight-setup.md](references/flight-setup.md#flightdirectorconfiglocaljson--optional-gitignored).
+
+- **`code.signature.enabled`** (optional, default `true`) — the tracker signature described in
+  [step 3](#3-work-it). `false` writes bare bodies.
 
 Want a different pipeline later? Edit `code.stages` in `.flightdirector/config.json` — e.g. add a `qa`
 stage between `develop` and `main`. The skills pick it up immediately. For worked setups at 1, 2, 3,
