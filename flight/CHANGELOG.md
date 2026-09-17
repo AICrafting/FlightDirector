@@ -13,7 +13,22 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **Per-machine config override** (#129). An optional, gitignored
+  `.flightdirector/config.local.json` is now merged over `config.json` for every read, with
+  jq's recursive-merge rules: nested objects merge key by key, scalars and arrays replace
+  wholesale. Use it for a fork's `owner`, a self-hosted `api`, `promptLog.enabled`, or a
+  `ciWatchTimeout` without touching the committed file. `flight reconcile` keeps writing the
+  tracked `config.json` only. An invalid local file is an error; a git-tracked one warns on
+  every run. `setting-up-a-repo` now lists it among the paths to gitignore.
+
+### Changed
+
+- **Summary lines in the repo's own tests and checks are consistent** (#123). Every counter-based
+  `scripts/tests/*.test.sh` and `scripts/checks/lint.sh` ends with the same `Passed: N  Failed: N`
+  line — plain when nothing failed, red otherwise — and every per-check ✓/✗ is green/red.
+  Dev-facing only; nothing a consuming repo sees.
 
 ## [0.14.0] - 2026-09-15
 
