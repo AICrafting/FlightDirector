@@ -9,6 +9,8 @@ __pycache__/
 # Secrets and sensitive data
 secret*
 .flightdirector/secrets*
+# flight per-machine config override (never committed)
+.flightdirector/config.local.json
 
 # - Keys
 *.pem

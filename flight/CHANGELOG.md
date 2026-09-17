@@ -13,6 +13,32 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+
+- **Every body flight writes is signed** (#132). Issue bodies, comments (so every work-ledger
+  entry) and PR bodies (promotions and sync-down PRs alike) now end with a `---` rule and
+  `via FlightDirector:flight@<version> with <Model/ver>` — the model clause when the skill passed
+  the new dispatcher-owned `--model <id>` flag (or `FLIGHT_MODEL` is set), omitted otherwise.
+  Done once in the dispatcher for all four backends; adapters are unchanged, except that the
+  Jira ADF shim now renders a `---` line as a rule. An update replaces an existing signature
+  rather than stacking one. Opt out per repo with `code.signature.enabled: false`, or per call
+  with `--no-signature`.
+
+- **Per-machine config override** (#129). An optional, gitignored
+  `.flightdirector/config.local.json` is now merged over `config.json` for every read, with
+  jq's recursive-merge rules: nested objects merge key by key, scalars and arrays replace
+  wholesale. Use it for a fork's `owner`, a self-hosted `api`, `promptLog.enabled`, or a
+  `ciWatchTimeout` without touching the committed file. `flight reconcile` keeps writing the
+  tracked `config.json` only. An invalid local file is an error; a git-tracked one warns on
+  every run. `setting-up-a-repo` now lists it among the paths to gitignore.
+
+### Changed
+
+- **Summary lines in the repo's own tests and checks are consistent** (#123). Every counter-based
+  `scripts/tests/*.test.sh` and `scripts/checks/lint.sh` ends with the same `Passed: N  Failed: N`
+  line — plain when nothing failed, red otherwise — and every per-check ✓/✗ is green/red.
+  Dev-facing only; nothing a consuming repo sees.
+
 ### Fixed
 
 - **`flight branches` and `flight branches sync-down` now run on macOS** (#127). Both used

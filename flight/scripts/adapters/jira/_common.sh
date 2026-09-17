@@ -50,8 +50,8 @@ _api() {
 
 # --- Minimal ADF shim ------------------------------------------------------
 # Jira stores rich text as Atlassian Document Format (ADF) JSON. This is a
-# DELIBERATELY minimal converter: paragraphs, fenced code blocks, and bullet/
-# ordered lists — enough for issue bodies and comments. Inline marks (bold,
+# DELIBERATELY minimal converter: paragraphs, fenced code blocks, bullet/
+# ordered lists, and a `---` rule (the dispatcher's signature separator) — enough for issue bodies and comments. Inline marks (bold,
 # links, …) are carried as plain text, not styled. See adapter-contract.md.
 #
 # ADF_JQ is prepended to jq programs that need md_to_adf / adf_to_text.
@@ -74,6 +74,7 @@ def md_to_adf:
            else .buf += [$l] end)
         elif ($l|test("^```")) then (flush | .mode="code" | .buf=[])
         elif ($l|test("^[[:space:]]*$")) then flush
+        elif ($l|test("^[[:space:]]*-{3,}[[:space:]]*$")) then (flush | .blocks += [{type:"rule"}])
         elif ($l|test("^[[:space:]]*[-*][[:space:]]+")) then
           (if .mode=="bullet" then . else flush end)
           | .mode="bullet" | .buf += [($l|sub("^[[:space:]]*[-*][[:space:]]+";""))]
@@ -87,7 +88,8 @@ def md_to_adf:
      ) | flush | .blocks) as $blocks
   | {type:"doc", version:1, content: [
       $blocks[] |
-      if .type=="code" then
+      if .type=="rule" then {type:"rule"}
+      elif .type=="code" then
         {type:"codeBlock", content: (if .text=="" then [] else [{type:"text", text:.text}] end)}
       elif .type=="bullet" then
         {type:"bulletList", content: [.items[] | {type:"listItem", content:[{type:"paragraph", content:[{type:"text", text:.}]}]}]}
@@ -105,6 +107,7 @@ def adf_to_text:
         if   .type=="paragraph"  then inline
         elif .type=="heading"    then inline
         elif .type=="codeBlock"  then "```\n" + inline + "\n```"
+        elif .type=="rule"       then "---"
         elif .type=="bulletList" then ([.content[]? | "- " + inline]  | join("\n"))
         elif .type=="orderedList" then ([.content[]? | "1. " + inline] | join("\n"))
         else inline end
