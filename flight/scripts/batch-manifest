@@ -5,6 +5,10 @@
 # transient, gitignored state.
 set -euo pipefail
 
+# Windows shims (jq CRLF, path form); a no-op elsewhere.
+# shellcheck source-path=SCRIPTDIR source=_portable.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+
 ROOT="${BATCH_MANIFEST_ROOT:-$(cd "$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")" && pwd)}"
 # Same config-home resolution as the dispatcher: `.flightdirector/`, falling back
 # to the deprecated pre-rename `.lightspeed/` when only that one is configured.

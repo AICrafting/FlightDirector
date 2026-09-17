@@ -198,8 +198,10 @@ Only after explicit approval:
      payloads / transcript path; if you can't determine it, pass every session id that worked
      this issue. Schema and semantics: [prompt-log.md](../../references/prompt-log.md).
    ```
-   flight issues comment --number N --body-file "$SCRATCH/done.md"
+   flight issues comment --number N --body-file "$SCRATCH/done.md" --model "$PRIMARY_MODEL"
    ```
+   `--model` is the id from step 2 below (resolve it first); the dispatcher signs the comment
+   with the plugin version and `with <Model/ver>` so the ledger entry names what wrote it.
 2. **Ensure and add the `model/<primary>` label** for the worked-by model with the most
    tokens/cost in the log when available, else the model you ran. The dispatcher owns the stable
    family convention (`gpt-5.6-sol` → `sol`, `claude-opus-4.7` → `opus`); do not derive it in

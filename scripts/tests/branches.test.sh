@@ -22,7 +22,7 @@ pass=0; fail=0
 check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=$((pass+1));
 			else printf '\033[0;31m  ✗ %s\033[0m  %s\n' "$1" "${3:-}"; fail=$((fail+1)); fi; }
 
-SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
+SANDBOX="$(cd "$(mktemp -d)" && pwd -P)"; trap 'rm -rf "$SANDBOX"' EXIT
 
 # ── a stub dispatcher: answers only `pr list`, from $PR_ROWS ──────────────────
 STUB="$SANDBOX/flight-stub"
@@ -128,8 +128,16 @@ check "no stage branch is ever listed" \
 	"$(grep -qE '^(develop|qa|main)	' <<<"$out" && echo 0 || echo 1)" "out=$out"
 check "row is branch⇥where⇥stage⇥pr⇥issue⇥worktree" \
 	"$(grep -q '^feature/1-merged	local+remote	develop	-	1	-$' <<<"$out" && echo 1 || echo 0)" "out=$out"
+# Ask git for the path rather than composing one from $R. The two spell it
+# differently on Windows (the shell says /c/src, git says C:/src) and git's is
+# what the dispatcher reports, so composing one only re-implements the bug. The
+# suffix test keeps this honest: it still has to be the .worktrees/ entry.
+wt7="$(git -C "$R" worktree list --porcelain \
+	| awk '/^worktree /{p=substr($0,10)} /^branch refs\/heads\/feature\/7-worktree$/{print p; exit}')"
 check "a branch with a worktree reports its path" \
-	"$(grep -q "^feature/7-worktree	local+remote	develop	-	7	$R/.worktrees/7-worktree\$" <<<"$out" && echo 1 || echo 0)" "out=$out"
+	"$([ -n "$wt7" ] && [ "${wt7%/.worktrees/7-worktree}" != "$wt7" ] \
+		&& grep -q "^feature/7-worktree	local+remote	develop	-	7	$wt7\$" <<<"$out" \
+		&& echo 1 || echo 0)" "out=$out; wt7=$wt7"
 
 check "--merged-into narrows to that one stage" \
 	"$(out2="$(run list --merged-into develop)"; grep -q '^bugfix/3-merged' <<<"$out2" && echo 0 || echo 1)" \
@@ -346,11 +354,11 @@ for backend in forgejo github; do
 
 	out="$(pr_list "$backend" --state merged)"
 	check "$backend: without --head, every merged PR comes back" \
-		"$([ "$(wc -l <<<"$out")" = 2 ] && echo 1 || echo 0)" "out=$out"
+		"$([ "$(wc -l <<<"$out")" -eq 2 ] && echo 1 || echo 0)" "out=$out"
 
 	out="$(pr_list "$backend" --state closed --head feature/6-squashed)"
 	check "$backend: --state closed keeps the never-merged PR" \
-		"$([ "$(wc -l <<<"$out")" = 2 ] && grep -q '^32	closed	' <<<"$out" && echo 1 || echo 0)" "out=$out"
+		"$([ "$(wc -l <<<"$out")" -eq 2 ] && grep -q '^32	closed	' <<<"$out" && echo 1 || echo 0)" "out=$out"
 
 	out="$(pr_list "$backend" --state merged --base nowhere)"
 	check "$backend: --base filters by target branch" \
@@ -387,6 +395,7 @@ out="$(pr_list gitlab --state open >/dev/null; grep -o 'state=[a-z]*' "$RESP/url
 check "gitlab: --state open maps to GitLab's 'opened'" \
 	"$([ "$out" = "state=opened" ] && echo 1 || echo 0)" "out=$out"
 
-printf '\033[1m────────────────────────────\033[0m\n'
-printf 'Passed: %d  Failed: %d\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]

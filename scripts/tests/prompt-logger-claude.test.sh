@@ -49,7 +49,7 @@ invoke prompt "$prompt" "$R" "$S"; backdate_state "$S"
 stop="$(jq -nc --arg cwd "$R" --arg path "$FIXTURES/claude-main.jsonl" '{session_id:"session-main",cwd:$cwd,hook_event_name:"Stop",transcript_path:$path,stop_hook_active:false}')"
 invoke stop "$stop" "$R" "$S" 2>"$T/main.err"
 LOG="$R/.flightdirector/prompt-log.jsonl"
-check "stop writes exactly one row" "$([ "$(wc -l <"$LOG")" = 1 ] && echo 1 || echo 0)"
+check "stop writes exactly one row" "$([ "$(wc -l <"$LOG")" -eq 1 ] && echo 1 || echo 0)"
 assert_jq "identity fields are the frozen schema" '.provider=="anthropic" and .harness=="claude" and .session_id=="session-main" and (.turn_id|length)>0 and .prompt=="main prompt" and .model=="claude-fable-5-1"' "$LOG"
 # req_1 (10 + 1000 + 20000, out 300) counted once despite two content blocks; req_2 (5 + 500 + 21000, out 200); old turn + sidechain excluded
 assert_jq "input_tokens is the TOTAL prompt (uncached + cache write + cache read) across the turn" '.input_tokens == (10+1000+20000)+(5+500+21000)' "$LOG"
@@ -61,7 +61,7 @@ assert_jq "cost_basis defaults to api-equivalent without an API key" '.cost_basi
 assert_jq "duration is recorded" '.duration_seconds != null and .duration_seconds > 0' "$LOG"
 check "no warnings on a clean main turn" "$([ ! -s "$T/main.err" ] && echo 1 || echo 0)"
 invoke stop "$stop" "$R" "$S" 2>/dev/null || true
-check "a second Stop for the same session without a new prompt writes nothing" "$([ "$(wc -l <"$LOG")" = 1 ] && echo 1 || echo 0)"
+check "a second Stop for the same session without a new prompt writes nothing" "$([ "$(wc -l <"$LOG")" -eq 1 ] && echo 1 || echo 0)"
 
 # ---------------------------------------------------------------------------
 # 2. API-key auth → actual-api
@@ -83,7 +83,7 @@ assert_jq "subagent row keeps the parent session and uses agent_id as turn_id" '
 assert_jq "subagent usage summed once per request" '.input_tokens==(2+33000+0)+(3+1000+33000) and .output_tokens==3000 and .reasoning_output_tokens==400' "$LOG"
 assert_jq "subagent priced with the opus-5 family" '(.cost_usd*1e9|round) == ((5*5 + 34000*6.25 + 33000*0.5 + 3000*25)/1e6*1e9|round)' "$LOG"
 invoke subagent-stop "$sub" "$R" "$S" 2>/dev/null
-check "repeated SubagentStop for the same agent does not duplicate" "$([ "$(wc -l <"$LOG")" = 1 ] && echo 1 || echo 0)"
+check "repeated SubagentStop for the same agent does not duplicate" "$([ "$(wc -l <"$LOG")" -eq 1 ] && echo 1 || echo 0)"
 
 # ---------------------------------------------------------------------------
 # 4. failure modes: missing transcript → null usage + warning; unknown model → null cost + warning
@@ -179,5 +179,7 @@ MD7="$(cd "$R" && "$DISP" prompt-log summary --session S5)"
 check "an 'unknown' row with tokens but no price is kept, marked unpriced" "$(grep -q '| claude | unknown | 1 | .* (+1 unpriced) |' <<<"$MD7" && echo 1 || echo 0)"
 check "…and no omitted-turns note is emitted for it" "$(grep -q 'recorded no model' <<<"$MD7" && echo 0 || echo 1)"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]

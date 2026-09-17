@@ -61,6 +61,10 @@ ok()  { pass=$((pass + 1)); printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; }
 bad() { fail=$((fail + 1)); printf '\033[0;31m  ✗ %s\033[0m\n' "$1"; }
 check() { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1', want '$2')"; fi; }
 
+# BSD `wc` right-aligns its count ('       0'), GNU does not, and check() compares
+# as strings — so normalise before comparing rather than at each call site.
+nlines() { wc -l <"$1" | tr -d '[:space:]'; }
+
 # run <backend> [args…] — returns the adapter's exit code, resets the write log.
 run() {
 	backend="$1"; shift
@@ -85,7 +89,7 @@ fi
 
 # Idempotent: a label the issue is not carrying is a no-op success.
 if ON_ISSUE='["status/to-test"]' run forgejo --number 5 --label bug; then
-	check "$(wc -l <"$CURL_LOG")" "0" "forgejo writes nothing when the label is absent"
+	check "$(nlines "$CURL_LOG")" "0" "forgejo writes nothing when the label is absent"
 else
 	bad "forgejo label-remove was not idempotent"
 fi
@@ -114,7 +118,7 @@ else
 fi
 
 if ON_ISSUE='["bug"]' run github --number 5 --label status/to-test; then
-	check "$(wc -l <"$CURL_LOG")" "0" "github writes nothing when the label is absent"
+	check "$(nlines "$CURL_LOG")" "0" "github writes nothing when the label is absent"
 else
 	bad "github label-remove was not idempotent"
 fi
@@ -156,7 +160,7 @@ else
 fi
 
 if ON_ISSUE='["chore"]' run jira --number ACME-5 --label bug; then
-	check "$(wc -l <"$CURL_LOG")" "0" "jira writes nothing when the label is absent"
+	check "$(nlines "$CURL_LOG")" "0" "jira writes nothing when the label is absent"
 else
 	bad "jira label-remove was not idempotent"
 fi
@@ -181,5 +185,7 @@ for backend in forgejo github gitlab jira; do
 	fi
 done
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]

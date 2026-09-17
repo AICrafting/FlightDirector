@@ -148,7 +148,7 @@ promote qa main
 main_tip="$(osha main)"
 run --from main; rc=$?
 check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(err)"
-check "rows in cascade order: qa then develop" "$([ "$(cut -f1 "$SANDBOX/out" | paste -sd,)" = "qa,develop" ] && echo 1 || echo 0)" "$(out)"
+check "rows in cascade order: qa then develop" "$([ "$(cut -f1 "$SANDBOX/out" | paste -sd, -)" = "qa,develop" ] && echo 1 || echo 0)" "$(out)"
 check "origin/qa == main tip" "$([ "$(osha qa)" = "$main_tip" ] && echo 1 || echo 0)"
 check "origin/develop == main tip" "$([ "$(osha develop)" = "$main_tip" ] && echo 1 || echo 0)"
 check "local qa (not checked out anywhere) was updated too" "$([ "$(sha qa)" = "$main_tip" ] && echo 1 || echo 0)"
@@ -183,7 +183,7 @@ check "origin/develop unchanged" "$([ "$(osha develop)" = "$dev_before" ] && ech
 check "local develop unchanged" "$([ "$(sha develop)" = "$dev_before" ] && echo 1 || echo 0)"
 check "no merge left in progress in the checkout" "$([ ! -e "$R/.git/MERGE_HEAD" ] && echo 1 || echo 0)"
 check "checkout tree is clean (tracked files)" "$(git -C "$R" diff --quiet && git -C "$R" diff --cached --quiet && echo 1 || echo 0)"
-check "no throwaway worktree left behind" "$([ "$(git -C "$R" worktree list | wc -l)" = 1 ] && echo 1 || echo 0)"
+check "no throwaway worktree left behind" "$([ "$(git -C "$R" worktree list | wc -l)" -eq 1 ] && echo 1 || echo 0)"
 
 # ── 5. squash hop, then sync-down: the next promotion carries only new work ──
 echo "── squash hop"
@@ -195,7 +195,7 @@ run --from qa; rc=$?
 check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(err)"
 check "develop row says merged (a true merge commit)" "$(line develop | grep -q $'^develop\tmerged\t' && echo 1 || echo 0)" "$(out)"
 check "develop and qa now have identical trees" "$([ "$(git -C "$R" rev-parse "develop^{tree}")" = "$(git -C "$R" rev-parse "origin/qa^{tree}")" ] && echo 1 || echo 0)"
-check "the merge commit has two parents" "$([ "$(git -C "$R" rev-list --parents -n1 develop | wc -w)" = 3 ] && echo 1 || echo 0)"
+check "the merge commit has two parents" "$([ "$(git -C "$R" rev-list --parents -n1 develop | wc -w)" -eq 3 ] && echo 1 || echo 0)"
 commit_on "$P" develop c C
 git -C "$R" pull -q --ff-only origin develop
 check "next hop's diff against qa is only the new file" "$([ "$(git -C "$R" diff --name-only origin/qa develop)" = "c" ] && echo 1 || echo 0)" "$(git -C "$R" diff --name-only origin/qa develop)"
@@ -214,7 +214,7 @@ check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(err)"
 check "pr open called with --head qa --base develop" "$(grep -q '^pr open .*--head qa .*--base develop' "$STUB_LOG" && echo 1 || echo 0)" "$(cat "$STUB_LOG")"
 check "ci watch called by --pr" "$(grep -q '^ci watch --pr 7' "$STUB_LOG" && echo 1 || echo 0)"
 check "pr merge uses --strategy merge (never the stage's promotion strategy)" "$(grep -q '^pr merge --number 7 --strategy merge$' "$STUB_LOG" && echo 1 || echo 0)" "$(cat "$STUB_LOG")"
-check "calls happen in order open → watch → merge" "$([ "$(cut -d' ' -f1,2 "$STUB_LOG" | paste -sd,)" = "pr open,ci watch,pr merge" ] && echo 1 || echo 0)"
+check "calls happen in order open → watch → merge" "$([ "$(cut -d' ' -f1,2 "$STUB_LOG" | paste -sd, -)" = "pr open,ci watch,pr merge" ] && echo 1 || echo 0)"
 check "develop row says pr-merged #7" "$(line develop | grep -q $'^develop\tpr-merged\t#7' && echo 1 || echo 0)" "$(out)"
 check "origin/develop now contains qa" "$(git -C "$P" fetch -q origin && git -C "$P" merge-base --is-ancestor "$qa_tip" origin/develop && echo 1 || echo 0)"
 check "local develop (checked out, clean) fast-forwarded to the merged tip" "$([ "$(sha develop)" = "$(osha develop)" ] && echo 1 || echo 0)"
@@ -256,7 +256,7 @@ check "origin/develop == qa tip" "$([ "$(osha develop)" = "$qa_tip" ] && echo 1 
 check "row reports the local checkout is behind" "$(line develop | grep -q 'local checkout .* is behind' && echo 1 || echo 0)" "$(out)"
 check "local develop ref was not moved under the dirty checkout" "$([ "$(sha develop)" = "$dev_local" ] && echo 1 || echo 0)"
 check "the uncommitted edit is intact" "$([ "$(cat "$R/base")" = "uncommitted" ] && echo 1 || echo 0)"
-check "throwaway worktree removed" "$([ "$(git -C "$R" worktree list | wc -l)" = 1 ] && echo 1 || echo 0)"
+check "throwaway worktree removed" "$([ "$(git -C "$R" worktree list | wc -l)" -eq 1 ] && echo 1 || echo 0)"
 git -C "$R" checkout -q -- base
 
 # ── 9. ahead / diverged lower stage → STOP, nothing pushed ───────────────────
@@ -305,5 +305,7 @@ check "flight branches sync-down --from qa routes to the script" "$([ "$rc" = 0 
 out="$(cd "$R" && "$DISPATCH" branches bogus 2>&1)"; rc=$?
 check "unknown branches verb lists sync-down in the usage" "$([ "$rc" != 0 ] && grep -q 'sync-down' <<<"$out" && echo 1 || echo 0)" "$out"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]

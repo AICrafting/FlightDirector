@@ -48,7 +48,10 @@ flight issues list --state open --limit 50
 
 ## Prerequisites
 
-- `curl` and `jq` on `PATH`.
+- Linux, macOS (stock bash 3.2 is fine), or Windows via Git Bash / MSYS — all three are tested
+  in CI on every change.
+- `curl` and `jq` on `PATH` (on Windows a native `jq.exe` is fine; keep `/usr/bin` ahead of
+  `System32`). `python3` (standard library only) if you turn on the prompt ledger.
 - A per-repo, least-privilege API token. Nothing to install or run.
 - In Codex, permission for the forge hostname and confirmation for network, push, and merge
   operations as required by the active sandbox profile. `queue-batches` additionally requires
@@ -80,7 +83,14 @@ which stage pipeline to use (a preset like `develop → main` or `develop → qa
 custom one), captures a token into a gitignored `.flightdirector/secrets.json`, writes the per-repo
 `.flightdirector/config.json`, and seeds labels. The other
 skills then read that config, so they speak your repo's label names and follow your merge style.
-Full details: [`references/flight-setup.md`](references/flight-setup.md).
+
+Anything that differs on *your* machine — a fork's `owner`, a self-hosted `api` host,
+`promptLog.enabled`, a `ciWatchTimeout` — goes in an optional, gitignored
+`.flightdirector/config.local.json`. It is merged over `config.json` on every read (nested
+objects key by key; scalars and arrays replace), the same way Claude Code layers
+`settings.local.json` over `settings.json`, and `reconcile` never writes local values back into
+the committed file. Full details, including the merge rules:
+[`references/flight-setup.md`](references/flight-setup.md#flightdirectorconfiglocaljson--optional-gitignored).
 
 ## Default labels
 

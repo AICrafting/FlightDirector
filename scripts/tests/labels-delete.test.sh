@@ -44,8 +44,8 @@ export LS_API=https://example.invalid/api LS_OWNER=acme LS_REPO=widget LS_TOKEN=
 export CURL_LOG="$SANDBOX/curl.log"
 
 pass=0; fail=0
-ok()     { pass=$((pass+1)); printf '  ✓ %s\n' "$1"; }
-not_ok() { fail=$((fail+1)); printf '  ✗ %s\n' "$1"; }
+ok()     { pass=$((pass+1)); printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; }
+not_ok() { fail=$((fail+1)); printf '\033[0;31m  ✗ %s\033[0m\n' "$1"; }
 check()  { if [ "$2" = 1 ]; then ok "$1"; else not_ok "$1"; fi; }
 
 run() { # backend args… → sets RC, ERR
@@ -104,5 +104,7 @@ export LS_EMAIL=dev@example.invalid LS_PROJECT=ACME
 run jira --name model/gpt-5
 check "jira: always errors and points at issues label-remove" "$([ "$RC" = 1 ] && printf '%s' "$ERR" | grep -q 'label-remove' && [ ! -s "$CURL_LOG" ] && echo 1 || echo 0)"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -15,6 +15,10 @@
 # See ../references/adapter-contract.md and ../skills/cleaning-up-branches/SKILL.md.
 set -euo pipefail
 
+# Windows shims (jq CRLF, path form); a no-op elsewhere.
+# shellcheck source-path=SCRIPTDIR source=_portable.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+
 die() { echo "flight branches: $*" >&2; exit 1; }
 warn() { echo "flight branches: $*" >&2; }
 
@@ -22,12 +26,46 @@ warn() { echo "flight branches: $*" >&2; }
 : "${FLIGHT_CONFIG:?FLIGHT_CONFIG not set (dispatcher must export it)}"
 : "${FLIGHT_SELF:?FLIGHT_SELF not set (dispatcher must export it)}"
 
-ROOT="$FLIGHT_REPO_ROOT"
+# Resolved (`pwd -P`), because `git worktree list` reports resolved paths and the
+# `.worktrees/` prefix test below is a string compare. FLIGHT_REPO_ROOT keeps symlinks
+# (the dispatcher builds it with a logical `pwd`), so on any repo reached through one —
+# every repo under macOS's /var or /tmp, both symlinks into /private — an unresolved
+# $ROOT never prefix-matches and `prune` skips every worktree it should have handled.
+# Windows disagrees a second way: MSYS bash says /c/src/repo where git says
+# C:/src/repo, so the form is normalised too. Both are no-ops on Linux.
+ROOT="$(flight_path_norm "$(cd "$FLIGHT_REPO_ROOT" && pwd -P)")"
 CFG="$FLIGHT_CONFIG"
 
 # Every git command is anchored to the MAIN checkout: branch refs and the worktree
 # list are shared across linked worktrees, and the caller may be sitting in any of them.
 g() { git -C "$ROOT" "$@"; }
+
+# ── bash 3.2 compatibility ──────────────────────────────────────────────────────
+# macOS ships bash 3.2 and nothing newer, so neither `mapfile` nor `declare -A` is
+# available here. Git forbids both TAB and newline in a ref name, which makes a plain
+# string safe to use as a branch-keyed container: one "<branch><TAB><value>" record per
+# line for a map, one branch per line for a set.
+
+# set_has <set> <key>
+set_has() {
+	case "
+$1" in *"
+$2
+"*) return 0 ;; esac
+	return 1
+}
+
+# map_get <map> <key> — prints the value; prints nothing when the key is absent.
+# ALWAYS returns 0 — test the output, not the status. Every caller reads it as
+# `x="$(map_get …)"`, and under `set -e` a non-zero return would fail the *assignment*
+# and kill the script. A miss is the common case here (a branch with no worktree, a
+# stage checked out nowhere), so a `return 1` on miss would be worse than no signal.
+map_get() {
+	local line
+	while IFS= read -r line; do
+		case "$line" in "$2	"*) printf '%s\n' "${line#*	}"; return 0 ;; esac
+	done <<<"$1"
+}
 
 verb="${1:-}"; shift || true
 
@@ -65,7 +103,9 @@ if [ "$verb" = prune ] && [ "$do_local" = 0 ] && [ "$do_remote" = 0 ] && [ "$do_
 fi
 
 # ── config ──────────────────────────────────────────────────────────────────────
-mapfile -t STAGES < <(jq -r '.code.stages[]?.name // empty' "$CFG")
+STAGES=()
+while IFS= read -r _s; do [ -n "$_s" ] && STAGES+=("$_s"); done \
+	< <(jq -r '.code.stages[]?.name // empty' "$CFG")
 [ "${#STAGES[@]}" -gt 0 ] || die "no code.stages configured in $CFG — nothing to measure 'merged' against"
 
 if [ -n "$merged_into" ]; then
@@ -79,7 +119,8 @@ fi
 
 # Candidate patterns: --pattern wins, else code.branches.patterns, else the defaults.
 if [ "${#patterns[@]}" -eq 0 ]; then
-	mapfile -t patterns < <(jq -r '.code.branches.patterns[]? // empty' "$CFG")
+	while IFS= read -r _p; do [ -n "$_p" ] && patterns+=("$_p"); done \
+		< <(jq -r '.code.branches.patterns[]? // empty' "$CFG")
 fi
 if [ "${#patterns[@]}" -eq 0 ]; then
 	patterns=("feature/*" "bugfix/*" "release/*")
@@ -104,13 +145,15 @@ g remote get-url origin >/dev/null 2>&1 && HAS_ORIGIN=1
 # ── worktree map: branch → path (and which paths are off limits) ────────────────
 # `git worktree list --porcelain` emits a `worktree <path>` line then, for a non-detached
 # checkout, a `branch refs/heads/<name>` line. The MAIN checkout is always the first entry.
-declare -A WT_PATH=()
+WT_PATH=""
 MAIN_WT=""
 _wt=""
 while IFS= read -r line; do
 	case "$line" in
-		"worktree "*) _wt="${line#worktree }"; [ -n "$MAIN_WT" ] || MAIN_WT="$_wt" ;;
-		"branch refs/heads/"*) WT_PATH["${line#branch refs/heads/}"]="$_wt" ;;
+		"worktree "*) _wt="$(flight_path_norm "${line#worktree }")"
+			[ -n "$MAIN_WT" ] || MAIN_WT="$_wt" ;;
+		"branch refs/heads/"*) WT_PATH="$WT_PATH${line#branch refs/heads/}	$_wt
+" ;;
 	esac
 done < <(g worktree list --porcelain)
 
@@ -134,12 +177,13 @@ protected() {
 	return 1
 }
 
-declare -A HAS_LOCAL=() HAS_REMOTE=()
+HAS_LOCAL=""; HAS_REMOTE=""
 while IFS= read -r b; do
 	[ -n "$b" ] || continue
 	protected "$b" && continue
 	matches_pattern "$b" || continue
-	HAS_LOCAL["$b"]=1
+	HAS_LOCAL="$HAS_LOCAL$b
+"
 done < <(g for-each-ref --format='%(refname:short)' refs/heads/)
 
 if [ "$HAS_ORIGIN" = 1 ]; then
@@ -148,7 +192,8 @@ if [ "$HAS_ORIGIN" = 1 ]; then
 		[ -n "$b" ] && [ "$b" != "HEAD" ] || continue
 		protected "$b" && continue
 		matches_pattern "$b" || continue
-		HAS_REMOTE["$b"]=1
+		HAS_REMOTE="$HAS_REMOTE$b
+"
 	done < <(g for-each-ref --format='%(refname:short)' refs/remotes/origin/)
 fi
 
@@ -168,7 +213,7 @@ stage_ref() {
 # a branch that exists only on origin.
 branch_ref() {
 	local b="$1"
-	if [ -n "${HAS_LOCAL[$b]:-}" ]; then printf 'refs/heads/%s\n' "$b"
+	if set_has "$HAS_LOCAL" "$b"; then printf 'refs/heads/%s\n' "$b"
 	else printf 'refs/remotes/origin/%s\n' "$b"; fi
 }
 
@@ -218,7 +263,7 @@ issue_number() {
 # Emits: branch⇥where⇥merged-into⇥pr⇥issue⇥worktree  for the merged candidates only.
 collect_rows() {
 	local b where stage pr issue wt hit x
-	for b in $(printf '%s\n' "${!HAS_LOCAL[@]}" "${!HAS_REMOTE[@]}" | sort -u); do
+	for b in $(printf '%s%s' "$HAS_LOCAL" "$HAS_REMOTE" | sort -u); do
 		[ -n "$b" ] || continue
 		if [ "${#only_branches[@]}" -gt 0 ]; then
 			hit=0
@@ -226,8 +271,8 @@ collect_rows() {
 			[ "$hit" = 1 ] || continue
 		fi
 		where=""
-		[ -n "${HAS_LOCAL[$b]:-}" ] && where="local"
-		[ -n "${HAS_REMOTE[$b]:-}" ] && where="${where:+$where+}remote"
+		set_has "$HAS_LOCAL" "$b" && where="local"
+		set_has "$HAS_REMOTE" "$b" && where="${where:+$where+}remote"
 
 		pr="-"
 		if stage="$(merged_stage "$b")"; then
@@ -239,7 +284,7 @@ collect_rows() {
 		fi
 
 		issue="$(issue_number "$b")"; issue="${issue:--}"
-		wt="${WT_PATH[$b]:--}"
+		wt="$(map_get "$WT_PATH" "$b")"; wt="${wt:--}"
 		printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$b" "$where" "$stage" "$pr" "$issue" "$wt"
 	done
 }
@@ -266,7 +311,12 @@ while IFS=$'\t' read -r b where stage pr issue wt; do
 
 	# A branch checked out in the MAIN checkout (or any worktree outside .worktrees/)
 	# is someone's working copy, not leftovers — never touch it, at any flag level.
-	if [ "$wt" != "-" ] && { [ "$wt" = "$MAIN_WT" ] || [ "${wt#"$ROOT"/.worktrees/}" = "$wt" ]; }; then
+	# Compare keys, not paths: on Windows the same directory can come back
+	# spelled with different case from git and from cygpath. $wt itself stays
+	# untouched, because it is what gets reported to the user below.
+	_wt_key="$(flight_path_key "$wt")"; _root_key="$(flight_path_key "$ROOT")"
+	if [ "$wt" != "-" ] && { [ "$_wt_key" = "$(flight_path_key "$MAIN_WT")" ] \
+		|| [ "${_wt_key#"$_root_key"/.worktrees/}" = "$_wt_key" ]; }; then
 		act skip "$b" "checked out at $wt (not a .worktrees/ entry)"
 		continue
 	fi
@@ -293,7 +343,7 @@ while IFS=$'\t' read -r b where stage pr issue wt; do
 		fi
 	fi
 
-	if [ -n "${HAS_LOCAL[$b]:-}" ]; then
+	if set_has "$HAS_LOCAL" "$b"; then
 		if [ "$do_local" = 1 ] && [ "$dry_run" = 0 ]; then
 			# `-d`, never `-D`: git's own merged check is the last line of defence, and
 			# a refusal here means our "merged" verdict disagreed with git's.
@@ -308,7 +358,7 @@ while IFS=$'\t' read -r b where stage pr issue wt; do
 		fi
 	fi
 
-	if [ -n "${HAS_REMOTE[$b]:-}" ]; then
+	if set_has "$HAS_REMOTE" "$b"; then
 		if [ "$do_remote" = 1 ] && [ "$dry_run" = 0 ]; then
 			if out="$(g push origin --delete "$b" 2>&1)"; then
 				act delete-remote "$b" "merged into $stage"

@@ -120,6 +120,7 @@ out="$(run_log)"; rc=$?
 check "errors when neither --sha nor --failed given" \
 	"$([ "$rc" != 0 ] && grep -q -- "--sha" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 
-printf '\033[1m────────────────────────────\033[0m\n'
-printf 'Passed: %d  Failed: %d\n' "$pass" "$fail"
+# Summary: plain when nothing failed, red when something did (#123).
+[ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
+printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]
