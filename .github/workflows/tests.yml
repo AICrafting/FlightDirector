@@ -9,18 +9,93 @@ on:
 
 jobs:
   script-tests:
-    name: script tests
+    name: script tests (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      # Report both interpreters on a failure; one being red is useful information
+      # about the other, not a reason to cancel it.
+      fail-fast: false
+      matrix:
+        include:
+          # The baseline: a current bash, which is what CI has always run.
+          - name: bash 5
+            image: alpine:latest
+            packages: npm bash gawk git coreutils jq python3
+
+          # macOS ships bash 3.2.57 and nothing newer, so `/usr/bin/env bash` there
+          # is 3.2 and anything bash 4+ (mapfile, declare -A) dies at runtime (#127).
+          # This is that exact version, so the interpreter half of "does it work on a
+          # Mac" is answerable on a Linux runner. shellcheck cannot cover this: the
+          # shebang says `bash`, so it assumes 4+ and accepts both.
+          #
+          # Deliberately NO `bash` package here — apk's bash is 5.x and would install
+          # to /bin/bash, shadowing the image's 3.2 at /usr/local/bin/bash and quietly
+          # turning this leg into a duplicate of the one above.
+          - name: bash 3.2
+            image: bash:3.2.57-alpine3.22
+            packages: npm gawk git coreutils jq python3
     container:
-      image: alpine:latest
+      image: ${{ matrix.image }}
     steps:
       - name: Setup tools
         run: |
           # python3: the prompt-logger producers/summary (stdlib only) and their tests
-          apk add --update npm bash gawk git coreutils jq python3
+          apk add --update ${{ matrix.packages }}
 
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Show the interpreter under test
+        run: |
+          command -v bash
+          bash --version | head -1
+
+      - name: Run script tests
+        run: |
+          bash scripts/run-tests.sh
+
+  # The other half of "does it work on a Mac": BSD userland. The Linux legs above
+  # cover the interpreter but run GNU coreutils, so they cannot see a BSD `wc`
+  # padding its count, `paste` demanding an explicit operand, or `sed -i` reading
+  # the next token as a backup suffix.
+  #
+  # No `container:` here — only the docker-labelled Linux runners can take one, and
+  # the point of this leg is the host's own tools. The runner has stock bash 3.2.57
+  # (no Homebrew bash), plus git, jq and python3, so nothing needs installing.
+  script-tests-macos:
+    name: script tests (macOS, BSD userland)
+    runs-on: macos-arm64
+    timeout-minutes: 10
+    steps:
+      # actions/checkout is a JavaScript action and this runner has no node, so it
+      # fails before the tests run ("Cannot find: node in PATH"). Check out with git
+      # directly instead. The token goes through env and is never interpolated into
+      # the script body, and extraheader keeps it out of the on-disk remote config.
+      - name: Checkout
+        env:
+          TOKEN: ${{ github.token }}
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Never let git block on a credential prompt: with no tty it hangs until
+          # the job timeout instead of failing, which reports as a timeout and hides
+          # the real cause. Fail immediately instead, and keep pagers out of it.
+          export GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat GIT_ASKPASS=/usr/bin/true
+          [ -n "$TOKEN" ] || { echo "no token in github.token — cannot fetch"; exit 1; }
+          git init -q .
+          git remote add origin "$SERVER/$REPO.git"
+          AUTH="$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"
+          git -c credential.helper= -c http.extraheader="AUTHORIZATION: basic $AUTH" \
+              fetch --no-tags --depth 1 origin "$SHA"
+          git checkout -q FETCH_HEAD
+          git --no-pager log --oneline -1
+
+      - name: Show the interpreter under test
+        run: |
+          sw_vers
+          command -v bash
+          bash --version | head -1
 
       - name: Run script tests
         run: |

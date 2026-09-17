@@ -145,7 +145,7 @@ env FLIGHT_TOKEN=envtok "$TAGREL" flight >/dev/null
 check "FLIGHT_TOKEN overrides the secrets file token" "$(grep -q 'Authorization: token envtok' "$CURL_LOG" && echo 1 || echo 0)"
 git -C "$R" tag -d flight-0.12.0 >/dev/null; git -C "$R" push -q --delete origin flight-0.12.0
 # missing changelog section → refuse before tagging
-sed -i 's/## \[0.12.0\]/## [0.12.9]/' "$R/flight/CHANGELOG.md"; git -C "$R" commit -qam "break changelog"; git -C "$R" push -q origin main
+sed 's/## \[0.12.0\]/## [0.12.9]/' "$R/flight/CHANGELOG.md" >"$R/flight/CHANGELOG.md.tmp" && mv "$R/flight/CHANGELOG.md.tmp" "$R/flight/CHANGELOG.md"; git -C "$R" commit -qam "break changelog"; git -C "$R" push -q origin main
 if run flight >/dev/null 2>"$T/nolog.err"; then rc=0; else rc=$?; fi
 check "no CHANGELOG section for the version → refuses before tagging" "$([ "$rc" = 1 ] && grep -q '0.12.0' "$T/nolog.err" && ! git -C "$R" rev-parse -q --verify refs/tags/flight-0.12.0 >/dev/null && echo 1 || echo 0)"
 if run nosuch --dry-run >/dev/null 2>"$T/plug.err"; then rc=0; else rc=$?; fi

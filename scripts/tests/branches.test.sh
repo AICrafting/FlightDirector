@@ -22,7 +22,7 @@ pass=0; fail=0
 check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=$((pass+1));
 			else printf '\033[0;31m  ✗ %s\033[0m  %s\n' "$1" "${3:-}"; fail=$((fail+1)); fi; }
 
-SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
+SANDBOX="$(cd "$(mktemp -d)" && pwd -P)"; trap 'rm -rf "$SANDBOX"' EXIT
 
 # ── a stub dispatcher: answers only `pr list`, from $PR_ROWS ──────────────────
 STUB="$SANDBOX/flight-stub"
@@ -346,11 +346,11 @@ for backend in forgejo github; do
 
 	out="$(pr_list "$backend" --state merged)"
 	check "$backend: without --head, every merged PR comes back" \
-		"$([ "$(wc -l <<<"$out")" = 2 ] && echo 1 || echo 0)" "out=$out"
+		"$([ "$(wc -l <<<"$out")" -eq 2 ] && echo 1 || echo 0)" "out=$out"
 
 	out="$(pr_list "$backend" --state closed --head feature/6-squashed)"
 	check "$backend: --state closed keeps the never-merged PR" \
-		"$([ "$(wc -l <<<"$out")" = 2 ] && grep -q '^32	closed	' <<<"$out" && echo 1 || echo 0)" "out=$out"
+		"$([ "$(wc -l <<<"$out")" -eq 2 ] && grep -q '^32	closed	' <<<"$out" && echo 1 || echo 0)" "out=$out"
 
 	out="$(pr_list "$backend" --state merged --base nowhere)"
 	check "$backend: --base filters by target branch" \
