@@ -41,6 +41,8 @@ must be proposed from the actual project, not seeded from a table.
 - **Never commit `.flightdirector/secrets.json`.** It holds the token — add the
   `.flightdirector/secrets*` glob to `.gitignore` before writing it, so backups and
   per-backend variants (`secrets.local.json`, `secrets.json.bak`, …) can't leak either.
+  Ignore `.flightdirector/config.local.json` in the same edit — it is the per-machine
+  override of `config.json` and must never be committed either.
 
 ## Step 0: Detect existing backends — offer, then confirm
 
@@ -88,7 +90,8 @@ mv .lightspeed/secrets* .flightdirector/                     # gitignored → pl
 rmdir .lightspeed 2>/dev/null || true                        # leave it if anything else is inside
 ```
 
-Then add `.flightdirector/secrets*` and `.flightdirector/batches/` to `.gitignore` (keep the
+Then add `.flightdirector/secrets*`, `.flightdirector/config.local.json` and
+`.flightdirector/batches/` to `.gitignore` (keep the
 old `.lightspeed/…` lines if other branches still use them) and continue as a re-run over the
 existing config. Until the move happens the dispatcher keeps working off the legacy folder with a
 one-line notice on stderr — so never block a user on the migration.
@@ -160,8 +163,8 @@ token-creation steps differ per backend (GitHub, GitLab, Forgejo, Jira) — see
 [flight-setup.md](../../references/flight-setup.md) for the config schema. Then:
 
 1. Create the config folder: `mkdir -p .flightdirector`.
-2. Add `.flightdirector/secrets*`, `.worktrees/`, **and** `.flightdirector/batches/` to `.gitignore`
-   **first** (create `.gitignore` if needed). Ignore the whole `secrets*` family, not just
+2. Add `.flightdirector/secrets*`, `.flightdirector/config.local.json`, `.worktrees/`, **and**
+   `.flightdirector/batches/` to `.gitignore` **first** (create `.gitignore` if needed). Ignore the whole `secrets*` family, not just
    `secrets.json` — a second token file or a backup made while rotating a token is otherwise one
    `git add -A` from being committed. `.worktrees/` is where `working-an-issue` creates
    per-issue git worktrees, and `.flightdirector/batches/` is where `queue-batches` writes per-run
