@@ -123,9 +123,12 @@ No confirmation needed to create. Labels are applied in the same call (they must
 
 ```
 flight issues create \
-  --title "…" --body-file "$SCRATCH/issue-body.md" --label bug --label ux
+  --title "…" --body-file "$SCRATCH/issue-body.md" --label bug --label ux \
+  --model <your-model-id>
 ```
 
+`--model` (your own model id, e.g. `claude-fable-5-1`) lets the dispatcher sign the body
+`FlightDirector:flight@<version> with <Model/ver>`; pass it on `update` and `comment` too.
 It prints the new issue `number`. Report: *"Created #N: [title]"*.
 
 ## Step 7: Attach images (if any were shared)
@@ -149,11 +152,13 @@ Only after the user agrees to the planned change:
 
 ```
 # Update title and/or body (only the fields you pass are changed)
-flight issues update --number N --title "…" --body-file "$SCRATCH/issue-body.md"
+flight issues update --number N --title "…" --body-file "$SCRATCH/issue-body.md" --model <id>
 
 # Or add a comment
-flight issues comment --number N --body "…"
+flight issues comment --number N --body "…" --model <id>
 ```
+
+An updated body that already ends with a flight signature gets it replaced, not doubled.
 
 When rewriting a stale body, show the old content in `~~strikethrough~~` above the new content
 so the change history stays visible, and add a comment explaining what changed and why.

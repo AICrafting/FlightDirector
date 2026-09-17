@@ -45,7 +45,9 @@ The dispatcher:
    (the `labels` map, for role→name resolution), and `LS_BACKEND`. Token precedence:
    `LS_TOKEN` / `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a legacy
    name), else the secrets file (axis, `code → issues`).
-4. Execs `adapters/<backend>/<group> <verb> [args…]`.
+4. **Signs the body** on `issues create|update|comment` and `pr open|update` (see **Body
+   signature** below), and strips its own flags (`--model`, `--no-signature`) from the args.
+5. Execs `adapters/<backend>/<group> <verb> [args…]`.
 
 So adapters are pure: they read coordinates/token from `LS_*` env, never parse config, never
 know which axis they serve. Swapping `forgejo` for `github` changes nothing above the adapter.
@@ -184,6 +186,24 @@ Safety is in the verb, not in the caller:
 - Model-family derivation lives in the dispatcher, before adapter execution. Skills pass the raw
   model id to `labels model-family` / `labels ensure --model` rather than interpreting vendor
   naming conventions themselves.
+- **Body signature** (dispatcher-owned, #132). Every body flight writes — `issues create` /
+  `update` / `comment` (so every work-ledger entry) and `pr open` / `update` (so every
+  promotion and sync-down PR) — ends with:
+
+  ```
+  ---
+  FlightDirector:flight@0.14.0 with Fable/5.1
+  ```
+
+  A blank line, a rule, then `FlightDirector:flight@<installed version>`, plus ` with
+  <Model/ver>` when the model is known. The model comes from the dispatcher-owned `--model <id>`
+  flag (stripped before the adapter sees the args) or `FLIGHT_MODEL` / `LS_MODEL` in the env,
+  rendered as `Fable/5.1` from `claude-fable-5-1`, `Sol/5.6` from `gpt-5.6-sol`, `GPT/5` from
+  `gpt-5`; unknown → omitted. On `update` a trailing signature already on the body is
+  **replaced**, not stacked, matched on shape so a newer plugin re-signs an older body. Titles,
+  labels and status are never touched. Off switch: `code.signature.enabled: false` in config,
+  or `--no-signature` on one call. Adapters never see any of this — the Jira ADF shim just
+  learned to render a `---` line as a `rule` node so the separator survives there too.
 - `ci watch`/`ci log` are the existing shared scripts adapted to this signature, not new code.
 - `⇥` above denotes a literal TAB.
 - **GitHub backend specifics:** GitHub label endpoints use label **names**, not numeric ids — the

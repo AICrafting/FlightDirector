@@ -184,6 +184,18 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
   `.flightdirector/agent-rules.md`; if that file is absent, workers run with the skill's built-in
   safety rules only (no project-specific rules).
 
+### Body signature (on by default)
+
+```jsonc
+"code": { "signature": { "enabled": true } }
+```
+
+- `code.signature.enabled` — when `true` (the default, and absent counts as `true`) the
+  dispatcher ends every issue body, comment and PR body it writes with a `---` rule and
+  `FlightDirector:flight@<version> with <Model/ver>` (the model clause only when the skill passed
+  `--model`). Set `false` to write bare bodies; `--no-signature` does the same for one call.
+  Details: [adapter-contract.md](adapter-contract.md) → **Body signature**.
+
 ### Prompt ledger (optional, off by default)
 
 ```jsonc
