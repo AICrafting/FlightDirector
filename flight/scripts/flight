@@ -120,7 +120,10 @@ sec_rel="${sec#"$repo_root"/}"
 # exactly as before.
 cfg_tracked="$cfg"
 cfg_local="$cfg_dir/config.local.json"
-cfg_tmp=""
+cfg_tmp=""; sig_tmp=""
+# One EXIT trap owns every dispatcher temp file (merged config, signed body).
+cleanup() { rm -f ${cfg_tmp:+"$cfg_tmp"} ${sig_tmp:+"$sig_tmp"}; }
+trap cleanup EXIT
 if [ -f "$cfg" ] && [ -f "$cfg_local" ]; then
   cfg_local_rel="${cfg_local#"$repo_root"/}"
   jq -e . "$cfg_local" >/dev/null 2>&1 || die "$cfg_local_rel is not valid JSON"
@@ -128,17 +131,42 @@ if [ -f "$cfg" ] && [ -f "$cfg_local" ]; then
     echo "flight: WARNING — $cfg_local_rel is tracked by git; it is meant to be a per-machine override — add it to .gitignore." >&2
   fi
   cfg_tmp="$(mktemp "${TMPDIR:-/tmp}/flight-config.XXXXXX")"
-  trap 'rm -f "$cfg_tmp"' EXIT
   jq -s '.[0] * .[1]' "$cfg" "$cfg_local" >"$cfg_tmp" || die "could not merge $cfg_local_rel over $cfg_rel"
   cfg="$cfg_tmp"
 fi
 
-# Hand off to a child program. Normally an `exec`; when a merged config temp
-# file exists, run the child in the foreground instead so the EXIT trap above
-# still removes the file once the child returns.
+# Hand off to a child program. Normally an `exec`; when a dispatcher temp file
+# exists (merged config, signed body), run the child in the foreground instead
+# so the EXIT trap above still removes the file once the child returns.
 handoff() {
-  if [ -n "$cfg_tmp" ]; then "$@"; exit $?; fi
+  if [ -n "$cfg_tmp$sig_tmp" ]; then "$@"; exit $?; fi
   exec "$@"
+}
+
+# Installed plugin version + name, from the manifest (Codex's first, then Claude's).
+plugin_manifest() {
+  local m="$SELF_DIR/../.codex-plugin/plugin.json"
+  [ -f "$m" ] || m="$SELF_DIR/../.claude-plugin/plugin.json"
+  printf '%s' "$m"
+}
+
+# `Fable/5.1` from `claude-fable-5-1`; `Sol/5.6` from `gpt-5.6-sol`; `GPT/5` from
+# `gpt-5`; anything else falls back to the model family alone, capitalised.
+# Routing prefixes (`anthropic/…`, `us.anthropic.claude-…`) are stripped first.
+model_display() {
+  local id fam ver
+  id="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"; id="${id##*/}"
+  case "$id" in *.claude-*) id="claude-${id##*.claude-}" ;; *.gpt-*) id="gpt-${id##*.gpt-}" ;; esac
+  if [[ "$id" =~ ^claude-([a-z0-9]+)-([0-9]+)(-([0-9]+))?(-[0-9]{8})?$ ]]; then
+    fam="${BASH_REMATCH[1]}"; ver="${BASH_REMATCH[2]}${BASH_REMATCH[4]:+.${BASH_REMATCH[4]}}"
+  elif [[ "$id" =~ ^gpt-([0-9]+([.][0-9]+)*)-([a-z0-9]+)$ ]]; then
+    fam="${BASH_REMATCH[3]}"; ver="${BASH_REMATCH[1]}"
+  elif [[ "$id" =~ ^gpt-([0-9]+([.][0-9]+)*)$ ]]; then
+    printf 'GPT/%s' "${BASH_REMATCH[1]}"; return
+  else
+    fam="$(model_family "$1" 2>/dev/null)" || fam="$id"; ver=""
+  fi
+  printf '%s%s' "$(printf '%s' "$fam" | awk '{ print toupper(substr($0, 1, 1)) substr($0, 2) }')" "${ver:+/$ver}"
 }
 
 # `flight auth check [--secrets <file>] [--axis code|issues]` — verify a token
@@ -210,8 +238,7 @@ if [ "$group" = "reconcile" ]; then
   harness="${1:-}"
   case "$harness" in claude|codex) ;; *) die "unsupported harness '$harness' (expected claude or codex)" ;; esac
   [ -f "$cfg_tracked" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
-  manifest="$SELF_DIR/../.codex-plugin/plugin.json"
-  [ -f "$manifest" ] || manifest="$SELF_DIR/../.claude-plugin/plugin.json"
+  manifest="$(plugin_manifest)"
   version="$(jq -r '.version // empty' "$manifest")"
   [ -n "$version" ] || die "cannot determine installed Flight version"
   plugin="$(jq -r '.name // empty' "$manifest")"
@@ -225,7 +252,7 @@ if [ "$group" = "reconcile" ]; then
     die "config was reconciled by newer $plugin $recorded; refusing downgrade to $version"
   fi
   tmp="$(mktemp "$cfg.tmp.XXXXXX")"
-  trap 'rm -f "$tmp" ${cfg_tmp:+"$cfg_tmp"}' EXIT
+  trap 'rm -f "$tmp"; cleanup' EXIT
   jq --arg h "$harness" --arg p "$plugin" --arg v "$version" '
       .schemaVersion = ([(.schemaVersion // 0), 2] | max)
     | .harnesses = (.harnesses // {})
@@ -240,7 +267,7 @@ if [ "$group" = "reconcile" ]; then
   jq -e . "$tmp" >/dev/null
   chmod --reference="$cfg_tracked" "$tmp" 2>/dev/null || true
   mv "$tmp" "$cfg_tracked"
-  trap 'rm -f ${cfg_tmp:+"$cfg_tmp"}' EXIT
+  trap cleanup EXIT
   printf 'flight: reconciled %s config with plugin %s %s\n' "$harness" "$plugin" "$version" >&2
   exit 0
 fi
@@ -306,6 +333,49 @@ LS_EMAIL="${LS_EMAIL:-$(cfg_get email)}"
 if [ -z "$LS_EMAIL" ] && [ -f "$sec" ]; then
   LS_EMAIL="$(jq -r --arg a "$axis" '(.[$a].email) // (.code.email) // empty' "$sec")"
 fi
+
+# Signature (#132). Every body flight writes ends with
+#     ---
+#     via FlightDirector:flight@<version>[ with <Model/ver>]
+# appended HERE, once, for every backend — adapters never learn about it. On
+# update an existing trailing signature is replaced, not stacked (matched on
+# shape, so a newer plugin re-signs an older body cleanly). The model is not
+# something the dispatcher can discover on its own; it comes from the
+# dispatcher-owned `--model <id>` flag or `FLIGHT_MODEL` / `LS_MODEL` in the
+# env, and the "with …" clause is simply omitted when neither is given.
+# Off switch: `code.signature.enabled: false` in config, or `--no-signature`.
+case "$group/$verb" in
+  issues/create|issues/update|issues/comment|pr/open|pr/update)
+    sig_on="$(jq -r 'if .code.signature.enabled == false then "no" else "yes" end' "$cfg")"
+    sig_model="${FLIGHT_MODEL:-${LS_MODEL:-}}"
+    sig_body=""; sig_body_file=""; sig_have=0; sig_args=()
+    while [ $# -gt 0 ]; do case "$1" in
+      --model)        [ $# -ge 2 ] || die "$group $verb: --model needs a model id"; sig_model="$2"; shift 2 ;;
+      --no-signature) sig_on=no; shift ;;
+      --body)         [ $# -ge 2 ] || die "$group $verb: --body needs a value"; sig_body="$2"; sig_have=1; shift 2 ;;
+      --body-file)    [ $# -ge 2 ] || die "$group $verb: --body-file needs a path"; sig_body_file="$2"; sig_have=1; shift 2 ;;
+      *) sig_args+=("$1"); shift ;;
+    esac; done
+    if [ "$sig_have" = 1 ] && [ "$sig_on" = yes ]; then
+      if [ -n "$sig_body_file" ]; then
+        [ -f "$sig_body_file" ] || die "$group $verb: --body-file '$sig_body_file' not found"
+        sig_body="$(cat "$sig_body_file")"
+      fi
+      sig_line="via FlightDirector:flight@$(jq -r '.version // "unknown"' "$(plugin_manifest)")"
+      [ -n "$sig_model" ] && sig_line="$sig_line with $(model_display "$sig_model")"
+      sig_tmp="$(mktemp "${TMPDIR:-/tmp}/flight-body.XXXXXX")"
+      printf '%s' "$sig_body" \
+        | jq -Rrs --arg sig "$sig_line" '
+            sub("\\s*\\n---\\n(via )?FlightDirector:flight@[^\\n]*\\s*$"; "")   # drop an old signature (either shape)
+            | sub("\\s+$"; "")                                         # trim trailing whitespace
+            | . + "\n\n---\n" + $sig + "\n"' >"$sig_tmp"
+      sig_args+=(--body-file "$sig_tmp")
+    elif [ "$sig_have" = 1 ]; then
+      if [ -n "$sig_body_file" ]; then sig_args+=(--body-file "$sig_body_file"); else sig_args+=(--body "$sig_body"); fi
+    fi
+    set -- "${sig_args[@]}"
+    ;;
+esac
 
 adapter="$ADAPTERS_DIR/$backend/$group"
 [ -x "$adapter" ] || die "no '$group' adapter for backend '$backend' (expected $adapter)"

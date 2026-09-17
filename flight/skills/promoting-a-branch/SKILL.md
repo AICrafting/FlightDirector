@@ -211,13 +211,14 @@ fi
 
 ```
 PR="$(flight pr open --head "$BRANCH" --base <target> \
-        --title "…" --body-file "$SCRATCH/pr-body.md")"   # → number⇥url
+        --title "…" --body-file "$SCRATCH/pr-body.md" \
+        --model <your-model-id>)"                          # → number⇥url; body gets signed
 PR_NUM="$(printf '%s' "$PR" | cut -f1)"
 ```
 
 A typo or a late test-plan edit does **not** need the web UI: correct an already-open PR with
-`flight pr update --number "$PR_NUM" --title "…" --body-file "$SCRATCH/pr-body.md"` (only the
-fields you pass are patched), and read back what is on it with `flight pr get --number "$PR_NUM"`.
+`flight pr update --number "$PR_NUM" --title "…" --body-file "$SCRATCH/pr-body.md" --model <id>`
+(only the fields you pass are patched; an existing signature is replaced, not stacked), and read back what is on it with `flight pr get --number "$PR_NUM"`.
 
 Then watch CI in the background and surface state via Monitor. Watch by **`--pr`**, not by a local
 SHA: the adapter resolves the PR's head commit — the exact SHA the run reports — so a local tip

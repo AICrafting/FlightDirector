@@ -15,6 +15,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- **Every body flight writes is signed** (#132). Issue bodies, comments (so every work-ledger
+  entry) and PR bodies (promotions and sync-down PRs alike) now end with a `---` rule and
+  `via FlightDirector:flight@<version> with <Model/ver>` — the model clause when the skill passed
+  the new dispatcher-owned `--model <id>` flag (or `FLIGHT_MODEL` is set), omitted otherwise.
+  Done once in the dispatcher for all four backends; adapters are unchanged, except that the
+  Jira ADF shim now renders a `---` line as a rule. An update replaces an existing signature
+  rather than stacking one. Opt out per repo with `code.signature.enabled: false`, or per call
+  with `--no-signature`.
+
 - **Per-machine config override** (#129). An optional, gitignored
   `.flightdirector/config.local.json` is now merged over `config.json` for every read, with
   jq's recursive-merge rules: nested objects merge key by key, scalars and arrays replace

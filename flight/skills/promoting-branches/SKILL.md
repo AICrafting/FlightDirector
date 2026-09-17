@@ -145,7 +145,7 @@ git -C "$SCRATCH/int-<zone>" push -u origin "$INT"
 # ("$DISP" issues get / issues comments --number <N>; the thread carries scope changes and the work
 # ledger, and the plan must test what was actually built) — halt the group if a resolved issue has no
 # writable plan; then one $KEYWORD #N line per included issue (Closes if stages[0] closesIssues, else Ready).
-PR="$("$DISP" pr open --head "$INT" --base "$BASE" --title "Batch: <zone> (#<n>, #<n>, …)" --body-file "$SCRATCH/pr-<zone>.md")"
+PR="$("$DISP" pr open --head "$INT" --base "$BASE" --title "Batch: <zone> (#<n>, #<n>, …)" --body-file "$SCRATCH/pr-<zone>.md" --model <your-model-id>)"
 # watch CI ("$DISP" ci watch --pr "<pr#>" …); on failure record the group FAILED and move on; on success
 # merge on the gate, using stages[0]'s configured strategy (default "merge" — never hard-code one):
 "$DISP" pr merge --number "<pr#>" --strategy "$("$DISP" config '.code.stages[0].strategy // "merge"')"
@@ -160,7 +160,7 @@ promoted** `#N`:
 ```bash
 # 1. Ensure a work-ledger comment exists (queue-batches branches already have one from done-<N>.md;
 #    otherwise write a short finishing record and post it):
-"$DISP" issues comment --number <N> --body-file "$SCRATCH/done-<N>.md"
+"$DISP" issues comment --number <N> --body-file "$SCRATCH/done-<N>.md" --model <your-model-id>
 # 2. Ask the dispatcher for the stable family, then lazily ensure + add it.
 #    A tool/service id returns non-zero and is skipped:
 PRIMARY_MODEL=<model-id-from-ledger>
