@@ -63,7 +63,7 @@ run() {
 }
 SIG_RE='^via FlightDirector:flight@'
 # last_two <body> → the last two lines of the body joined by \n
-last_two() { printf '%s' "$1" | tail -2 | paste -sd '\n'; }
+last_two() { printf '%s' "$1" | tail -2 | paste -sd '\n' -; }   # explicit '-' operand: BSD paste requires it
 
 R="$(mkrepo plain)"
 
