@@ -17,6 +17,7 @@ out=""; method=GET; url=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		-o) out="$2"; shift 2 ;;
+		-D) shift 2 ;;
 		-w|-X|-H|-u|--data-binary) [ "$1" = -X ] && method="$2"; shift 2 ;;
 		-L|-sS) shift ;;
 		*) url="$1"; shift ;;
@@ -24,7 +25,7 @@ while [ $# -gt 0 ]; do
 done
 if [ "$method" = GET ]; then
 	case "$url" in
-		*/labels\?*page=1*) printf '%s' '[{"id":7,"name":"model/gpt-5","color":"d97757","description":"old"},{"id":8,"name":"status/in progress","color":"1f9d55"}]' >"$out" ;;
+		*/labels\?*page=1) printf '%s' '[{"id":7,"name":"model/gpt-5","color":"d97757","description":"old"},{"id":8,"name":"status/in progress","color":"1f9d55"}]' >"$out" ;;
 		*/labels\?*) printf '%s' '[]' >"$out" ;;
 		*/issues\?*|*/merge_requests\?*)
 			printf '%s\t%s\n' "$method" "$url" >>"${CURL_LOG:?}"
