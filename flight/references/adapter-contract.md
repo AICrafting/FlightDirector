@@ -64,15 +64,44 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
   one-line reason on stderr. Skills must check it — a non-zero exit is a hard stop, never a
   silent no-op.
 
+## Paging
+
+Every backend clamps a list request to its own maximum and reports the clamp only in a header:
+Forgejo caps at `MAX_RESPONSE_ITEMS` (50 by default), GitHub defaults to 30 and caps at 100,
+GitLab caps at 100, Jira clamps `maxResults` to its own ceiling. A single request per list verb
+is therefore silently truncated, and the truncation is invisible to the caller.
+
+Two rules follow, and adapters must implement both:
+
+1. **Page until a page comes back EMPTY — never until a page looks short.** A short page and a
+   clamped page are indistinguishable, so "stop when fewer rows than asked for came back" is not
+   a stopping condition, it is a guess. (Jira's two read paths stop on the flags the API gives
+   instead: `nextPageToken` for `/search/jql`, `startAt` against `total` for the collection
+   endpoints.)
+2. **`--limit N` is a ceiling, not a request size.** The adapter pages underneath it and returns
+   at most N rows. When the ceiling hid something, a warning goes to **stderr** naming the count
+   where the backend reports one (`warning: showing 50 of 109 rows for /issues; raise --limit to
+   see the rest`) and saying `more are available` where it does not. stdout stays clean TSV, so
+   a caller that ignores stderr is unaffected and one that reads it can tell a complete list from
+   a clamped one. That distinction is the whole point: without it, "raise `--limit` if a full page
+   came back" is a no-op, because at the cap a full page always comes back.
+
+Verbs with no `--limit` (`issues comments`, `labels list`) page to exhaustion and never warn.
+
+**The exception.** Forgejo's `/issues/{n}/comments` ignores both `limit` and `page` and returns
+the whole thread (verified against a 53-comment issue), so that one verb is deliberately *not*
+paged — a page-until-empty loop would re-fetch the same rows until the guard fired. GitHub and
+GitLab comment endpoints do cap, and are paged.
+
 ## Verbs (proposed shapes — open to revision)
 
 ### `issues`
 
 | Verb        | Args                                   | stdout |
 |-------------|----------------------------------------|--------|
-| `list`      | `--state open\|closed\|all` `--limit N` `--label NAME` (repeatable) | one row per issue: `number⇥title⇥comma,labels` |
+| `list`      | `--state open\|closed\|all` `--limit N` `--label NAME` (repeatable) | one row per issue: `number⇥title⇥comma,labels`. `--limit` is a true ceiling: the adapter pages underneath it (see **Paging**), so `--limit 200` returns up to 200 rows rather than one server-clamped page |
 | `get`       | `--number N`                           | `number⇥title` then a blank line then the raw body (the one verb that emits a body) |
-| `comments`  | `--number N`                           | one block per comment, oldest-first: `author⇥created_at` header line, the raw comment body, then a blank separator line. Empty output (exit 0) = no comments |
+| `comments`  | `--number N`                           | one block per comment, oldest-first: `author⇥created_at` header line, the raw comment body, then a blank separator line. Empty output (exit 0) = no comments. Unbounded: the thread is always returned whole, because oldest-first rendering means a truncated fetch drops the **newest** comments, and "the later comment wins" depends on those |
 | `create`    | `--title T` `--body B` (or `--body-file PATH`) `--label NAME` (repeatable) | the new issue `number`; labels resolved name→id, applied at creation |
 | `update`    | `--number N` `--title T` and/or `--body B` (or `--body-file PATH`) | (nothing) — patches only the fields passed |
 | `comment`   | `--number N` `--body B` (or `--body-file PATH`) | (nothing; exit 0) |
@@ -107,7 +136,7 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 | `get`   | `--number N`                                           | `number⇥title⇥state⇥url` |
 | `update`| `--number N` `--title T` and/or `--body B` (or `--body-file PATH`) | (nothing) — patches only the fields passed, so a title fix leaves the body alone (mirrors `issues update`) |
 | `merge` | `--number N` `--strategy merge\|squash\|rebase`        | (nothing) |
-| `list`  | `--state open\|closed\|merged\|all` (default `open`) `[--head BRANCH] [--base BRANCH] [--limit N]` (default 30) | one row per PR: `number⇥state⇥head⇥base⇥title`; `state` is `merged` for a merged PR whatever the backend calls it. `--state merged --head <branch>` is how `branches` detects a **squash/rebase** merge, whose commits are rewritten so the branch tip never becomes an ancestor of the target. `--limit` bounds the **fetch**, not the matches — on Forgejo, where `--head`/`--base` filter client-side, a small limit can hide an old PR. |
+| `list`  | `--state open\|closed\|merged\|all` (default `open`) `[--head BRANCH] [--base BRANCH] [--limit N]` (default 30) | one row per PR: `number⇥state⇥head⇥base⇥title`; `state` is `merged` for a merged PR whatever the backend calls it. `--state merged --head <branch>` is how `branches` detects a **squash/rebase** merge, whose commits are rewritten so the branch tip never becomes an ancestor of the target. `--limit` bounds the **fetch**, not the matches — on Forgejo, where `--head`/`--base` filter client-side, a small limit can hide an old PR. The fetch itself is paged (see **Paging**), so the limit is honoured in full rather than clamped to one page. |
 
 ### `auth`
 

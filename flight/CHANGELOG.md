@@ -13,7 +13,25 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **`list` verbs no longer truncate silently at the server's cap** (#149). Every backend clamps a
+  list request to its own maximum and says so only in a header, so a single request per verb was
+  silently cut short: `issues list --limit 200` against a 109-issue tracker returned 50 rows and
+  looked complete. All four adapters now page underneath `--limit`, stopping only when a page
+  comes back **empty** (or, on Jira, when `nextPageToken`/`startAt` says the collection is
+  exhausted) rather than when a page looks short, since a short page and a clamped one are
+  indistinguishable. `--limit N` remains a true ceiling of N rows, and when the ceiling hid
+  something the adapter now warns on **stderr** naming the count where the backend reports one
+  (`warning: showing 50 of 109 rows for /issues; raise --limit to see the rest`). stdout stays
+  clean TSV. This makes the mitigation the skills already described real: "raise `--limit` if a
+  full page came back" could never work, because at the cap a full page always comes back.
+
+  Affected verbs: `issues list`, `pr list`, `labels list` (now through the same paged cache label
+  resolution uses, so the two can no longer disagree about which labels exist), and `issues
+  comments` on GitHub, GitLab and Jira — those render oldest-first, so an unpaged fetch dropped
+  the **newest** comments, which is precisely what "the later comment wins" depends on. Forgejo's
+  comment endpoint ignores paging and returns the whole thread, so it is unchanged.
 
 ## [0.15.0] - 2026-09-17
 
