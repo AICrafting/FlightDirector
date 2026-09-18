@@ -15,12 +15,13 @@ mkdir -p "$SANDBOX/bin"
 cat >"$SANDBOX/bin/curl" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-out=""; hdr=""; url=""
+out=""; hdr=""; url=""; data=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		-o) out="$2"; shift 2 ;;
 		-D) hdr="$2"; shift 2 ;;
-		-w|-X|-H|--data-binary) shift 2 ;;
+		--data-binary) data="$2"; shift 2 ;;
+		-w|-X|-H|-u) shift 2 ;;
 		-sS|-L) shift ;;
 		*) url="$1"; shift ;;
 	esac
@@ -36,30 +37,63 @@ field() {
 	local v="${url##*[?&]$1=}"
 	printf '%s' "${v%%&*}"
 }
-page="$(field page)" || page=1
-asked="$(field limit)" || asked="$(field per_page)" || asked=30
 
 cap="${CAP:-50}"
-size="$asked"; [ "$size" -le "$cap" ] || size="$cap"
 total="${TOTAL:-109}"
-start=$(( (page - 1) * size ))
+
+# Where this request starts, and how many rows it may have. Jira's collections
+# count from startAt, its JQL search from an opaque token (here: the next index),
+# and the git forges from a page number.
+if [ -n "$data" ]; then
+	start="$(printf '%s' "$data" | jq -r '.nextPageToken // "0"')"
+	asked="$(printf '%s' "$data" | jq -r '.maxResults // 50')"
+	size="$asked"; [ "$size" -le "$cap" ] || size="$cap"
+elif asked="$(field startAt)"; then
+	start="$asked"
+	asked="$(field maxResults)" || asked=50
+	size="$asked"; [ "$size" -le "$cap" ] || size="$cap"
+else
+	page="$(field page)" || page=1
+	asked="$(field limit)" || asked="$(field per_page)" || asked=30
+	size="$asked"; [ "$size" -le "$cap" ] || size="$cap"
+	start=$(( (page - 1) * size ))
+fi
+
 n=$(( total - start ))
 [ "$n" -ge 0 ] || n=0
 [ "$n" -le "$size" ] || n="$size"
 
-# Rows are shaped for whichever endpoint was asked for.
+# Rows are shaped for whichever endpoint was asked for, then wrapped in that
+# backend's envelope: a bare array on the git forges, an object on Jira.
 case "$url" in
-	*/comments*) tmpl='{"user":{"login":"dave"},"created_at":"2026-09-0\(1+(.%9))","body":"c\(.)"}' ;;
-	*/labels*)   tmpl='{"id":.,"name":"l\(.)","color":"ffffff","description":""}' ;;
-	*)           tmpl='{"number":.,"iid":.,"title":"i\(.)","labels":[]}' ;;
+	*/search/jql*)             tmpl='{"key":"ACME-\(.)","fields":{"summary":"i\(.)","labels":[]}}' ;;
+	*/rest/api/3/label*)       tmpl='"l\(.)"' ;;
+	*/comment*)                tmpl='{"author":{"displayName":"dave"},"created":"2026-09-01","user":{"login":"dave"},"created_at":"2026-09-01","body":"c\(.)"}' ;;
+	*/labels*)                 tmpl='{"id":.,"name":"l\(.)","color":"ffffff","description":""}' ;;
+	*)                         tmpl='{"number":.,"iid":.,"title":"i\(.)","labels":[]}' ;;
 esac
-jq -nc --argjson s "$start" --argjson n "$n" "[range(\$s; \$s + \$n) | $tmpl]" >"$out"
+rows="$(jq -nc --argjson s "$start" --argjson n "$n" "[range(\$s; \$s + \$n) | $tmpl]")"
+
+next=$(( start + n ))
+case "$url" in
+	*/search/jql*)
+		jq -nc --argjson r "$rows" --argjson next "$next" --argjson t "$total" \
+			'{issues:$r} + (if $next < $t then {nextPageToken:($next|tostring)} else {isLast:true} end)' >"$out" ;;
+	*/rest/api/3/label*)
+		jq -nc --argjson r "$rows" --argjson s "$start" --argjson t "$total" --argjson m "$size" \
+			'{values:$r, startAt:$s, maxResults:$m, total:$t, isLast:(($s + ($r|length)) >= $t)}' >"$out" ;;
+	*/rest/api/3/issue/*/comment*)
+		jq -nc --argjson r "$rows" --argjson s "$start" --argjson t "$total" --argjson m "$size" \
+			'{comments:$r, startAt:$s, maxResults:$m, total:$t}' >"$out" ;;
+	*)
+		printf '%s' "$rows" >"$out" ;;
+esac
 
 if [ -n "$hdr" ]; then
 	{
 		printf 'HTTP/2 200\r\n'
 		[ "${NO_TOTAL:-0}" = 1 ] || printf '%s: %s\r\n' "${TOTAL_HEADER:-x-total-count}" "$total"
-		[ $(( start + n )) -ge "$total" ] || printf 'link: <https://x/next>; rel="next"\r\n'
+		[ "$next" -ge "$total" ] || printf 'link: <https://x/next>; rel="next"\r\n'
 		printf '\r\n'
 	} >"$hdr"
 fi
@@ -139,5 +173,29 @@ fi
 if "$ADAPTERS/forgejo/issues" list --limit abc >/dev/null 2>&1; then
 	fail "--limit abc was accepted"
 fi
+
+
+# --- Jira: the JQL search pages with an opaque nextPageToken ------------------
+# Jira clamps maxResults to its own ceiling and the enhanced search reports no
+# total, so the token is the only thing that says whether more remain.
+export LS_EMAIL=dev@example.invalid LS_PROJECT=ACME
+run "$ADAPTERS/jira/issues" list --state all --limit 200
+[ "$(rows)" = 109 ] || fail "jira list returned $(rows) rows, want 109"
+[ "$(reqs)" = 3 ] || fail "jira list made $(reqs) requests, want 3"
+[ ! -s "$SANDBOX/err" ] || fail "a complete jira list warned: $(cat "$SANDBOX/err")"
+grep -q '^ACME-0	i0	$' "$SANDBOX/out" || fail "jira rows are not the expected TSV: $(head -1 "$SANDBOX/out")"
+
+run "$ADAPTERS/jira/issues" list --state all --limit 50
+[ "$(rows)" = 50 ] || fail "jira limit 50 returned $(rows) rows"
+grep -q 'more are available' "$SANDBOX/err" || fail "jira did not warn at the cap: $(cat "$SANDBOX/err")"
+
+# --- Jira: the collection endpoints page with startAt against total -----------
+run "$ADAPTERS/jira/labels" list
+[ "$(rows)" = 109 ] || fail "jira labels returned $(rows) rows, want 109"
+grep -q '^l108		$' "$SANDBOX/out" || fail "the last jira label was dropped"
+
+run CAP=50 TOTAL=70 "$ADAPTERS/jira/issues" comments --number ACME-1
+[ "$(grep -c '^dave	' "$SANDBOX/out")" = 70 ] || fail "jira comments returned $(grep -c '^dave	' "$SANDBOX/out") of 70"
+grep -q '^c69$' "$SANDBOX/out" || fail "the newest jira comment was dropped"
 
 printf 'paging tests passed\n'
