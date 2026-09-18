@@ -270,6 +270,12 @@ EOF
 		return 1
 	fi
 	status="$(printf '%s\n' "$watch" | sed -n 's/.*status=\([a-z]*\).*/\1/p' | tail -n1)"
+	# Only `success` merges. `skipped` (#150) means every run was skipped, so CI
+	# verified nothing — not a failure, but never grounds to merge unattended.
+	if [ "$status" = skipped ]; then
+		row "$lower" stopped "PR #$num left open — CI ran nothing (every run skipped)"
+		return 1
+	fi
 	if [ "$status" != success ]; then
 		row "$lower" stopped "PR #$num left open — CI ${status:-reported no run}"
 		return 1

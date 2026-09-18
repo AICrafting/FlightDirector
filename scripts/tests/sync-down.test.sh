@@ -40,7 +40,7 @@ case "$group $verb" in
 		printf '%s\t%s\n' "$head" "$base" >"${STUB_LOG%.log}.pr"
 		printf '7\thttps://example.invalid/acme/widget/pulls/7\n' ;;
 	"ci watch")
-		printf 'ci runs=1 pending=0 failed=%s status=%s\n' "${STUB_CI_FAILED:-0}" "${STUB_CI_STATUS:-success}"
+		printf 'ci runs=1 pending=0 failed=%s skipped=%s status=%s\n' "${STUB_CI_FAILED:-0}" "${STUB_CI_SKIPPED:-0}" "${STUB_CI_STATUS:-success}"
 		exit "${STUB_CI_RC:-0}" ;;
 	"pr merge")
 		IFS=$'\t' read -r head base <"${STUB_LOG%.log}.pr"
@@ -241,6 +241,14 @@ check "pr merge was NOT called" "$(grep -q '^pr merge' "$STUB_LOG" && echo 0 || 
 check "origin/develop untouched" "$([ "$(osha develop)" = "$dev_before" ] && echo 1 || echo 0)"
 STUB_CI_RC=1 run --from qa; rc=$?
 check "ci watch timeout (non-zero) → stopped, PR left open" "$([ "$rc" != 0 ] && line develop | grep -q $'^develop\tstopped\tPR #7 left open' && ! grep -q '^pr merge' "$STUB_LOG" && echo 1 || echo 0)" "$(out)"
+
+# An all-skipped run (#150) is not a failure, but nothing was verified — the
+# cascade must stop on it rather than merge on a check that never executed.
+STUB_CI_STATUS=skipped STUB_CI_SKIPPED=1 run --from qa; rc=$?
+check "all-skipped CI → exit non-zero" "$([ "$rc" != 0 ] && echo 1 || echo 0)"
+check "row says the CI ran nothing, PR left open" "$(line develop | grep -q $'^develop\tstopped\tPR #7 left open.*ran nothing' && echo 1 || echo 0)" "$(out)"
+check "pr merge was NOT called on a skipped verdict" "$(grep -q '^pr merge' "$STUB_LOG" && echo 0 || echo 1)"
+check "origin/develop untouched by a skipped verdict" "$([ "$(osha develop)" = "$dev_before" ] && echo 1 || echo 0)"
 
 # ── 8. dirty checkout: merge in a throwaway worktree, push, report behind ────
 echo "── direct: dirty checkout"

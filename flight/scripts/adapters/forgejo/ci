@@ -53,7 +53,11 @@ case "$verb" in
         "${REPO_API}/actions/runs?${filter}limit=20" 2>/dev/null || true)"
       # Aggregate over ALL runs for this SHA (a PR can trigger several): keep
       # watching while any is pending; once none are pending the verdict is
-      # failure if any run failed, else success. total/pending/failed on one line.
+      # failure if any run failed, skipped if every run was skipped, else
+      # success. total/pending/failed/skipped on one line.
+      # `skipped` is counted on its own axis (#150): it is not a failure, but
+      # it is not a pass either — a run where nothing executed must not be
+      # indistinguishable from one that verified everything at the merge gate.
       # Superseded attempts don't count (#43): within each workflow, score the
       # latest run per trigger event — a retried-to-green flake must not watch
       # as failure — and if the workflow's newest run is a manual
@@ -72,15 +76,23 @@ case "$verb" in
         | ([$s[] | select(. as $x | ["waiting","running","queued","in_progress","blocked","unknown",""] | index($x))] | length) as $pending
         | ([$s[] | select((. as $x | ["waiting","running","queued","in_progress","blocked","unknown",""] | index($x)) | not)
                  | select((. as $x | ["success","skipped"] | index($x)) | not)] | length) as $failed
-        | "\($total) \($pending) \($failed)"' 2>/dev/null || true)"
-      read -r total pending failed <<<"$metrics" || true
-      total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"
+        | ([$s[] | select(. == "skipped")] | length) as $skipped
+        | "\($total) \($pending) \($failed) \($skipped)"' 2>/dev/null || true)"
+      read -r total pending failed skipped <<<"$metrics" || true
+      total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"; skipped="${skipped:-0}"
       if [ "$total" -gt 0 ]; then
         seen=1
-        if [ "$pending" -gt 0 ]; then agg=pending; elif [ "$failed" -gt 0 ]; then agg=failure; else agg=success; fi
-        sig="${total}/${pending}/${failed}"
+        # Verdict order matters: pending wins, then failure, then an all-skipped
+        # run (#150) — which is its own terminal outcome, NOT a pass, because
+        # nothing in it executed. A partial skip still passes; the skipped count
+        # on the line is what tells the human how much was actually verified.
+        if [ "$pending" -gt 0 ]; then agg=pending
+        elif [ "$failed" -gt 0 ]; then agg=failure
+        elif [ "$skipped" -eq "$total" ]; then agg=skipped
+        else agg=success; fi
+        sig="${total}/${pending}/${failed}/${skipped}"
         if [ "$sig" != "$last_sig" ]; then
-          echo "ci runs=${total} pending=${pending} failed=${failed} status=${agg}"
+          echo "ci runs=${total} pending=${pending} failed=${failed} skipped=${skipped} status=${agg}"
           last_sig="$sig"; _write "$agg"
         fi
         [ "$pending" -eq 0 ] && exit 0
