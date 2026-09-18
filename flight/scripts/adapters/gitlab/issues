@@ -35,12 +35,13 @@ case "$verb" in
       all)    q="" ;;
       *) die "issues list: --state must be open|closed|all" ;;
     esac
-    q="${q:+$q&}per_page=${limit}"
     if [ ${#labels[@]} -gt 0 ]; then
-      old="$IFS"; IFS=,; q="${q}&labels=${labels[*]}"; IFS="$old"
+      old="$IFS"; IFS=,; q="${q:+$q&}labels=${labels[*]}"; IFS="$old"
     fi
-    _api GET "/issues?${q}" \
-      | jq -r '.[] | [(.iid|tostring), .title, ((.labels // []) | join(","))] | @tsv'
+    # _paged_get honours --limit as a ceiling and pages underneath it, so a limit
+    # above the server's cap returns what it says rather than one clamped page.
+    _paged_get "/issues" "$q" "$limit" \
+      | jq -r '[(.iid|tostring), .title, ((.labels // []) | join(","))] | @tsv'
     ;;
 
   get)
@@ -64,9 +65,13 @@ case "$verb" in
     # One block per comment, oldest-first: `author⇥created_at` header, the raw
     # body, then a blank separator. System notes (label/state changes) are dropped.
     # GitLab returns notes newest-first, so reverse for oldest-first.
-    _api GET "/issues/${number}/notes?sort=asc&order_by=created_at&per_page=100" \
-      | jq -r '[.[] | select(.system | not)] | .[]
-               | ([(.author.username // "?"), .created_at] | @tsv), (.body // ""), ""'
+    # Paged to exhaustion: 100 is GitLab's per_page maximum and the thread renders
+    # oldest-first, so an unpaged fetch drops the NEWEST notes — precisely the ones
+    # "the later comment wins" depends on. System notes are dropped inside the
+    # pager so they never displace a real comment.
+    _paged_get "/issues/${number}/notes" "sort=asc&order_by=created_at" "" \
+      '.[] | select(.system | not)' \
+      | jq -r '([(.author.username // "?"), .created_at] | @tsv), (.body // ""), ""'
     ;;
 
   create)
