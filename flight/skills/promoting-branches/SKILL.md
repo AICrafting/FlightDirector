@@ -152,6 +152,9 @@ PR="$("$DISP" pr open --head "$INT" --base "$BASE" --title "Batch: <zone> (#<n>,
 # merge on the gate, using stages[0]'s configured strategy (default "merge" — never hard-code one):
 "$DISP" pr merge --number "<pr#>" --strategy "$("$DISP" config '.code.stages[0].strategy // "merge"')"
 git -C "$MAIN" worktree remove "$SCRATCH/int-<zone>"
+# The integration branch itself is left standing, local and on origin. `batch/*` is one of
+# `flight branches`' default patterns, so `cleaning-up-branches` finds it once its PR is
+# merged — don't hand-delete it here.
 ```
 
 ## Step 5: Per-issue bookkeeping + lifecycle (per promoted issue)

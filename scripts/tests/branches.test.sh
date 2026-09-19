@@ -64,6 +64,9 @@ branch release/0.1.0    r4          # → merged into develop below
 branch hotfix/5-merged  h5          # merged, but outside the default patterns
 branch feature/6-squashed f6        # "squash merged": PR-only evidence
 branch feature/7-worktree f7        # merged, and checked out in a worktree
+# `promoting-branches` leaves one of these behind per group on a `pr` hop (#168).
+branch batch/zone-0919  bz          # → merged into develop below
+branch batch/open-0919  bo          # never merged: must never be a candidate
 
 # archived/* is protected even when a --pattern would otherwise select it.
 git -C "$R" switch -q -c archived/feature/8-old develop
@@ -71,7 +74,7 @@ seed a8 "archived/feature/8-old"
 git -C "$R" push -q -u origin archived/feature/8-old
 
 git -C "$R" switch -q develop
-for b in feature/1-merged release/0.1.0 hotfix/5-merged feature/7-worktree; do
+for b in feature/1-merged release/0.1.0 hotfix/5-merged feature/7-worktree batch/zone-0919; do
 	git -C "$R" merge -q --no-ff -m "merge $b" "$b"
 done
 git -C "$R" push -q origin develop
@@ -122,6 +125,10 @@ check "finds a branch merged into a LATER stage (qa), not just stages[0]" \
 	"$(grep -q '^bugfix/3-merged	local+remote	qa	' <<<"$out" && echo 1 || echo 0)" "out=$out"
 check "release/* is a default pattern too" \
 	"$(grep -q '^release/0.1.0	' <<<"$out" && echo 1 || echo 0)" "out=$out"
+check "batch/* is a default pattern (the integration branches flight opens itself)" \
+	"$(grep -q '^batch/zone-0919	local+remote	develop	-	-	-$' <<<"$out" && echo 1 || echo 0)" "out=$out"
+check "an unmerged batch/* integration branch is never a candidate" \
+	"$(grep -q '^batch/open-0919' <<<"$out" && echo 0 || echo 1)" "out=$out"
 check "a merged branch outside the patterns is left alone" \
 	"$(grep -q '^hotfix/5-merged' <<<"$out" && echo 0 || echo 1)" "out=$out"
 check "no stage branch is ever listed" \
@@ -245,6 +252,14 @@ check "--remote deletes the branch on origin" \
 	"$(grep -q '^delete-remote	feature/1-merged' <<<"$out" && echo 1 || echo 0)" "out=$out"
 check "…and origin no longer has it" \
 	"$(git -C "$ORIGIN" rev-parse -q --verify refs/heads/feature/1-merged >/dev/null && echo 0 || echo 1)"
+
+out="$(run prune --local --branch batch/zone-0919)"
+check "prune --local deletes a merged batch/* integration branch" \
+	"$(grep -q '^delete-local	batch/zone-0919	merged into develop$' <<<"$out" && echo 1 || echo 0)" "out=$out"
+check "…and its local ref is really gone" \
+	"$(git -C "$R" rev-parse -q --verify refs/heads/batch/zone-0919 >/dev/null && echo 0 || echo 1)"
+check "…while the unmerged batch/* branch is left standing" \
+	"$(git -C "$R" rev-parse -q --verify refs/heads/batch/open-0919 >/dev/null && echo 1 || echo 0)"
 
 printf '\033[1m── worktrees ──\033[0m\n'
 
