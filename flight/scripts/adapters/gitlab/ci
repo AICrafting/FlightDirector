@@ -11,8 +11,12 @@ verb="${1:-}"; shift || true
 
 # GitLab pipeline statuses that mean "still going" vs. a clean pass. Anything
 # terminal that isn't a clean pass (failed, canceled) counts as a failure.
+# _SKIPPED is a subset of _PASSED: a skipped pipeline is not a failure, but
+# nothing in it executed, so it is scored on its own axis rather than folded
+# into the pass side (#150).
 _PENDING='["created","waiting_for_resource","preparing","pending","running","scheduled"]'
 _PASSED='["success","skipped","manual"]'
+_SKIPPED='["skipped"]'
 
 case "$verb" in
   # Stream one line per CI state change for a commit, exit on a terminal state.
@@ -55,14 +59,15 @@ case "$verb" in
       body="$(curl -sS "${GL_HEADERS[@]}" \
         "${PROJECT_API}/pipelines?sha=${sha}&per_page=20" 2>/dev/null || true)"
       # Aggregate over ALL pipelines for this SHA: keep watching while any is
-      # pending; once none are pending the verdict is failure if any failed.
+      # pending; once none are pending the verdict is failure if any failed,
+      # skipped if every pipeline was skipped, else success.
       # Superseded pipelines don't count (#43): job retries mutate the pipeline
       # in place (same id), so per-source only the latest pipeline is scored; a
       # newest `web` pipeline (manual "run pipeline") supersedes ALL earlier
       # pipelines for the sha — a human explicitly re-ran it. A missing source
       # falls back to the pipeline's own id, i.e. no collapse.
       metrics="$(printf '%s' "$body" | jq -r \
-        --argjson pend "$_PENDING" --argjson pass "$_PASSED" '
+        --argjson pend "$_PENDING" --argjson pass "$_PASSED" --argjson skip "$_SKIPPED" '
         [.[]?]
         | (if length == 0 then []
            elif (max_by(.id).source // "") == "web" then [max_by(.id)]
@@ -71,15 +76,23 @@ case "$verb" in
         | ([$r[] | select(.status as $s | $pend | index($s))] | length) as $pending
         | ([$r[] | select(.status as $s | ($pend | index($s)) | not)
                  | select(.status as $s | ($pass | index($s)) | not)] | length) as $failed
-        | "\($total) \($pending) \($failed)"' 2>/dev/null || true)"
-      read -r total pending failed <<<"$metrics" || true
-      total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"
+        | ([$r[] | select(.status as $s | $skip | index($s))] | length) as $skipped
+        | "\($total) \($pending) \($failed) \($skipped)"' 2>/dev/null || true)"
+      read -r total pending failed skipped <<<"$metrics" || true
+      total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"; skipped="${skipped:-0}"
       if [ "$total" -gt 0 ]; then
         seen=1
-        if [ "$pending" -gt 0 ]; then agg=pending; elif [ "$failed" -gt 0 ]; then agg=failure; else agg=success; fi
-        sig="${total}/${pending}/${failed}"
+        # Verdict order matters: pending wins, then failure, then an all-skipped
+        # run (#150) — which is its own terminal outcome, NOT a pass, because
+        # nothing in it executed. A partial skip still passes; the skipped count
+        # on the line is what tells the human how much was actually verified.
+        if [ "$pending" -gt 0 ]; then agg=pending
+        elif [ "$failed" -gt 0 ]; then agg=failure
+        elif [ "$skipped" -eq "$total" ]; then agg=skipped
+        else agg=success; fi
+        sig="${total}/${pending}/${failed}/${skipped}"
         if [ "$sig" != "$last_sig" ]; then
-          echo "ci runs=${total} pending=${pending} failed=${failed} status=${agg}"
+          echo "ci runs=${total} pending=${pending} failed=${failed} skipped=${skipped} status=${agg}"
           last_sig="$sig"; _write "$agg"
         fi
         [ "$pending" -eq 0 ] && exit 0

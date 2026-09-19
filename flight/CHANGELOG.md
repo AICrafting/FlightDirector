@@ -13,7 +13,19 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **`ci watch` no longer reports a run where nothing executed as green** (#150). `skipped` used to
+  be folded into the success side of the aggregate, so a workflow whose runs were all skipped (a
+  path filter that matched nothing, a `needs:` whose dependency was skipped, a conditional that
+  evaluated false) reported `status=success` and was indistinguishable, at the merge gate, from a
+  run that verified everything. Skipped is now counted on its own axis in all three code backends
+  (Forgejo, GitHub, GitLab): the line gained a `skipped=<s>` field, an all-skipped SHA verdicts as
+  the new `status=skipped` rather than `success`, and a partial skip still passes but names how many
+  runs did not run. `promoting-a-branch` and `promoting-branches` now handle that third verdict
+  instead of treating not-failed as passed. This is the false-green counterpart to #43's false red.
+  **Note for anything parsing the output line:** `status=` can now be `skipped`, and `skipped=<s>`
+  sits between `failed=` and `status=`.
 
 ## [0.15.1] - 2026-09-19
 

@@ -230,8 +230,18 @@ flight ci watch --pr "$PR_NUM" \
    --status-file "$SCRATCH/ls-ci-$BRANCH.json"
 ```
 
-On failure: `ci log --failed "$BRANCH"`, fix, push, re-watch. On success: tell the user
-**"CI passed — ready to merge #$PR_NUM."** Merge only on the user's go-ahead (`pre-merge` gate) or
+Read the verdict off the `status=` field of the last line, **not** off the exit code — `ci watch`
+exits 0 on every terminal verdict and non-zero only on a timeout. There are three:
+
+- `status=failure` — `ci log --failed "$BRANCH"`, fix, push, re-watch.
+- `status=success` — tell the user **"CI passed — ready to merge #$PR_NUM."** If `skipped=` is
+  non-zero, say so as well (**"CI passed, N of M runs skipped"**): part of the suite did not run.
+- `status=skipped` — **every** run was skipped, so CI verified *nothing*. This is not a pass and
+  not a failure: say **"CI ran nothing for #$PR_NUM (all N runs skipped) — nothing was verified."**
+  Don't merge on it, and don't treat it as a red either; it usually means a path filter matched
+  nothing or a `needs:` dependency was skipped. The user decides whether that is acceptable here.
+
+On a green verdict, merge only on the user's go-ahead (`pre-merge` gate) or
 per your `post-merge-qa` policy. Use the `$STRATEGY` resolved in Step 1 — the stage's configured
 strategy, defaulting to `merge`:
 
