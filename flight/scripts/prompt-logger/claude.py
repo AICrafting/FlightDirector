@@ -19,6 +19,12 @@ Claude Code hook payloads carry no turn_id and no model, so:
   row keyed by agent_id, keeping the parent session_id. The harness also fires
   SubagentStop for its own short-lived helpers (about every 30 s per running
   background agent): no agent_type, no transcript on disk. Those get no row (#155).
+  A real agent stops more than once too — each time it parks on background work or a
+  child agent, and again after handing its report back — so each stop logs only the
+  usage beyond that agent's earlier rows (`part: n` from the second on). Logging the
+  first stop alone, as this once did, lost 13-28% of subagent cost (#155). Agents
+  launched by agents stop on their own account; their rows carry `parent_agent_id`
+  and `spawn_depth`.
 
 Anthropic reports `input_tokens` as the *uncached* portion, separate from the cache
 counters. The shared record format defines `input_tokens` as the *total* prompt
@@ -37,7 +43,7 @@ import time
 import uuid
 from typing import Any
 
-from common import append_record, main_worktree, price_usage, read_state, remove_state, stable_key, state_path, warn, write_json_atomic
+from common import append_increment, append_record, main_worktree, price_usage, read_state, remove_state, stable_key, state_path, warn, write_json_atomic
 
 
 SUPPORTED_MODES = {"prompt", "stop", "interrupt", "subagent-stop"}
@@ -235,6 +241,30 @@ def price_by_model(repo_root: Path, by_model: dict[str, dict[str, int]]) -> floa
 	return round(cost, 12)
 
 
+def agent_lineage(transcript: str | None) -> dict[str, Any]:
+	"""Who launched this subagent, from the `agent-<id>.meta.json` Claude Code writes beside
+	its transcript. Nested agents (an agent launched by an agent) get their own SubagentStop
+	and their own transcript, so their cost is never inside the parent's row; these two
+	fields are what let a reader roll a child back up to the worker that spawned it.
+	The file is undocumented, so anything unexpected just means no lineage."""
+	if not transcript or not transcript.endswith(".jsonl"):
+		return {}
+	try:
+		with Path(transcript[:-len(".jsonl")] + ".meta.json").open(encoding="utf-8") as handle:
+			meta = json.load(handle)
+	except (OSError, json.JSONDecodeError):
+		return {}
+	lineage: dict[str, Any] = {}
+	if isinstance(meta, dict):
+		parent = meta.get("parentAgentId")
+		if isinstance(parent, str) and parent:
+			lineage["parent_agent_id"] = parent
+		depth = meta.get("spawnDepth")
+		if isinstance(depth, int) and not isinstance(depth, bool):
+			lineage["spawn_depth"] = depth
+	return lineage
+
+
 def make_record(event: dict[str, Any], delegated: bool) -> tuple[Path, dict[str, Any], str] | None:
 	session_id = require_string(event, "session_id")
 	now = time.time()
@@ -308,6 +338,7 @@ def make_record(event: dict[str, Any], delegated: bool) -> tuple[Path, dict[str,
 		record["models"] = {m: u["output_tokens"] for m, u in by_model.items()}
 	if delegated:
 		record["subagent"] = True
+		record.update(agent_lineage(transcript if isinstance(transcript, str) else None))
 	if not delegated and event.get("hook_event_name") == "Interrupt":
 		record["interrupted"] = True
 	record_key = stable_key("claude", session_id, turn_id, "subagent" if delegated else "main")
@@ -319,8 +350,11 @@ def finish(event: dict[str, Any], delegated: bool) -> None:
 	if made is None:
 		return
 	repo_root, record, record_key = made
-	append_record(repo_root, record, record_key)
-	if not delegated:
+	if delegated:
+		# An agent stops several times; each stop logs only what it adds (see append_increment).
+		append_increment(repo_root, record)
+	else:
+		append_record(repo_root, record, record_key)
 		remove_state(record["session_id"], ACTIVE)
 
 

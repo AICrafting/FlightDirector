@@ -89,6 +89,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 	reasons: dict[str, int] = {}
 	bases: set[str] = set()
 	subagent_rows = 0
+	agents: set[tuple[str, str]] = set()	# an agent logs one row per stop that added usage
 	for row in rows:
 		harness = str(row.get("harness") or "claude")	# legacy rows predate the field
 		provider = str(row.get("provider") or ("anthropic" if harness == "claude" else "unknown"))
@@ -102,6 +103,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 		group["rows"] += 1
 		if row.get("subagent"):
 			subagent_rows += 1
+			agents.add((str(row.get("session_id")), str(row.get("turn_id"))))
 		if row.get("input_tokens") is None and row.get("output_tokens") is None:
 			unmeasured += 1
 			reason = row.get("usage_missing")
@@ -133,6 +135,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 		"unmeasured_reasons": reasons,
 		"helper_stop_rows": helper_stops,
 		"subagent_rows": subagent_rows,
+		"subagent_agents": len(agents),
 		"cost_usd": round(total_cost, 6),
 		"cost_basis": sorted(bases),
 		"unpriced_models": sorted(unpriced_models, key=lambda m: (-m["rows"], m["model"])),
@@ -180,7 +183,7 @@ def render_markdown(summary: dict[str, Any], sessions: list[str]) -> str:
 	if no_model_rows:
 		notes.append(f"{no_model_rows} turn(s) recorded no model and cost nothing (omitted from the table)")
 	if summary["subagent_rows"]:
-		notes.append(f"{summary['subagent_rows']} subagent row(s) included")
+		notes.append(f"{summary['subagent_rows']} subagent row(s) from {summary['subagent_agents']} agent(s) included")
 	if summary["unmeasured_rows"]:
 		causes = sorted(summary["unmeasured_reasons"].items(), key=lambda item: (-item[1], item[0]))
 		named = ", ".join(f"{count} {MISSING_REASONS.get(reason, 'reason not recorded')}" for reason, count in causes)

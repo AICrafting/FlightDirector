@@ -30,6 +30,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   null-usage row now records why (`usage_missing`: `no-path` / `unreadable` / `no-usage`, both
   harnesses) and the summary names the causes instead of always saying "hook could not read the
   transcript"; and the parent-transcript fallback only counts the stopping agent's own entries.
+  (3) Claude Code fires `SubagentStop` for a real agent several times — each time it parks on a
+  background command or a child agent, and again after it hands its report back — and the ledger
+  kept only the first, so a subagent's cost stopped counting at its first pause: 13–28% low in a
+  measured capture, and far more for a worker that backgrounds a long CI watch early. Each stop
+  now logs the usage beyond that agent's earlier rows (`part: 2`, `3`, … from the second row), so
+  an agent's rows always sum to its transcript. Agents launched by other agents were already
+  logged on their own; their rows now carry `parent_agent_id` and `spawn_depth`, and the summary
+  note reads "N subagent row(s) from M agent(s)". Anything that sums ledger rows stays correct;
+  anything that assumed one row per agent should count distinct `turn_id`s instead.
 
 - **`ci watch` no longer reports a run where nothing executed as green** (#150). `skipped` used to
   be folded into the success side of the aggregate, so a workflow whose runs were all skipped (a

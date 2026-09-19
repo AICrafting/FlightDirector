@@ -100,6 +100,54 @@ check "untyped SubagentStop falling back to the parent transcript writes no row"
 invoke subagent-stop "$(jq -nc --arg cwd "$R" '{session_id:"session-main",cwd:$cwd,hook_event_name:"SubagentStop",agent_id:"agent-real",agent_type:"general-purpose",agent_transcript_path:"/nonexistent/agent-real.jsonl"}')" "$R" "$S" 2>/dev/null
 assert_jq "a typed subagent that cannot be measured still gets a row, with the reason" '.turn_id=="agent-real" and .output_tokens==null and .usage_missing=="unreadable"' "$R/.flightdirector/prompt-log.jsonl"
 
+# --- an agent stops several times; each stop logs only what it adds (#155) ---
+# Live capture: every agent fired SubagentStop 2-4 times — parked on a background shell or a
+# child agent, woken, then once more after handing its report back. Keeping the first stop
+# only (the old dedup) logged 72% of the real cost; logging every stop whole logged 239%.
+R="$T/multi"; S="$T/state-multi"; make_repo "$R" true; LOG="$R/.flightdirector/prompt-log.jsonl"
+mkdir -p "$T/live"
+stop_at() {	# stop_at <agent_id> <fixture.jsonl> <lines>  — the transcript as it stood at that stop, then the hook
+	head -n "$3" "$2" >"$T/live/agent-$1.jsonl"
+	if [ -f "${2%.jsonl}.meta.json" ]; then cp "${2%.jsonl}.meta.json" "$T/live/agent-$1.meta.json"; fi
+	invoke subagent-stop "$(jq -nc --arg cwd "$R" --arg id "$1" --arg path "$T/live/agent-$1.jsonl" '{session_id:"session-main",cwd:$cwd,hook_event_name:"SubagentStop",agent_id:$id,agent_type:"general-purpose",agent_transcript_path:$path}')" "$R" "$S" 2>/dev/null
+}
+MULTI="$FIXTURES/claude-subagent-multistop.jsonl"
+stop_at agent-multi "$MULTI" 2	# parked on a background shell
+stop_at agent-multi "$MULTI" 4	# woken, answered
+stop_at agent-multi "$MULTI" 4	# a stop with nothing new
+stop_at agent-multi "$MULTI" 6	# after the hand-back
+check "three stops that each added usage write three rows; the idle stop writes none" "$([ "$(wc -l <"$LOG")" -eq 3 ] && echo 1 || echo 0)"
+check "each row holds only that stop's increment" "$(jq -se '[.[].output_tokens]==[100,50,400] and [.[].input_tokens]==[30002,30503,30704] and [.[].cache_read_tokens]==[0,30000,30500]' "$LOG" >/dev/null && echo 1 || echo 0)"
+check "the rows sum to the whole transcript, tokens and cost" "$(jq -se '(map(.output_tokens)|add)==550 and (map(.input_tokens)|add)==(2+30000)+(3+500+30000)+(4+200+30500) and ((map(.cost_usd)|add)*1e9|round)==((9*5 + 30700*6.25 + 60500*0.5 + 550*25)/1e6*1e9|round)' "$LOG" >/dev/null && echo 1 || echo 0)"
+check "later rows are numbered, the first is not" "$(jq -se '[.[]|.part]==[null,2,3]' "$LOG" >/dev/null && echo 1 || echo 0)"
+
+# an agent first seen unmeasured, then readable: one null row, then everything
+R="$T/late"; S="$T/state-late"; make_repo "$R" true; LOG="$R/.flightdirector/prompt-log.jsonl"
+late="$(jq -nc --arg cwd "$R" --arg path "$T/live/agent-late.jsonl" '{session_id:"session-main",cwd:$cwd,hook_event_name:"SubagentStop",agent_id:"agent-late",agent_type:"general-purpose",agent_transcript_path:$path}')"
+invoke subagent-stop "$late" "$R" "$S" 2>/dev/null; invoke subagent-stop "$late" "$R" "$S" 2>/dev/null
+check "an unmeasurable agent gets one null row, not one per stop" "$(jq -se 'length==1 and .[0].usage_missing=="unreadable"' "$LOG" >/dev/null && echo 1 || echo 0)"
+cp "$MULTI" "$T/live/agent-late.jsonl"; invoke subagent-stop "$late" "$R" "$S" 2>/dev/null
+check "once its transcript is readable the full usage is logged" "$(jq -se 'length==2 and .[1].output_tokens==550 and (.[1]|has("usage_missing")|not)' "$LOG" >/dev/null && echo 1 || echo 0)"
+
+# --- agents launched by agents: own stops, own transcripts, lineage on the row (#155) ---
+# worker (depth 1) -> child (2) -> grandchild (3, the deepest Claude Code allows: it has no
+# Agent tool). Stops interleave the way the live capture did.
+R="$T/nested"; S="$T/state-nested"; make_repo "$R" true; LOG="$R/.flightdirector/prompt-log.jsonl"
+NEST="$FIXTURES/claude-nested"
+stop_at worker "$NEST/agent-worker.jsonl" 2			# parked on its child
+stop_at child "$NEST/agent-child.jsonl" 2			# parked on the grandchild
+stop_at grandchild "$NEST/agent-grandchild.jsonl" 2	# done
+stop_at grandchild "$NEST/agent-grandchild.jsonl" 2	# hand-back stop, nothing new
+stop_at child "$NEST/agent-child.jsonl" 4
+stop_at worker "$NEST/agent-worker.jsonl" 4
+check "nested run: one row per stop that added usage (5 of 6)" "$([ "$(wc -l <"$LOG")" -eq 5 ] && echo 1 || echo 0)"
+check "each agent's rows sum to its own transcript — a parent never absorbs its child" "$(jq -se 'def out(id): map(select(.turn_id==id).output_tokens)|add; out("worker")==200 and out("child")==100 and out("grandchild")==30' "$LOG" >/dev/null && echo 1 || echo 0)"
+check "the ledger total is the three transcripts, nothing twice" "$(jq -se '(map(.input_tokens)|add)==(2+20000)+(3+300+20000)+(2+10000)+(3+200+10000)+(2+5000) and (map(.cost_usd)|all(.!=null))' "$LOG" >/dev/null && echo 1 || echo 0)"
+check "rows carry who launched them and how deep" "$(jq -se 'def row(id): map(select(.turn_id==id))[0]; (row("worker")|.spawn_depth==1 and (has("parent_agent_id")|not)) and (row("child")|.spawn_depth==2 and .parent_agent_id=="worker") and (row("grandchild")|.spawn_depth==3 and .parent_agent_id=="child")' "$LOG" >/dev/null && echo 1 || echo 0)"
+check "children are priced on their own model" "$(jq -se 'map(select(.turn_id!="worker").model)|unique==["claude-haiku-4-5-20251001"]' "$LOG" >/dev/null && echo 1 || echo 0)"
+J5="$(python3 "$ROOT/flight/scripts/prompt-logger/summary.py" --log "$LOG" --session session-main --json)"
+check "summary counts agents as well as their rows" "$(jq -e '.subagent_rows==5 and .subagent_agents==3' <<<"$J5" >/dev/null && echo 1 || echo 0)"
+
 # ---------------------------------------------------------------------------
 # 4. failure modes: missing transcript → null usage + warning; unknown model → null cost + warning
 # ---------------------------------------------------------------------------

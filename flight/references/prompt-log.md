@@ -66,6 +66,10 @@ producers may add the optional extras at the end.
   "duration_seconds": 42.1                          // turn wall time
   // optional extras:
   // "subagent": true,           row for a delegated agent (SubagentStop); turn_id is the agent id
+  // "part": 2,                  Claude Code: this agent's 2nd, 3rd… row — an agent logs one row per stop, each
+  //                              holding only the usage since its previous row (absent on the first)
+  // "parent_agent_id": "a1b2…", Claude Code: the agent that launched this one (absent when the main loop did)
+  // "spawn_depth": 2,           Claude Code: 1 = launched by the main loop, 2 = by that agent, 3 = the deepest
   // "interrupted": true,        the turn was interrupted; usage is whatever had been reported
   // "usage_missing": "no-usage", only on a row whose token fields are null — why:
   //                              "no-path" (payload named no transcript) | "unreadable" | "no-usage"
@@ -96,6 +100,9 @@ producers may add the optional extras at the end.
   *would* cost via the API — useful for comparing issues, not a bill. Override the guess with
   `FLIGHT_CLAUDE_AUTH_MODE=api|subscription` / `FLIGHT_CODEX_AUTH_MODE=api|chatgpt`.
 - **Subagent rows** keep the parent `session_id` so a session total includes delegated work.
+  On Claude Code one agent usually has **several rows** (see *Several stops per agent* below);
+  they are increments, so adding rows is always right and "latest row per agent" is always wrong.
+  A nested agent's usage is only ever in its own rows, never its parent's.
 
 ## Pricing
 
@@ -148,6 +155,29 @@ subagent's transcript (`agent_transcript_path`); the producer sums every assista
 and prices per model, since subagents often run a different model than the main loop. A payload
 with no `agent_transcript_path` falls back to the parent `transcript_path`, counting only the
 sidechain entries whose `agentId` is this agent's.
+
+**Several stops per agent.** `SubagentStop` does not mean "finished". A live capture (34 stops,
+14 agents, #155) showed every agent stopping 2–4 times: whenever it parks on a background shell
+or on a child agent, again each time it is woken, and once more after handing its report back —
+even an agent that ran everything in the foreground stopped twice. Each stop re-reads the whole
+transcript, so the producer logs the **increment**: the transcript's totals minus what this
+agent's earlier rows already hold, read back from the ledger under the append lock (no side
+state to lose). A stop that adds nothing writes no row; rows after the first carry `part`.
+Measured against the final transcripts, first-stop-only logging (what flight did before) recorded
+72–86% of the real cost, logging every stop whole 155–239%, and increments 100%. The payload's
+`background_tasks` cannot be used to pick "the last stop": it lists every shell in the session
+with no owner, and an agent still lists itself as running in its own final stop. One residue: the
+transcript can trail the stop event by a moment, so a row may miss the last response — the next
+stop picks it up, and only an agent's very last response can stay uncounted.
+
+**Agents launched by agents.** A subagent can launch its own (depth 2), and that one another
+(depth 3); a depth-3 agent has no Agent tool, so that is the floor. Every nested agent fires its
+own `SubagentStop`s with its own `agent_id` and transcript, and a parent's transcript holds none
+of its child's requests — so nothing is double-counted and nothing is rolled up. The producer
+copies `parentAgentId` / `spawnDepth` from the `agent-<id>.meta.json` beside the transcript onto
+the row (`parent_agent_id`, `spawn_depth`) so a reader can attribute a child's cost to the worker
+that spawned it. That file is undocumented harness state: when it is missing or changes shape the
+fields are simply absent.
 
 **Harness-helper stops.** Claude Code also fires `SubagentStop` for short-lived internal helpers
 — observed about every 30 seconds per running background agent — whose payload has an `agent_id`

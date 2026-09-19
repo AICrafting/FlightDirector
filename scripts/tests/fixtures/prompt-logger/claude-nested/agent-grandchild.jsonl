@@ -1,0 +1,2 @@
+{"type":"user","timestamp":"2026-09-19T22:24:00.000Z","isSidechain":true,"agentId":"grandchild"}
+{"type":"assistant","timestamp":"2026-09-19T22:25:00.000Z","isSidechain":true,"agentId":"grandchild","requestId":"greq_1","message":{"model":"claude-haiku-4-5-20251001","usage":{"input_tokens":2,"output_tokens":30,"cache_creation_input_tokens":5000,"cache_read_input_tokens":0}}}
