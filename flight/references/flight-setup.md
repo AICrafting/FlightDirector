@@ -157,19 +157,22 @@ Consumed by the `cleaning-up-branches` skill and the `branches` dispatcher group
 ```jsonc
 "code": {
   // …existing keys (backend, owner, repo, api, stages)…
-  "branches": { "patterns": ["feature/*", "bugfix/*", "release/*"] }
+  "branches": { "patterns": ["feature/*", "bugfix/*", "release/*", "batch/*"] }
 }
 ```
 
 - `code.branches.patterns` — globs naming which branches are cleanup *candidates* at all.
-  Defaults to `["feature/*", "bugfix/*", "release/*"]` when absent, which matches flight's own
-  `feature/<N>-<slug>` convention plus the usual bugfix and release-fold names. Set it when your
-  repo spells them differently (`feat/*`, `fix/*`) so you don't pass `--pattern` every time.
+  Defaults to `["feature/*", "bugfix/*", "release/*", "batch/*"]` when absent, which matches
+  flight's own `feature/<N>-<slug>` convention and the `batch/<group>-<short>` integration
+  branches `promoting-branches` opens on a `pr` hop, plus the usual bugfix and release-fold
+  names. Set it when your repo spells them differently (`feat/*`, `fix/*`) so you don't pass
+  `--pattern` every time — your list **replaces** the defaults outright rather than adding to
+  them, so repeat any built-in prefix you still want covered.
   Widening it is safe: stage branches, `archived/*`, and any branch checked out in the main
   checkout or in a worktree outside `.worktrees/` are protected regardless of what the patterns
   say. Read it with:
   ```
-  flight config '.code.branches.patterns // ["feature/*","bugfix/*","release/*"]'
+  flight config '.code.branches.patterns // ["feature/*","bugfix/*","release/*","batch/*"]'
   ```
   There is deliberately **no** "delete on the remote by default" knob: remote deletion is the one
   irreversible step, so it stays an explicit `--remote` on each run.

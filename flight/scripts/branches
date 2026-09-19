@@ -117,13 +117,16 @@ else
 	TARGETS=("${STAGES[@]}")
 fi
 
-# Candidate patterns: --pattern wins, else code.branches.patterns, else the defaults.
+# Candidate patterns: --pattern wins, else code.branches.patterns (which REPLACES the
+# defaults outright — the two lists are never merged), else the defaults.
 if [ "${#patterns[@]}" -eq 0 ]; then
 	while IFS= read -r _p; do [ -n "$_p" ] && patterns+=("$_p"); done \
 		< <(jq -r '.code.branches.patterns[]? // empty' "$CFG")
 fi
 if [ "${#patterns[@]}" -eq 0 ]; then
-	patterns=("feature/*" "bugfix/*" "release/*")
+	# batch/* is in the defaults because flight creates those itself: `promoting-branches`
+	# opens one integration branch per group on a `pr` hop and nothing else removes it.
+	patterns=("feature/*" "bugfix/*" "release/*" "batch/*")
 fi
 
 # ── freshness ───────────────────────────────────────────────────────────────────
