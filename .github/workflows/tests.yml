@@ -133,9 +133,18 @@ jobs:
       - name: Install jq
         shell: bash
         run: |
+          # The sha256 is the one jq publishes in the release's own sha256sum.txt
+          # for this asset; the step runs the download, so verify it before doing so.
+          JQ_URL=https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe
+          JQ_SHA256=7451fbbf37feffb9bf262bd97c54f0da558c63f0748e64152dd87b0a07b6d6ab
           mkdir -p "$HOME/bin"
-          curl -sSL -o "$HOME/bin/jq.exe" \
-            https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe
+          # -f so an HTTP error fails here with curl's own message. Without it curl
+          # saves the error page as jq.exe and exits 0, and the leg dies one line
+          # later on `jq.exe: line 1: <!DOCTYPE html>`, which names neither the
+          # download nor the reason (#166). --retry so a transient 5xx or timeout
+          # does not fail the leg at all.
+          curl -fsSL --retry 3 --retry-delay 5 -o "$HOME/bin/jq.exe" "$JQ_URL"
+          printf '%s  %s\n' "$JQ_SHA256" "$HOME/bin/jq.exe" | sha256sum -c -
           "$HOME/bin/jq.exe" --version
           # setup-python installs `python`; the scripts invoke `python3`.
           if ! command -v python3 >/dev/null 2>&1 && command -v python >/dev/null 2>&1; then
