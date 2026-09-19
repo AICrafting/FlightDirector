@@ -18,7 +18,7 @@ pass=0; fail=0
 # nobody can reproduce locally says nothing about why.
 check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=$((pass+1));
 			else printf '\033[0;31m  ✗ %s\033[0m\n' "$1"; fail=$((fail+1));
-				printf '      rc=%s\n' "${rc:-unset}"; sed 's/^/      | /' <<<"${out:-}"; fi; }
+				printf '      rc=%s\n' "${rc:-unset}"; while IFS= read -r line; do printf '      | %s\n' "$line"; done <<<"${out:-}"; fi; }
 
 SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
 
