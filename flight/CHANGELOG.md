@@ -27,6 +27,18 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   **Note for anything parsing the output line:** `status=` can now be `skipped`, and `skipped=<s>`
   sits between `failed=` and `status=`.
 
+- **`auth check` now says which source the token came from** (#177). Token resolution is
+  env-first (`LS_TOKEN` → `FLIGHT_TOKEN` → the legacy `FORGEJO_TOKEN`, then the secrets file) and
+  never said so, so a token exported for a *different* forge — the classic stale `FORGEJO_TOKEN`
+  in a shell profile — produced a flat `HTTP 401` with `.flightdirector/secrets.json` as the
+  obvious, and wrong, suspect. The resolution order is unchanged; the silence is what was fixed.
+  The `authenticates` line now reads `token 024ffe8f… (from $FORGEJO_TOKEN)` or
+  `(from .flightdirector/secrets.json)` on every backend, and the *failing* branch carries the
+  same detail as a hint where it previously printed no token at all. Separately, the legacy
+  `FORGEJO_TOKEN` shadowing a present secrets file that holds a different token now gets a
+  one-line note on stderr; `LS_TOKEN` and `FLIGHT_TOKEN` are deliberate backend-neutral
+  overrides and stay quiet. Adapters get the source as `LS_TOKEN_SOURCE` in the environment.
+
 ## [0.15.1] - 2026-09-19
 
 ### Fixed
