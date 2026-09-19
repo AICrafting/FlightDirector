@@ -27,6 +27,41 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   **Note for anything parsing the output line:** `status=` can now be `skipped`, and `skipped=<s>`
   sits between `failed=` and `status=`.
 
+- **`cleaning-up-branches` now finds the `batch/*` branches `promoting-branches` leaves behind**
+  (#168). A `pr`-hop batch promote opens a `batch/<group>-<short>` integration branch per group and
+  nothing removes it afterwards, but `flight branches` only considered `feature/*`, `bugfix/*` and
+  `release/*` — so the documented cleanup pass never saw them and they accumulated on origin.
+  `batch/*` is now one of the built-in default patterns, and the places that state that list
+  (`flight-setup.md`, `cleaning-up-branches`) agree again. A `batch/*` branch carries no issue
+  number, so it is reported as "no cross-check was possible" rather than silently trusted.
+  `promoting-branches` still does not delete the branch itself, and now says so. Also documented
+  explicitly: a configured `code.branches.patterns` **replaces** the defaults outright rather than
+  adding to them.
+
+- **Every interpolated value in the `pr`, `ci` and `labels` adapters is URL-encoded** (#169).
+  Branch names, label names, usernames and states are caller input that ends up in a query string.
+  Unencoded, a space made curl refuse the whole request ("Malformed input to a URL function"), and
+  a `#` was worse: the request succeeded with everything after it cut off as a fragment, so a PR or
+  CI-log lookup silently matched nothing. Now encoded: `pr list --head/--base` (GitHub, GitLab),
+  `ci log --failed` (all three), and `issues assign --user` (GitLab). Delimiters are assembled
+  around the encoded value rather than through it — Forgejo's `refs/heads/` prefix and GitHub's
+  `owner:ref` colon stay literal — so a branch with no special character sends exactly the URL it
+  always did. The encoder now lives once in `_portable.sh`.
+
+- **`ci watch` no longer reports a healthy run as a hang just because it sat in a queue** (#171).
+  The watcher counted every second since it started against `code.ciWatchTimeout` (default 900),
+  which on a repo with one runner per platform is mostly queue time: a run that took 19m29s wall
+  clock with almost all of it waiting for a runner had its watcher die at 900s calling it a hang.
+  There are now two clocks. **`--timeout` / `code.ciWatchTimeout` changed meaning**: it bounds how
+  long a run may *execute*, not how long the watch may last. Time in which every job of every
+  non-terminal run is waiting for a runner is bounded separately by the new **`--queue-timeout` /
+  `LS_CI_QUEUE_TIMEOUT` / `code.ciQueueTimeout`** (default 3600; `0` disables either cap, as
+  before). Each message names which cap fired and the key that raises it. Because every backend
+  marks a run running as soon as *any* job starts, a run that looks like it is executing is
+  confirmed against its own job list first; anything unreadable counts as executing, so a blip can
+  only ever leave the shorter cap in charge. "No run found at all" is a trigger or push problem,
+  not a queue, and stays bounded by `--timeout` as it was.
+
 ## [0.15.1] - 2026-09-19
 
 ### Fixed
