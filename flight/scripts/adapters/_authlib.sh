@@ -37,6 +37,13 @@ need() {
 # mask <token> — first 8 characters only; a token must never be printed whole.
 mask() { printf '%.8s…' "$1"; }
 
+# token_desc — the masked token plus WHERE it came from (#177). LS_TOKEN_SOURCE
+# is exported by the dispatcher and names either an env var ("$FORGEJO_TOKEN") or
+# the secrets file's repo-relative path. Every adapter prints it through this one
+# helper so the four never disagree on the wording, and so the prefix stops being
+# a diagnostic you can only use by hand-comparing it against the secrets file.
+token_desc() { printf '%s (from %s)' "$(mask "$LS_TOKEN")" "${LS_TOKEN_SOURCE:-an unrecorded source}"; }
+
 _FAILS=0
 _PROBE_BODY=""; _PROBE_HDR=""; PROBE_CODE=""
 

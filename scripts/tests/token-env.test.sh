@@ -3,6 +3,12 @@
 # FLIGHT_TOKEN env override, the legacy FORGEJO_TOKEN name, LS_TOKEN taking
 # precedence over both, and the secrets file as the fallback. The network is
 # stubbed with a fake `curl` on PATH that records the Authorization header.
+#
+# It also covers what #177 added on top of that order: the winning source is
+# reported by `auth check` (LS_TOKEN_SOURCE), and the legacy FORGEJO_TOKEN
+# shadowing a present secrets file that holds a DIFFERENT token says so on
+# stderr. The order itself is unchanged, which the five original cases below
+# still assert.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -57,6 +63,60 @@ check "FLIGHT_TOKEN wins over FORGEJO_TOKEN" \
 	"$([ "$(run FLIGHT_TOKEN=from-flight FORGEJO_TOKEN=from-forgejo)" = from-flight ] && echo 1 || echo 0)"
 check "LS_TOKEN wins over both" \
 	"$([ "$(run LS_TOKEN=from-ls FLIGHT_TOKEN=from-flight FORGEJO_TOKEN=from-forgejo)" = from-ls ] && echo 1 || echo 0)"
+
+# --- #177: the resolved source is reported ---------------------------------
+# `auth check` is the verb that has to name its source. The fake curl answers
+# 200/`[]` for every probe, so identity "passes" with empty fields — enough for
+# the adapter to print its `authenticates` line, which is all we read here.
+echo '{"code":{"token":"from-candidate"}}' >"$R/cand-secrets.json"
+
+auth_check() {	# auth_check [VAR=value …] — `flight auth check` against the live secrets file
+	(cd "$R" && env -u LS_TOKEN -u FLIGHT_TOKEN -u FORGEJO_TOKEN -u LS_SECRETS_FILE \
+		PATH="$FAKE_DIR:$PATH" "$@" "$DISP" auth check 2>"$SANDBOX/err") || true
+}
+auth_check_secrets() {	# auth_check_secrets FILE [VAR=value …] — the same, against a CANDIDATE file
+	local f="$1"; shift
+	(cd "$R" && env -u LS_TOKEN -u FLIGHT_TOKEN -u FORGEJO_TOKEN -u LS_SECRETS_FILE \
+		PATH="$FAKE_DIR:$PATH" "$@" "$DISP" auth check --secrets "$f" 2>"$SANDBOX/err") || true
+}
+from() { sed -n 's/.*(from \(.*\))$/\1/p' | sed -n '1p'; }	# first match only; no `| head` (SIGPIPE, #110)
+
+check "auth check names the secrets file when it is the source" \
+	"$([ "$(auth_check | from)" = ".flightdirector/secrets.json" ] && echo 1 || echo 0)"
+# shellcheck disable=SC2016  # the literal env-var NAME is what the output must contain
+check "auth check names \$FORGEJO_TOKEN when the legacy env var is the source" \
+	"$([ "$(auth_check FORGEJO_TOKEN=from-forgejo | from)" = '$FORGEJO_TOKEN' ] && echo 1 || echo 0)"
+# shellcheck disable=SC2016  # the literal env-var NAME is what the output must contain
+check "auth check names the winner (\$FLIGHT_TOKEN) when both env vars are set" \
+	"$([ "$(auth_check FLIGHT_TOKEN=from-flight FORGEJO_TOKEN=from-forgejo | from)" = '$FLIGHT_TOKEN' ] && echo 1 || echo 0)"
+# shellcheck disable=SC2016  # the literal env-var NAME is what the output must contain
+check "auth check names \$LS_TOKEN when it outranks the rest" \
+	"$([ "$(auth_check LS_TOKEN=from-ls FLIGHT_TOKEN=from-flight | from)" = '$LS_TOKEN' ] && echo 1 || echo 0)"
+check "auth check --secrets names the candidate file, not a shadowing env var" \
+	"$([ "$(auth_check_secrets cand-secrets.json FORGEJO_TOKEN=from-forgejo | from)" = "cand-secrets.json" ] && echo 1 || echo 0)"
+
+# --- #177: the shadow note -------------------------------------------------
+# It rides the every-verb path, so it is deliberately narrow: ONLY the legacy
+# FORGEJO_TOKEN winning over a present secrets file that holds something else.
+# A deliberate LS_TOKEN/FLIGHT_TOKEN override must not nag a two-forge setup on
+# every single call; `auth check` names the source for those, which is enough.
+# `issues list` is used here, not `auth check`, to prove it is the general path.
+quiet() { case "$(cat "$SANDBOX/err")" in *overrides*) echo 0 ;; *) echo 1 ;; esac; }
+
+run FORGEJO_TOKEN=from-forgejo >/dev/null
+# shellcheck disable=SC2016  # the literal env-var NAME is what the output must contain
+check "the legacy FORGEJO_TOKEN shadowing a differing secrets file notes it on stderr" \
+	"$(case "$(cat "$SANDBOX/err")" in *'$FORGEJO_TOKEN is set and overrides .flightdirector/secrets.json'*) echo 1 ;; *) echo 0 ;; esac)"
+run FORGEJO_TOKEN=from-secrets >/dev/null
+check "a legacy env token that merely repeats the secrets file stays quiet" "$(quiet)"
+run FLIGHT_TOKEN=from-flight >/dev/null
+check "a deliberate FLIGHT_TOKEN override stays quiet on the every-verb path" "$(quiet)"
+run LS_TOKEN=from-ls >/dev/null
+check "a deliberate LS_TOKEN override stays quiet on the every-verb path" "$(quiet)"
+run >/dev/null
+check "a secrets-only setup stays quiet" "$(quiet)"
+auth_check_secrets cand-secrets.json FORGEJO_TOKEN=from-forgejo >/dev/null
+check "--secrets stays quiet: the env is already out of the picture" "$(quiet)"
 
 # Summary: plain when nothing failed, red when something did (#123).
 [ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''

@@ -27,9 +27,10 @@ HDRS=(-H "PRIVATE-TOKEN: ${LS_TOKEN}")
 is_bot=0
 if probe GET "${SITE}/user"; then
 	is_bot="$(body_field 'if (.bot // false) then 1 else 0 end')"
-	pass "authenticates" "$(body_field '.username // "?"')$(body_field 'if (.bot // false) then " (bot)" else "" end') (id $(body_field '.id // "?"')) — token $(mask "$LS_TOKEN")"
+	pass "authenticates" "$(body_field '.username // "?"')$(body_field 'if (.bot // false) then " (bot)" else "" end') (id $(body_field '.id // "?"')) — token $(token_desc)"
 else
 	fail "authenticates" "$(why)"
+	hint "token $(token_desc)"
 	hint "401 invalid_token almost always means the token is past its expiry date"
 fi
 
