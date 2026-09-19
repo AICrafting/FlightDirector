@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.15.1] - 2026-09-19
+
 ### Fixed
 
 - **`list` verbs no longer truncate silently at the server's cap** (#149). Every backend clamps a
@@ -32,6 +36,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   comments` on GitHub, GitLab and Jira — those render oldest-first, so an unpaged fetch dropped
   the **newest** comments, which is precisely what "the later comment wins" depends on. Forgejo's
   comment endpoint ignores paging and returns the whole thread, so it is unchanged.
+
+- **`issues list --label` works for label names with a space** (#140). The Forgejo and GitLab
+  adapters put the `--label` value into the query string raw, so any label with a space, which
+  is every default status label (`status/to test`, `status/in progress`), made curl refuse the
+  URL (`Malformed input to a URL function`) and the list fail. That broke the board cross-check
+  `cleaning-up-branches` documents. Every value interpolated into an `issues list` URL is now
+  percent-encoded on Forgejo, GitLab and GitHub (GitHub already encoded labels; its `--state`
+  now is too). Several labels are encoded one by one and then comma-joined, so the separator
+  survives. Jira is unchanged: its JQL travels in the request body and was already quoted.
 
 ## [0.15.0] - 2026-09-17
 
