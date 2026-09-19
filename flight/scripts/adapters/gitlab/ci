@@ -104,7 +104,7 @@ case "$verb" in
       pipeline_id="$(_api GET "/pipelines?sha=${sha}&order_by=id&sort=desc&per_page=20" \
         | jq -r 'first(.[]? | select(.status != "success" and .status != "skipped") | .id) // (.[0].id // empty)')"
     else
-      pipeline_id="$(_api GET "/pipelines?ref=${failed_branch}&status=failed&order_by=id&sort=desc&per_page=1" \
+      pipeline_id="$(_api GET "/pipelines?ref=$(urlenc "$failed_branch")&status=failed&order_by=id&sort=desc&per_page=1" \
         | jq -r '.[0].id // empty')"
     fi
     [ -n "$pipeline_id" ] || die "ci log: no pipeline found"

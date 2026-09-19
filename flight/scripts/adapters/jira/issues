@@ -245,7 +245,7 @@ case "$verb" in
     esac; done
     [ -n "$number" ] || die "issues assign: --number required"
     [ -n "$user" ]   || die "issues assign: --user required"
-    aid="$(_api GET "/rest/api/3/user/search?query=$(jq -rn --arg q "$user" '$q|@uri')" \
+    aid="$(_api GET "/rest/api/3/user/search?query=$(urlenc "$user")" \
       | jq -r '.[0].accountId // empty')"
     [ -n "$aid" ] || die "issues assign: no Jira user matches '${user}'"
     _api PUT "/rest/api/3/issue/${number}/assignee" "$(jq -n --arg id "$aid" '{accountId:$id}')" >/dev/null

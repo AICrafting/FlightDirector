@@ -64,6 +64,26 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
   one-line reason on stderr. Skills must check it — a non-zero exit is a hard stop, never a
   silent no-op.
 
+## URL encoding
+
+**Every caller-supplied value an adapter puts in a URL — query parameter or path segment — is
+percent-encoded, through the one shared `urlenc` in `flight/scripts/_portable.sh`.** Adapters do
+not define their own; `_portable.sh` is sourced by every adapter and by `_authlib.sh`, so `urlenc`
+is simply in scope. It is `jq`'s `@uri`, which leaves the RFC 3986 unreserved set alone
+(`A-Z a-z 0-9 - _ . ~`) and encodes everything else as UTF-8 bytes. It goes through `_portable.sh`'s
+`jq` wrapper, so a Windows `jq.exe` cannot smuggle a CR into the URL.
+
+Encode the **value**, never the assembled URL: the `?`, `&` and `=` that separate parameters, a
+fixed path prefix such as `refs/heads/`, and GitHub's `owner:ref` colon are delimiters, so they are
+written around what `urlenc` returns rather than passed through it.
+
+Branch names, label names, states and usernames are all caller input and all reach a query string.
+Unencoded, a space makes curl refuse the whole request outright ("Malformed input to a URL
+function") and a `#` truncates the query at the fragment — the second is the dangerous one, because
+the request succeeds and the lookup silently matches nothing. Values the adapter itself produced,
+and backend ids that are verified integers or hex SHAs, need no encoding; encoding them anyway is
+harmless and byte-identical.
+
 ## Paging
 
 Every backend clamps a list request to its own maximum and reports the clamp only in a header:

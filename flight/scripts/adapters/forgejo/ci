@@ -118,7 +118,10 @@ case "$verb" in
         | jq -c --arg sha "$sha" '[.workflow_runs[]? | select((.commit_sha // "")|startswith($sha))]
           | sort_by(.started // .created) | last // empty')"
     else
-      run="$(_api GET "/actions/runs?ref=refs/heads/${branch}&status=failure&limit=1" \
+      # The `refs/heads/` prefix is ours and stays literal; only the branch name
+      # the caller passed is encoded, so an ordinary branch sends the same URL
+      # it always did and `feat/a b` no longer breaks the request.
+      run="$(_api GET "/actions/runs?ref=refs/heads/$(urlenc "$branch")&status=failure&limit=1" \
         | jq -c '.workflow_runs[0] // empty')"
     fi
     [ -n "$run" ] || die "ci log: no CI run found for ${sha:-$branch}"

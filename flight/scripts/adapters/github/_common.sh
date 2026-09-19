@@ -55,20 +55,12 @@ _api() {
   cat "$tmp"; rm -f "$tmp"
 }
 
-# urlenc <string> — percent-encode for a URL path segment. Label names contain
-# spaces and '/', which must be encoded for the DELETE-label-by-name endpoint.
-# Handles ASCII (label names are ASCII in this project).
-urlenc() {
-  local s="$1" out="" c i
-  for (( i=0; i<${#s}; i++ )); do
-    c="${s:$i:1}"
-    case "$c" in
-      [a-zA-Z0-9.~_-]) out+="$c" ;;
-      *) out+="$(printf '%%%02X' "'$c")" ;;
-    esac
-  done
-  printf '%s' "$out"
-}
+# `urlenc` comes from ../../_portable.sh — every value interpolated into a URL
+# goes through it. The hand-rolled loop that used to live here agreed with jq's
+# `@uri` on every ASCII character but encoded a non-ASCII one as its raw
+# codepoint (`é` → `%E9`) instead of its UTF-8 bytes (`%C3%A9`), which no server
+# decodes back to the name that was asked for. See the "URL encoding" rule in
+# ../../../references/adapter-contract.md.
 
 # --- Paging ----------------------------------------------------------------
 # GitHub's list endpoints default to 30 rows per page and cap `per_page` at 100, so
