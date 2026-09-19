@@ -2,8 +2,10 @@
 # Local pre-push lint check — mirrors the CI lint workflow.
 # Can be run from anywhere:
 #   lint.sh             — run all checks
+#   lint.sh all         — the same, said out loud
 #   lint.sh yaml        — yamllint only
 #   lint.sh shell       — shellcheck only
+# Anything else is a usage error (exit 2), not an empty green run.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -14,6 +16,23 @@ fail=0
 skipped=0
 missing=""
 filter="${1:-all}"
+
+# An unrecognised filter used to match no check at all, so a typo
+# (`lint.sh yml`, `lint.sh shellcheck`) printed "Passed: 0  Failed: 0" and
+# exited 0 — green, having linted nothing (#170). That is the same trap #135
+# closed for a missing linter, but it is a usage error rather than a missing
+# tool, so it is rejected here, before any linter runs, instead of borrowing
+# #135's "install a linter" message.
+case "$filter" in
+	all | yaml | shell) ;;
+	*)
+		# ${0##*/} rather than basename: this runs under a PATH that may hold
+		# nothing but the tools lint.sh needs (see scripts/tests/lint.test.sh).
+		printf '\033[0;31merror: unknown filter '"'"'%s'"'"'\033[0m\n' "$filter" >&2
+		printf 'usage: %s [all|yaml|shell]\n' "${0##*/}" >&2
+		exit 2
+		;;
+esac
 
 run_check() {
 	local name="$1"

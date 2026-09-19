@@ -99,6 +99,33 @@ check "filtered run with its linter missing exits non-zero" \
 check "filtered run with its linter missing reports one skip" \
 	"$(grep -q '^Passed: 0  Failed: 0  Skipped: 1$' <<<"$out" && echo 1 || echo 0)"
 
+# --- an unknown filter is a usage error, not an empty green run (#170) ---
+# Both linters are on the PATH here, so nothing can be "skipped": the only
+# reason to come back non-zero is the filter itself.
+run_lint "$BOTH" yml
+check "unknown filter exits 2" "$([ "$rc" = 2 ] && echo 1 || echo 0)"
+check "unknown filter names the offending value" \
+	"$(grep -q "unknown filter 'yml'" <<<"$out" && echo 1 || echo 0)"
+check "unknown filter names the accepted values" \
+	"$(grep -q 'all|yaml|shell' <<<"$out" && echo 1 || echo 0)"
+check "unknown filter prints no summary line" \
+	"$(grep -q '^Passed: ' <<<"$out" && echo 0 || echo 1)"
+
+# It must be rejected before any linter runs, not after: a failing yamllint
+# would otherwise mask the usage error behind a lint failure.
+run_lint "$FAILING" yml
+check "unknown filter is rejected before any linter runs" \
+	"$([ "$rc" = 2 ] && echo 1 || echo 0)"
+
+# The accepted values still behave as before (#123/#135 contract untouched).
+run_lint "$BOTH" all
+check "explicit 'all' filter exits 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)"
+check "explicit 'all' filter runs both checks" \
+	"$(grep -q '^Passed: 2  Failed: 0$' <<<"$out" && echo 1 || echo 0)"
+run_lint "$BOTH" shell
+check "'shell' filter runs only shellcheck" \
+	"$(grep -q '^Passed: 1  Failed: 0$' <<<"$out" && echo 1 || echo 0)"
+
 # --- a real failure still wins over the skip accounting (#123) ---
 run_lint "$FAILING"
 check "a failing linter exits 1" "$([ "$rc" = 1 ] && echo 1 || echo 0)"
