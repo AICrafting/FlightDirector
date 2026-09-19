@@ -18,8 +18,15 @@ jobs:
       matrix:
         include:
           # The baseline: a current bash, which is what CI has always run.
+          #
+          # Pinned, not `alpine:latest`: a floating base can change the bash,
+          # BusyBox and coreutils under the tests between two runs of the same
+          # commit (#167). 3.22 deliberately matches the alpine3.22 in the
+          # bash 3.2 image below, so the two Linux legs differ in the
+          # interpreter and nothing else — which is the point of the matrix.
+          # Bump both together.
           - name: bash 5
-            image: alpine:latest
+            image: alpine:3.22.6
             packages: npm bash gawk git coreutils jq python3
 
           # macOS ships bash 3.2.57 and nothing newer, so `/usr/bin/env bash` there
