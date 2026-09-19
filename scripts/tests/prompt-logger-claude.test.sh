@@ -155,7 +155,7 @@ EOF
 MD4="$(cd "$R" && "$DISP" prompt-log summary --session S3)"
 check "unpriced model is named in the summary note" "$(grep -q 'No pricing for \*\*gpt-7-nova\*\* (openai, 2 rows)' <<<"$MD4" && echo 1 || echo 0)"
 check "the note says how to fix it (pricing.json override)" "$(grep -q '\.flightdirector/pricing\.json' <<<"$MD4" && echo 1 || echo 0)"
-check "priced models do not appear in the note" "$(grep 'No pricing for' <<<"$MD4" | grep -qv 'claude-fable-5-1' && echo 1 || echo 0)"
+check "priced models do not appear in the note" "$(grep -qv 'claude-fable-5-1' < <(grep 'No pricing for' <<<"$MD4") && echo 1 || echo 0)"
 J4="$(cd "$R" && "$DISP" prompt-log summary --session S3 --json)"
 check "json aggregate lists unpriced_models with row counts" "$(jq -e '.unpriced_models==[{"model":"gpt-7-nova","provider":"openai","harness":"codex","rows":2}]' <<<"$J4" >/dev/null && echo 1 || echo 0)"
 MD5="$(cd "$R" && "$DISP" prompt-log summary --session S1)"

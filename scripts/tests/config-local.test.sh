@@ -32,9 +32,9 @@ check "no config.local.json: nothing on stderr" "$([ ! -s "$R/err" ] && echo 1 |
 R="$(mkrepo nested)"
 echo '{"code":{"owner":"me","promptLog":{"enabled":true}}}' >"$R/.flightdirector/config.local.json"
 out="$(cd "$R" && "$DISP" config '.code | [.owner, .repo, .backend, .promptLog.enabled] | tojson' 2>"$R/err")"
-check "local scalar overrides the tracked value" "$(printf '%s' "$out" | grep -q '"me"' && echo 1 || echo 0)" "$out"
-check "sibling keys the local file omits survive" "$(printf '%s' "$out" | grep -q '"widget"' && printf '%s' "$out" | grep -q '"forgejo"' && echo 1 || echo 0)" "$out"
-check "nested objects merge key by key" "$(printf '%s' "$out" | grep -q 'true' && echo 1 || echo 0)" "$out"
+check "local scalar overrides the tracked value" "$(grep -q '"me"' <<<"$out" && echo 1 || echo 0)" "$out"
+check "sibling keys the local file omits survive" "$(grep -q '"widget"' <<<"$out" && grep -q '"forgejo"' <<<"$out" && echo 1 || echo 0)" "$out"
+check "nested objects merge key by key" "$(grep -q 'true' <<<"$out" && echo 1 || echo 0)" "$out"
 check "a valid local file is silent" "$([ ! -s "$R/err" ] && echo 1 || echo 0)" "$(cat "$R/err")"
 
 # --- 3. arrays replace, they do not patch --------------------------------------
