@@ -119,7 +119,7 @@ check "flight Codex plugin.json bumped" \
 	"$([ "$(json_version "$SANDBOX/flight/.codex-plugin/plugin.json")" = "1.3.0" ] && echo 1 || echo 0)"
 
 check "marketplace flight entry bumped" \
-	"$(grep -A3 '"name": "flight"' "$SANDBOX/.claude-plugin/marketplace.json" | grep -q '"version": "1.3.0"' && echo 1 || echo 0)"
+	"$(grep -q '"version": "1.3.0"' < <(grep -A3 '"name": "flight"' "$SANDBOX/.claude-plugin/marketplace.json") && echo 1 || echo 0)"
 
 check "flight CHANGELOG has dated new heading" \
 	"$(grep -q "^## \[1.3.0\] - $TODAY\$" "$SANDBOX/flight/CHANGELOG.md" && echo 1 || echo 0)"
@@ -175,9 +175,9 @@ fi
 # --- empty-Unreleased warning (bump 'other', whose Unreleased is a placeholder)
 warn_out="$(BUMP_VERSION_ROOT="$SANDBOX" "$BUMP" other 9.10.0 2>&1 >/dev/null || true)"
 check "warns when rolling an empty Unreleased section" \
-	"$(printf '%s' "$warn_out" | grep -qi 'unreleased' && printf '%s' "$warn_out" | grep -qiE 'empty|nothing' && echo 1 || echo 0)"
+	"$(grep -qi 'unreleased' <<<"$warn_out" && grep -qiE 'empty|nothing' <<<"$warn_out" && echo 1 || echo 0)"
 check "still bumps despite empty Unreleased" \
-	"$(json_version "$SANDBOX/other/.claude-plugin/plugin.json" | grep -qx '9.10.0' && echo 1 || echo 0)"
+	"$(grep -qx '9.10.0' < <(json_version "$SANDBOX/other/.claude-plugin/plugin.json") && echo 1 || echo 0)"
 
 # --- summary ----------------------------------------------------------------
 # Summary: plain when nothing failed, red when something did (#123).

@@ -31,7 +31,7 @@ cols="$(head -1 <<<"$OUT" | awk -F'\t' '{print NF}')"
 [ "$cols" = 3 ] && ok "list rows are 3-col TSV" || no "list rows are 3-col TSV" "got $cols cols"
 
 GET="$(lsp issues get --number "$N")"
-head -1 <<<"$GET" | grep -q "First issue" && ok "get returns title line" || no "get returns title line" "$GET"
+grep -q "First issue" < <(head -1 <<<"$GET") && ok "get returns title line" || no "get returns title line" "$GET"
 grep -q "hello body" <<<"$GET" && ok "get returns body" || no "get returns body"
 
 echo "── labels resolve ──"
@@ -65,7 +65,7 @@ else no "comment exits 0"; fi
 echo "── comments (read) ──"
 CMTS="$(lsp issues comments --number "$N")"
 grep -q "a smoke comment" <<<"$CMTS" && ok "comments returns the posted body" || no "comments returns the posted body" "$CMTS"
-head -1 <<<"$CMTS" | grep -q $'\t' && ok "comments header line is author⇥timestamp TSV" || no "comments header is TSV" "$(head -1 <<<"$CMTS")"
+grep -q $'\t' < <(head -1 <<<"$CMTS") && ok "comments header line is author⇥timestamp TSV" || no "comments header is TSV" "$(head -1 <<<"$CMTS")"
 
 echo "── pr open / merge ──"
 # Make a branch with a diff via the API (create a file on a new branch off main).
