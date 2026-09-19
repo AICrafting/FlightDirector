@@ -1,6 +1,6 @@
 ---
 name: cleaning-up-branches
-description: Use when clearing out branches whose work has already shipped — "clean up the branches", "delete merged branches", "prune old feature branches", "what branches can go", "tidy up the worktrees", "origin is full of old feature branches". Finds feature/bugfix/release branches already merged into a stage, cross-checks each against its issue, previews them, and deletes the local ref, the remote ref, and the leftover worktree only on your go-ahead.
+description: Use when clearing out branches whose work has already shipped — "clean up the branches", "delete merged branches", "prune old feature branches", "what branches can go", "tidy up the worktrees", "origin is full of old feature branches". Finds feature/bugfix/release/batch branches already merged into a stage, cross-checks each against its issue, previews them, and deletes the local ref, the remote ref, and the leftover worktree only on your go-ahead.
 ---
 
 # Cleaning Up Branches
@@ -9,7 +9,8 @@ Before the first command, follow [runtime preflight](../../references/runtime.md
 
 `working-an-issue` and `promoting-branches` remove an issue's **worktree** when it merges;
 nothing removes the **branch**. So every worked issue leaves a `feature/<N>-<slug>` on origin
-and usually a local ref, and `release/*` fold branches pile up the same way. This skill finds
+and usually a local ref; `release/*` fold branches and the `batch/*` integration branches
+`promoting-branches` opens on a `pr` hop pile up the same way. This skill finds
 the ones whose work has demonstrably landed and — after a preview and your go-ahead — deletes
 them.
 
@@ -55,12 +56,14 @@ that discovers the path. Everything after it uses `-C`.
 MAIN="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 
 flight config '.code.stages'                    # the pipeline these branches merged into
-flight config '.code.branches.patterns // ["feature/*","bugfix/*","release/*"]'
+flight config '.code.branches.patterns // ["feature/*","bugfix/*","release/*","batch/*"]'
 ```
 
 `code.branches.patterns` names which branches are even candidates. Absent, the defaults above
-apply. A repo with another convention (`feat/*`, `fix/*`) sets the key rather than having you
-pass `--pattern` every time.
+apply — including `batch/*`, because flight opens those integration branches itself. A repo
+with another convention (`feat/*`, `fix/*`) sets the key rather than having you pass
+`--pattern` every time; the configured list **replaces** the defaults outright rather than
+adding to them, so a repo that sets it has to repeat any built-in prefix it still wants.
 
 ## Step 2: Refresh the picture, then list candidates
 
@@ -115,6 +118,11 @@ flight issues list --state open --label "status/to test" --limit 200
 flight issues list --state open --label "status/qa"    --limit 200   # …and each later stage
 ```
 
+`--limit 200` really does fetch up to 200 rows: the adapter pages underneath the limit. If one of
+these prints `warning: showing 200 of N rows …` on stderr, the accepted set is incomplete — raise
+the limit past N and re-read before judging anything, because a branch whose issue fell off the
+end looks like a board mismatch and gets skipped for the wrong reason.
+
 Then judge each row:
 
 - Issue is **closed**, or **open carrying the merged stage's status or any later stage's** →
@@ -125,8 +133,11 @@ Then judge each row:
   never relabelled it. Skipping; fix the board first."*
 - Issue number is present but the issue **doesn't exist** (renumbered repo, hand-named branch)
   → skip and flag.
-- **No issue number** (`-`) — a `release/*` fold branch, or a hand-named branch. There is
-  nothing to cross-check, so say so and let the user decide that row on its own.
+- **No issue number** (`-`) — a `release/*` fold branch, a `batch/*` integration branch, or a
+  hand-named branch. There is nothing to cross-check, so say so and let the user decide that
+  row on its own. A `batch/*` branch is flight's own: `promoting-branches` opened it to carry a
+  group of features through one PR, so once that PR is merged it is safe — but the user still
+  hears that no cross-check was possible.
 
 This step is the whole reason the skill exists rather than a one-liner. `flight branches` can
 tell you what git and the backend believe; only this comparison notices when they disagree.
@@ -213,8 +224,8 @@ died halfway, and that is worth an issue of its own.
 - Skipping Step 3 because the ancestry check "already proves" the work merged. It proves the
   *code* merged; it says nothing about whether the issue was ever moved along, and a merged
   branch behind a `status/in progress` issue is a bug report about the workflow.
-- Treating a branch with no issue number as a free deletion. `release/*` fold branches often
-  are safe, but "no cross-check was possible" is something the user should hear, not something
+- Treating a branch with no issue number as a free deletion. `release/*` fold branches and
+  `batch/*` integration branches often are safe, but "no cross-check was possible" is something the user should hear, not something
   to quietly resolve in favour of deleting.
 - Running a bare `git branch -d` / `git push origin --delete` instead of `flight branches
   prune`. The protections (stage names, `archived/*`, checkouts outside `.worktrees/`, no-force)

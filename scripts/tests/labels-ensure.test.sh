@@ -15,6 +15,7 @@ out=""; method=GET; url=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		-o) out="$2"; shift 2 ;;
+		-D) shift 2 ;;
 		-w) shift 2 ;;
 		-X) method="$2"; shift 2 ;;
 		-H|--data-binary) shift 2 ;;

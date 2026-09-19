@@ -64,6 +64,9 @@ branch release/0.1.0    r4          # → merged into develop below
 branch hotfix/5-merged  h5          # merged, but outside the default patterns
 branch feature/6-squashed f6        # "squash merged": PR-only evidence
 branch feature/7-worktree f7        # merged, and checked out in a worktree
+# `promoting-branches` leaves one of these behind per group on a `pr` hop (#168).
+branch batch/zone-0919  bz          # → merged into develop below
+branch batch/open-0919  bo          # never merged: must never be a candidate
 
 # archived/* is protected even when a --pattern would otherwise select it.
 git -C "$R" switch -q -c archived/feature/8-old develop
@@ -71,7 +74,7 @@ seed a8 "archived/feature/8-old"
 git -C "$R" push -q -u origin archived/feature/8-old
 
 git -C "$R" switch -q develop
-for b in feature/1-merged release/0.1.0 hotfix/5-merged feature/7-worktree; do
+for b in feature/1-merged release/0.1.0 hotfix/5-merged feature/7-worktree batch/zone-0919; do
 	git -C "$R" merge -q --no-ff -m "merge $b" "$b"
 done
 git -C "$R" push -q origin develop
@@ -122,6 +125,10 @@ check "finds a branch merged into a LATER stage (qa), not just stages[0]" \
 	"$(grep -q '^bugfix/3-merged	local+remote	qa	' <<<"$out" && echo 1 || echo 0)" "out=$out"
 check "release/* is a default pattern too" \
 	"$(grep -q '^release/0.1.0	' <<<"$out" && echo 1 || echo 0)" "out=$out"
+check "batch/* is a default pattern (the integration branches flight opens itself)" \
+	"$(grep -q '^batch/zone-0919	local+remote	develop	-	-	-$' <<<"$out" && echo 1 || echo 0)" "out=$out"
+check "an unmerged batch/* integration branch is never a candidate" \
+	"$(grep -q '^batch/open-0919' <<<"$out" && echo 0 || echo 1)" "out=$out"
 check "a merged branch outside the patterns is left alone" \
 	"$(grep -q '^hotfix/5-merged' <<<"$out" && echo 0 || echo 1)" "out=$out"
 check "no stage branch is ever listed" \
@@ -246,6 +253,14 @@ check "--remote deletes the branch on origin" \
 check "…and origin no longer has it" \
 	"$(git -C "$ORIGIN" rev-parse -q --verify refs/heads/feature/1-merged >/dev/null && echo 0 || echo 1)"
 
+out="$(run prune --local --branch batch/zone-0919)"
+check "prune --local deletes a merged batch/* integration branch" \
+	"$(grep -q '^delete-local	batch/zone-0919	merged into develop$' <<<"$out" && echo 1 || echo 0)" "out=$out"
+check "…and its local ref is really gone" \
+	"$(git -C "$R" rev-parse -q --verify refs/heads/batch/zone-0919 >/dev/null && echo 0 || echo 1)"
+check "…while the unmerged batch/* branch is left standing" \
+	"$(git -C "$R" rev-parse -q --verify refs/heads/batch/open-0919 >/dev/null && echo 1 || echo 0)"
+
 printf '\033[1m── worktrees ──\033[0m\n'
 
 out="$(run prune --local --branch feature/7-worktree)"
@@ -318,6 +333,11 @@ while [ $# -gt 0 ]; do
 done
 printf '%s\n' "$url" >>"$FAKE_RESP/urls.log"
 body="$(cat "$FAKE_RESP/pulls.json")"
+# The adapters page, so anything past the first page must come back empty.
+case "$url" in
+  *"?page=1"|*"&page=1") ;;
+  *page=*) body='[]' ;;
+esac
 if [ -n "$outfile" ]; then printf '%s' "$body" >"$outfile"; else printf '%s' "$body"; fi
 [ "$want_code" = 1 ] && printf '200'
 exit 0
@@ -370,9 +390,11 @@ for backend in forgejo github; do
 done
 
 # GitHub is the one backend that can filter server-side; it must actually do so.
+# The branch name is a percent-encoded query VALUE (#169), so its '/' arrives as
+# %2F — the ':' between owner and ref is the delimiter and stays literal.
 pr_list github --state merged --head feature/6-squashed --base develop >/dev/null
 check "github: sends head=owner:branch and base= server-side" \
-	"$(grep -q 'head=o:feature/6-squashed' "$RESP/urls.log" && grep -q 'base=develop' "$RESP/urls.log" && echo 1 || echo 0)" \
+	"$(grep -q 'head=o:feature%2F6-squashed' "$RESP/urls.log" && grep -q 'base=develop' "$RESP/urls.log" && echo 1 || echo 0)" \
 	"$(cat "$RESP/urls.log")"
 pr_list forgejo --state merged --head feature/6-squashed >/dev/null
 check "forgejo: asks for closed PRs (it has no merged state)" \
@@ -389,9 +411,10 @@ out="$(pr_list gitlab --state merged --head feature/6-squashed)"
 check "gitlab: pr list projects iid/source/target into the same TSV" \
 	"$([ "$out" = "$(printf '31\tmerged\tfeature/6-squashed\tdevelop\tSquashed')" ] && echo 1 || echo 0)" "out=$out"
 check "gitlab: uses the native merged state and source_branch filter" \
-	"$(grep -q 'state=merged' "$RESP/urls.log" && grep -q 'source_branch=feature/6-squashed' "$RESP/urls.log" && echo 1 || echo 0)" \
+	"$(grep -q 'state=merged' "$RESP/urls.log" && grep -q 'source_branch=feature%2F6-squashed' "$RESP/urls.log" && echo 1 || echo 0)" \
 	"$(cat "$RESP/urls.log")"
-out="$(pr_list gitlab --state open >/dev/null; grep -o 'state=[a-z]*' "$RESP/urls.log")"
+# One line per page fetched, so collapse them before comparing.
+out="$(pr_list gitlab --state open >/dev/null; grep -o 'state=[a-z]*' "$RESP/urls.log" | sort -u)"
 check "gitlab: --state open maps to GitLab's 'opened'" \
 	"$([ "$out" = "state=opened" ] && echo 1 || echo 0)" "out=$out"
 

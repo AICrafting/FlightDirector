@@ -109,5 +109,5 @@ Working on the tools in this repo? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 
-- **Aaron Wood** — *The original ideast* 🤣
+- **[Aaron Wood](https://aaronwood.dev/)** — *The original ideast* 🤣
 - **[Dave Wood](https://davewood.com/)** — *AI wrangler*

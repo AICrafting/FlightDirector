@@ -157,19 +157,22 @@ Consumed by the `cleaning-up-branches` skill and the `branches` dispatcher group
 ```jsonc
 "code": {
   // …existing keys (backend, owner, repo, api, stages)…
-  "branches": { "patterns": ["feature/*", "bugfix/*", "release/*"] }
+  "branches": { "patterns": ["feature/*", "bugfix/*", "release/*", "batch/*"] }
 }
 ```
 
 - `code.branches.patterns` — globs naming which branches are cleanup *candidates* at all.
-  Defaults to `["feature/*", "bugfix/*", "release/*"]` when absent, which matches flight's own
-  `feature/<N>-<slug>` convention plus the usual bugfix and release-fold names. Set it when your
-  repo spells them differently (`feat/*`, `fix/*`) so you don't pass `--pattern` every time.
+  Defaults to `["feature/*", "bugfix/*", "release/*", "batch/*"]` when absent, which matches
+  flight's own `feature/<N>-<slug>` convention and the `batch/<group>-<short>` integration
+  branches `promoting-branches` opens on a `pr` hop, plus the usual bugfix and release-fold
+  names. Set it when your repo spells them differently (`feat/*`, `fix/*`) so you don't pass
+  `--pattern` every time — your list **replaces** the defaults outright rather than adding to
+  them, so repeat any built-in prefix you still want covered.
   Widening it is safe: stage branches, `archived/*`, and any branch checked out in the main
   checkout or in a worktree outside `.worktrees/` are protected regardless of what the patterns
   say. Read it with:
   ```
-  flight config '.code.branches.patterns // ["feature/*","bugfix/*","release/*"]'
+  flight config '.code.branches.patterns // ["feature/*","bugfix/*","release/*","batch/*"]'
   ```
   There is deliberately **no** "delete on the remote by default" knob: remote deletion is the one
   irreversible step, so it stays an explicit `--remote` on each run.
@@ -208,6 +211,31 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
   `via FlightDirector:flight@<version> with <Model/ver>` (the model clause only when the skill passed
   `--model`). Set `false` to write bare bodies; `--no-signature` does the same for one call.
   Details: [adapter-contract.md](adapter-contract.md) → **Body signature**.
+
+### CI watch timeouts (optional)
+
+```jsonc
+"code": {
+  "ciWatchTimeout": 900,
+  "ciQueueTimeout": 3600
+}
+```
+
+`ci watch` keeps two clocks, because "still queued" and "hung" are not the same failure and a
+repo with one runner per platform hits the first constantly.
+
+- `code.ciWatchTimeout` — seconds a run may spend **executing**. Default `900`; `0` disables the
+  cap. Precedence: `--timeout` → `LS_CI_WATCH_TIMEOUT` → this → default. Time in which every job
+  of every non-terminal run is waiting for a runner does **not** count against it.
+- `code.ciQueueTimeout` — seconds every run for the SHA may spend **waiting for a runner**, in
+  total. Default `3600`; `0` disables the cap. Precedence: `--queue-timeout` →
+  `LS_CI_QUEUE_TIMEOUT` → this → default. When it fires the message says the run never started
+  executing, so a queue is never reported as a hang.
+
+Raise `ciQueueTimeout` on a repo where several PRs land at once and serialize on a scarce
+runner; raise `ciWatchTimeout` only when the tests themselves got slower. The one case still
+bounded by `ciWatchTimeout` alone is "no run exists at all" — that is a trigger or push problem,
+not a queue, and is still reported within `ciWatchTimeout`.
 
 ### Prompt ledger (optional, off by default)
 
@@ -359,5 +387,9 @@ coordinates from the git remote on first run, so in the normal case you set noth
 ## Context note
 
 List verbs project with `jq` to minimal TSV before anything reaches the conversation, so listing
-issues is cheap on context. Still pass a sane `--limit` and paginate rather than pulling hundreds
-at once.
+issues is cheap on context. Still pass a sane `--limit` rather than pulling hundreds at once: the
+adapter pages underneath the limit, so a big number really does fetch that many rows.
+
+When a limit hides rows, the adapter says so on **stderr** (`warning: showing 50 of 109 rows …`)
+and leaves stdout clean. Read that line: it is the only reliable signal that a list is partial,
+since a full page on its own proves nothing.

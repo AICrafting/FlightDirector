@@ -18,7 +18,7 @@ verb="${1:-}"; shift || true
 
 need LS_API LS_OWNER LS_REPO LS_TOKEN
 SITE="${LS_API%/}"
-PROJECT_ENC="$(printf '%s' "${LS_OWNER}/${LS_REPO}" | jq -sRr @uri)"
+PROJECT_ENC="$(urlenc "${LS_OWNER}/${LS_REPO}")"
 PROJECT_API="${SITE}/projects/${PROJECT_ENC}"
 HDRS=(-H "PRIVATE-TOKEN: ${LS_TOKEN}")
 

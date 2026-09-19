@@ -20,7 +20,8 @@ command -v jq   >/dev/null 2>&1 || { echo "jira adapter: jq is required"   >&2; 
 
 SITE="${LS_API%/}"
 
-die() { echo "${ADAPTER_NAME:-jira}: $*" >&2; exit 1; }
+die()  { echo "${ADAPTER_NAME:-jira}: $*" >&2; exit 1; }
+warn() { echo "${ADAPTER_NAME:-jira}: warning: $*" >&2; }
 
 # HTTP Basic auth: email:api_token (classic Atlassian API token, NOT OAuth).
 JIRA_AUTH=(-u "${LS_EMAIL}:${LS_TOKEN}")
@@ -46,6 +47,97 @@ _api() {
     die "$method $path → HTTP $code${msg:+: $msg}"
   fi
   cat "$tmp"; rm -f "$tmp"
+}
+
+# --- Paging ----------------------------------------------------------------
+# Jira clamps `maxResults` to its own ceiling and reports the clamp in the payload,
+# so a single request per list verb truncates silently. Jira's two read paths cannot
+# share one loop: the enhanced-JQL search pages with an opaque `nextPageToken`, while
+# the older collection endpoints page with a numeric `startAt`. Both stop only when
+# the response says there is no more, never because a page looked short.
+
+# Per-process scratch, cleared on exit. Created lazily by the first paged call.
+_SCRATCH=""
+_PAGED_CALLS=0
+_scratch_init() {
+  [ -z "$_SCRATCH" ] || return 0
+  _SCRATCH="$(mktemp -d)" || die "cannot create temp directory"
+  # shellcheck disable=SC2064  # expand $_SCRATCH now: the trap must not depend on later state
+  trap "rm -rf '$_SCRATCH'" EXIT
+}
+
+# _paged_rows <limit> — trim the accumulated NDJSON to LIMIT rows and emit it.
+_paged_rows() {
+  if [ -n "$1" ]; then head -n "$1" "$2"; else cat "$2"; fi
+  rm -f "$2"
+}
+
+# _paged_size <limit> — rows to ask for per request: the limit, capped at 100.
+_paged_size() {
+  [ -n "$1" ] || { printf '100'; return 0; }
+  case "$1" in ''|*[!0-9]*) die "--limit must be a positive integer (got '$1')" ;; esac
+  [ "$1" -gt 0 ] || die "--limit must be a positive integer (got '$1')"
+  if [ "$1" -ge 100 ]; then printf '100'; else printf '%s' "$1"; fi
+}
+
+# _jql_search <jql> <fields-json> [LIMIT] — up to LIMIT issues as NDJSON.
+# /search/jql reports no total, so a capped result can only be announced as
+# "more are available".
+_jql_search() {
+  local jql="$1" fields="$2" limit="${3:-}"
+  local size token="" payload resp rows=0 page=0 out
+  size="$(_paged_size "$limit")"
+  _scratch_init
+  _PAGED_CALLS=$((_PAGED_CALLS + 1))
+  out="$_SCRATCH/rows.$_PAGED_CALLS"
+  : >"$out"
+  while :; do
+    page=$((page + 1))
+    [ "$page" -le 1000 ] || die "pagination exceeded 1000 pages for /search/jql"
+    payload="$(jq -n --arg j "$jql" --argjson m "$size" --argjson f "$fields" --arg t "$token" \
+      '{jql:$j, maxResults:$m, fields:$f} + (if $t == "" then {} else {nextPageToken:$t} end)')"
+    resp="$(_api POST "/rest/api/3/search/jql" "$payload")"
+    printf '%s' "$resp" | jq -c '.issues[]?' >>"$out"
+    rows="$(wc -l <"$out" | tr -d ' ')"
+    token="$(printf '%s' "$resp" | jq -r '.nextPageToken // empty')"
+    [ -n "$token" ] || break
+    [ -z "$limit" ] || [ "$rows" -lt "$limit" ] || break
+  done
+  if [ -n "$limit" ] && [ "$rows" -ge "$limit" ] && [ -n "$token" ]; then
+    warn "showing $limit rows for /search/jql and more are available; raise --limit to see the rest"
+  fi
+  _paged_rows "$limit" "$out"
+}
+
+# _offset_get <path> <query> <array-key> [LIMIT] — up to LIMIT rows as NDJSON from a
+# startAt-paged collection endpoint (/label, /issue/KEY/comment). These do report a
+# `total`, so a capped result can name the number it is hiding.
+_offset_get() {
+  local path="$1" query="$2" key="$3" limit="${4:-}"
+  local size start=0 resp batch rows=0 page=0 total="" out
+  size="$(_paged_size "$limit")"
+  _scratch_init
+  _PAGED_CALLS=$((_PAGED_CALLS + 1))
+  out="$_SCRATCH/rows.$_PAGED_CALLS"
+  : >"$out"
+  while :; do
+    page=$((page + 1))
+    [ "$page" -le 1000 ] || die "pagination exceeded 1000 pages for $path"
+    resp="$(_api GET "${path}?${query:+$query&}startAt=${start}&maxResults=${size}")"
+    batch="$(printf '%s' "$resp" | jq --arg k "$key" '(.[$k] // []) | length')"
+    printf '%s' "$resp" | jq -c --arg k "$key" '(.[$k] // [])[]' >>"$out"
+    rows="$(wc -l <"$out" | tr -d ' ')"
+    total="$(printf '%s' "$resp" | jq -r '.total // empty')"
+    [ "$batch" -gt 0 ] || break
+    # Jira clamps maxResults to its own ceiling, so advance by what it actually sent.
+    start=$((start + batch))
+    [ -z "$total" ] || [ "$start" -lt "$total" ] || break
+    [ -z "$limit" ] || [ "$rows" -lt "$limit" ] || break
+  done
+  if [ -n "$limit" ] && [ "$rows" -ge "$limit" ] && [ -n "$total" ] && [ "$total" -gt "$limit" ]; then
+    warn "showing $limit of $total rows for $path; raise --limit to see the rest"
+  fi
+  _paged_rows "$limit" "$out"
 }
 
 # --- Minimal ADF shim ------------------------------------------------------

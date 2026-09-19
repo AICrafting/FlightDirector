@@ -42,7 +42,7 @@ _Nothing yet._
 EOF
 out="$("$NOTES" --changelog "$T/CHANGELOG.md" --version 0.12.0)"
 check "extracts exactly the version's section (stops at the next heading)" \
-	"$(printf '%s' "$out" | grep -q 'Thing one' && printf '%s' "$out" | grep -q 'Thing two' && ! printf '%s' "$out" | grep -q 'Older stuff' && echo 1 || echo 0)"
+	"$(grep -q 'Thing one' <<<"$out" && grep -q 'Thing two' <<<"$out" && ! grep -q 'Older stuff' <<<"$out" && echo 1 || echo 0)"
 check "excludes the heading by default and trims blank edges" \
 	"$([ "$(printf '%s' "$out" | head -1)" = "### Added" ] && [ "$(printf '%s' "$out" | tail -1)" = "- Thing two." ] && echo 1 || echo 0)"
 out2="$("$NOTES" --changelog "$T/CHANGELOG.md" --version 0.12.0 --title)"
