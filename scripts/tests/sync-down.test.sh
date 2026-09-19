@@ -246,7 +246,7 @@ check "ci watch timeout (non-zero) → stopped, PR left open" "$([ "$rc" != 0 ] 
 # cascade must stop on it rather than merge on a check that never executed.
 STUB_CI_STATUS=skipped STUB_CI_SKIPPED=1 run --from qa; rc=$?
 check "all-skipped CI → exit non-zero" "$([ "$rc" != 0 ] && echo 1 || echo 0)"
-check "row says the CI ran nothing, PR left open" "$(line develop | grep -q $'^develop\tstopped\tPR #7 left open.*ran nothing' && echo 1 || echo 0)" "$(out)"
+check "row says the CI ran nothing, PR left open" "$(grep -q $'^develop\tstopped\tPR #7 left open.*ran nothing' < <(line develop) && echo 1 || echo 0)" "$(out)"
 check "pr merge was NOT called on a skipped verdict" "$(grep -q '^pr merge' "$STUB_LOG" && echo 0 || echo 1)"
 check "origin/develop untouched by a skipped verdict" "$([ "$(osha develop)" = "$dev_before" ] && echo 1 || echo 0)"
 
