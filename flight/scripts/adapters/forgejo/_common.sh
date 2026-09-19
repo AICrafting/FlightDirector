@@ -21,6 +21,12 @@ REPO_API="${LS_API%/}/repos/${LS_OWNER}/${LS_REPO}"
 die()  { echo "${ADAPTER_NAME:-forgejo}: $*" >&2; exit 1; }
 warn() { echo "${ADAPTER_NAME:-forgejo}: warning: $*" >&2; }
 
+# urlenc <string> — percent-encode one query-parameter value or path segment.
+# Every value interpolated into a URL goes through this: label names carry
+# spaces and '/' (`status/to test`), and curl rejects a raw space outright
+# ("Malformed input to a URL function") rather than sending a broken filter.
+urlenc() { printf '%s' "$1" | jq -sRr @uri; }
+
 # _api METHOD PATH [JSON_DATA] — stdout is the response body; exits nonzero on HTTP >= 400.
 # When _API_HEADER_FILE names a file, the response headers are dumped there as well
 # (that is how _paged_get reads the row total). The flag is omitted when it is unset,
