@@ -13,8 +13,12 @@ LINT_SRC="$REPO_ROOT/scripts/checks/lint.sh"
 ESC=$'\033'
 
 pass=0; fail=0
+# A failed check prints the run it judged (exit code + output): the restricted
+# PATH below behaves differently per platform, and a bare ✗ from a CI leg
+# nobody can reproduce locally says nothing about why.
 check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=$((pass+1));
-			else printf '\033[0;31m  ✗ %s\033[0m\n' "$1"; fail=$((fail+1)); fi; }
+			else printf '\033[0;31m  ✗ %s\033[0m\n' "$1"; fail=$((fail+1));
+				printf '      rc=%s\n' "${rc:-unset}"; sed 's/^/      | /' <<<"${out:-}"; fi; }
 
 SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
 
@@ -29,9 +33,13 @@ printf '#!/usr/bin/env bash\ntrue\n' >"$SANDBOX/repo/sample.sh"
 
 # --- a PATH with no linters on it at all ---
 BASEBIN="$SANDBOX/basebin"; mkdir -p "$BASEBIN"
+# Each tool is a wrapper that execs the real one by absolute path, not a symlink:
+# on Windows (MSYS) `ln -s` copies the file, and a copied bash.exe outside
+# /usr/bin cannot find msys-2.0.dll, so nothing under this PATH would start.
 for tool in bash dirname find xargs; do
 	src="$(command -v "$tool")"
-	ln -s "$src" "$BASEBIN/$tool"
+	printf '#!/bin/sh\nexec "%s" "$@"\n' "$src" >"$BASEBIN/$tool"
+	chmod +x "$BASEBIN/$tool"
 done
 
 stub() {  # stub <bin dir> <name> <exit code>
