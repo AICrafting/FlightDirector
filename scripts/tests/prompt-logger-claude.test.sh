@@ -85,6 +85,21 @@ assert_jq "subagent priced with the opus-5 family" '(.cost_usd*1e9|round) == ((5
 invoke subagent-stop "$sub" "$R" "$S" 2>/dev/null
 check "repeated SubagentStop for the same agent does not duplicate" "$([ "$(wc -l <"$LOG")" -eq 1 ] && echo 1 || echo 0)"
 
+# --- streamed requests: early content blocks carry a placeholder output count (#155) ---
+R="$T/stream"; S="$T/state-stream"; make_repo "$R" true
+invoke subagent-stop "$(jq -nc --arg cwd "$R" --arg path "$FIXTURES/claude-subagent-streaming.jsonl" '{session_id:"session-main",cwd:$cwd,hook_event_name:"SubagentStop",agent_id:"agent-str",agent_type:"general-purpose",agent_transcript_path:$path}')" "$R" "$S" 2>/dev/null
+assert_jq "a request's final usage wins over its streaming-start blocks" '.output_tokens==165+500 and .reasoning_output_tokens==40 and .input_tokens==(2+1000+0)+(3+100+1000)' "$R/.flightdirector/prompt-log.jsonl"
+
+# --- harness-internal SubagentStop (no agent_type, nothing measurable) writes no row (#155) ---
+R="$T/phantom"; S="$T/state-phantom"; make_repo "$R" true
+invoke subagent-stop "$(jq -nc --arg cwd "$R" '{session_id:"session-main",cwd:$cwd,hook_event_name:"SubagentStop",agent_id:"agent-tick",agent_transcript_path:"/nonexistent/agent-tick.jsonl"}')" "$R" "$S" 2>"$T/phantom.err"
+check "untyped SubagentStop with no usage writes no row" "$([ ! -s "$R/.flightdirector/prompt-log.jsonl" ] && echo 1 || echo 0)"
+check "skipped SubagentStop says why on stderr" "$(grep -q 'agent-tick.*no row written' "$T/phantom.err" && echo 1 || echo 0)"
+invoke subagent-stop "$(jq -nc --arg cwd "$R" --arg path "$FIXTURES/claude-main.jsonl" '{session_id:"session-main",cwd:$cwd,hook_event_name:"SubagentStop",agent_id:"agent-tick2",transcript_path:$path}')" "$R" "$S" 2>/dev/null
+check "untyped SubagentStop falling back to the parent transcript writes no row" "$([ ! -s "$R/.flightdirector/prompt-log.jsonl" ] && echo 1 || echo 0)"
+invoke subagent-stop "$(jq -nc --arg cwd "$R" '{session_id:"session-main",cwd:$cwd,hook_event_name:"SubagentStop",agent_id:"agent-real",agent_type:"general-purpose",agent_transcript_path:"/nonexistent/agent-real.jsonl"}')" "$R" "$S" 2>/dev/null
+assert_jq "a typed subagent that cannot be measured still gets a row, with the reason" '.turn_id=="agent-real" and .output_tokens==null and .usage_missing=="unreadable"' "$R/.flightdirector/prompt-log.jsonl"
+
 # ---------------------------------------------------------------------------
 # 4. failure modes: missing transcript → null usage + warning; unknown model → null cost + warning
 # ---------------------------------------------------------------------------
@@ -92,6 +107,7 @@ R="$T/missing"; S="$T/state-missing"; make_repo "$R" true
 invoke prompt "$(jq -nc --arg cwd "$R" '{session_id:"s-miss",cwd:$cwd,prompt:"p"}')" "$R" "$S"
 invoke stop "$(jq -nc --arg cwd "$R" '{session_id:"s-miss",cwd:$cwd,transcript_path:"/nonexistent/transcript.jsonl"}')" "$R" "$S" 2>"$T/miss.err"
 assert_jq "unreadable transcript → null usage and cost, row still written" '.input_tokens==null and .output_tokens==null and .cost_usd==null and .cost_basis==null' "$R/.flightdirector/prompt-log.jsonl"
+assert_jq "null-usage row records why" '.usage_missing=="unreadable"' "$R/.flightdirector/prompt-log.jsonl"
 check "unreadable transcript warns on stderr" "$(grep -q 'cannot read transcript' "$T/miss.err" && echo 1 || echo 0)"
 
 R="$T/unknown"; S="$T/state-unknown"; make_repo "$R" true
@@ -141,6 +157,23 @@ check "summary groups per harness/provider/model" "$(jq -e '(.groups|length)==3 
 check "summary counts unmeasured and subagent rows" "$(jq -e '.unmeasured_rows==1 and .subagent_rows==1' <<<"$J" >/dev/null && echo 1 || echo 0)"
 MD="$(cd "$R" && "$DISP" prompt-log summary --session S1)"
 check "markdown summary has the table and the lower-bound note" "$(grep -q '| codex | gpt-5.6-sol |' <<<"$MD" && grep -q 'lower bound' <<<"$MD" && echo 1 || echo 0)"
+check "legacy null row (no usage_missing) is reported as reason not recorded" "$(grep -q '1 reason not recorded' <<<"$MD" && echo 1 || echo 0)"
+cat >>"$R/.flightdirector/prompt-log.jsonl" <<'EOF'
+{"timestamp":"2026-09-06T12:05:00+00:00","provider":"anthropic","harness":"claude","session_id":"S3","turn_id":"u1","prompt":"d","model":"","input_tokens":null,"output_tokens":null,"cost_usd":null,"usage_missing":"unreadable"}
+{"timestamp":"2026-09-06T12:06:00+00:00","provider":"anthropic","harness":"claude","session_id":"S3","turn_id":"u2","prompt":"e","model":"","input_tokens":null,"output_tokens":null,"cost_usd":null,"usage_missing":"no-usage"}
+{"timestamp":"2026-09-06T12:07:00+00:00","provider":"anthropic","harness":"claude","session_id":"S3","turn_id":"u3","prompt":"f","model":"","input_tokens":null,"output_tokens":null,"cost_usd":null,"usage_missing":"no-usage"}
+EOF
+MD3="$(cd "$R" && "$DISP" prompt-log summary --session S3)"
+check "summary names each null-usage cause" "$(grep -q '3 row(s) had no usage (2 transcript had no usage for the turn, 1 transcript unreadable)' <<<"$MD3" && echo 1 || echo 0)"
+check "summary --json breaks unmeasured rows down by cause" "$(cd "$R" && "$DISP" prompt-log summary --session S3 --json | jq -e '.unmeasured_reasons=={"no-usage":2,"unreadable":1}' >/dev/null && echo 1 || echo 0)"
+# legacy logs: untyped, unmeasured SubagentStop rows are harness helpers, not unmeasured agents (#155)
+cat >>"$R/.flightdirector/prompt-log.jsonl" <<'EOF'
+{"timestamp":"2026-09-06T12:08:00+00:00","provider":"anthropic","harness":"claude","session_id":"S6","turn_id":"a1","prompt":"[subagent a1]","model":"","input_tokens":null,"output_tokens":null,"cost_usd":null,"subagent":true}
+{"timestamp":"2026-09-06T12:08:30+00:00","provider":"anthropic","harness":"claude","session_id":"S6","turn_id":"a2","prompt":"[subagent a2 (general-purpose)]","model":"","input_tokens":null,"output_tokens":null,"cost_usd":null,"subagent":true}
+EOF
+J4="$(cd "$R" && "$DISP" prompt-log summary --session S6 --json)"
+check "legacy helper-stop rows are set aside, a typed unmeasured agent is not" "$(jq -e '.helper_stop_rows==1 and .unmeasured_rows==1 and .rows==1 and .subagent_rows==1' <<<"$J4" >/dev/null && echo 1 || echo 0)"
+check "markdown summary mentions the ignored helper rows" "$(cd "$R" && "$DISP" prompt-log summary --session S6 | grep -q '1 untyped SubagentStop row(s) from harness helpers ignored' && echo 1 || echo 0)"
 MD2="$(cd "$R" && "$DISP" prompt-log summary --session NOPE)"
 check "no rows → explicit 'estimate only' line" "$(grep -q 'estimate only' <<<"$MD2" && echo 1 || echo 0)"
 J3="$(cd "$R" && "$DISP" prompt-log summary --session S2 --json)"

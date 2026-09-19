@@ -60,9 +60,33 @@ def load_rows(path: Path) -> list[dict[str, Any]]:
 	return rows
 
 
+# Why a row has no usage, as the producers record it in `usage_missing`.
+MISSING_REASONS = {
+	"no-path": "no transcript path in the hook payload",
+	"unreadable": "transcript unreadable",
+	"no-usage": "transcript had no usage for the turn",
+}
+UNRECORDED = "unrecorded"	# rows written before `usage_missing` existed
+
+
+def is_helper_stop(row: dict[str, Any]) -> bool:
+	"""A pre-#155 row for a harness-internal SubagentStop: untyped (`[subagent <id>]`, no
+	`(<agent_type>)`) and unmeasured. The producer no longer writes these; old logs are
+	full of them, and none is an agent anyone launched."""
+	prompt = row.get("prompt")
+	return (
+		bool(row.get("subagent")) and row.get("harness", "claude") == "claude"
+		and row.get("input_tokens") is None and row.get("output_tokens") is None
+		and isinstance(prompt, str) and prompt.startswith("[subagent ") and prompt.endswith("]") and "(" not in prompt
+	)
+
+
 def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 	groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+	helper_stops = sum(1 for row in rows if is_helper_stop(row))
+	rows = [row for row in rows if not is_helper_stop(row)]
 	unmeasured = 0
+	reasons: dict[str, int] = {}
 	bases: set[str] = set()
 	subagent_rows = 0
 	for row in rows:
@@ -80,6 +104,9 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 			subagent_rows += 1
 		if row.get("input_tokens") is None and row.get("output_tokens") is None:
 			unmeasured += 1
+			reason = row.get("usage_missing")
+			reason = reason if isinstance(reason, str) and reason in MISSING_REASONS else UNRECORDED
+			reasons[reason] = reasons.get(reason, 0) + 1
 			continue
 		for field in ("input_tokens", "output_tokens", "reasoning_output_tokens", "cache_creation_tokens", "cache_read_tokens"):
 			value = row.get(field)
@@ -103,6 +130,8 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 	return {
 		"rows": len(rows),
 		"unmeasured_rows": unmeasured,
+		"unmeasured_reasons": reasons,
+		"helper_stop_rows": helper_stops,
 		"subagent_rows": subagent_rows,
 		"cost_usd": round(total_cost, 6),
 		"cost_basis": sorted(bases),
@@ -153,7 +182,11 @@ def render_markdown(summary: dict[str, Any], sessions: list[str]) -> str:
 	if summary["subagent_rows"]:
 		notes.append(f"{summary['subagent_rows']} subagent row(s) included")
 	if summary["unmeasured_rows"]:
-		notes.append(f"{summary['unmeasured_rows']} row(s) had no usage (hook could not read the transcript) — totals are a lower bound")
+		causes = sorted(summary["unmeasured_reasons"].items(), key=lambda item: (-item[1], item[0]))
+		named = ", ".join(f"{count} {MISSING_REASONS.get(reason, 'reason not recorded')}" for reason, count in causes)
+		notes.append(f"{summary['unmeasured_rows']} row(s) had no usage ({named}) — totals are a lower bound")
+	if summary["helper_stop_rows"]:
+		notes.append(f"{summary['helper_stop_rows']} untyped SubagentStop row(s) from harness helpers ignored (not launched agents; an older flight logged them)")
 	if notes:
 		lines.append("")
 		lines.append("_" + "; ".join(notes) + "._")

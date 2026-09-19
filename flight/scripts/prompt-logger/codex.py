@@ -94,9 +94,11 @@ def prompt_text(payload: dict[str, Any]) -> str | None:
 
 
 def parse_transcript(path: str | None, turn_id: str) -> dict[str, Any]:
-	result: dict[str, Any] = {"model": None, "usage": None, "duration_seconds": None, "prompt": None}
+	# `missing` names why usage is None: "no-path", "unreadable" or "no-usage" (shared with claude.py).
+	result: dict[str, Any] = {"model": None, "usage": None, "duration_seconds": None, "prompt": None, "missing": None}
 	if not path:
 		warn(f"no transcript path for turn {turn_id}; token and cost fields are null")
+		result["missing"] = "no-path"
 		return result
 
 	active_turn: str | None = None
@@ -130,9 +132,11 @@ def parse_transcript(path: str | None, turn_id: str) -> dict[str, Any]:
 					result["prompt"] = prompt_text(payload)
 	except OSError as error:
 		warn(f"cannot read transcript {path} for turn {turn_id}: {error}; token and cost fields are null")
+		result["missing"] = "unreadable"
 		return result
 
 	if result["usage"] is None:
+		result["missing"] = "no-usage"
 		warn(f"no token_usage_record with exact turn_id {turn_id} in {path}; token and cost fields are null")
 	return result
 
@@ -196,6 +200,8 @@ def make_record(event: dict[str, Any], delegated: bool, interrupted: bool) -> tu
 		"cost_basis": auth_cost_basis(),
 		"duration_seconds": duration,
 	}
+	if usage is None:
+		record["usage_missing"] = parsed["missing"]
 	if delegated:
 		record["subagent"] = True
 	if interrupted:

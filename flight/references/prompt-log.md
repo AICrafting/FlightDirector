@@ -67,6 +67,8 @@ producers may add the optional extras at the end.
   // optional extras:
   // "subagent": true,           row for a delegated agent (SubagentStop); turn_id is the agent id
   // "interrupted": true,        the turn was interrupted; usage is whatever had been reported
+  // "usage_missing": "no-usage", only on a row whose token fields are null — why:
+  //                              "no-path" (payload named no transcript) | "unreadable" | "no-usage"
   // "models": {"m1": 123, …}   a turn that spanned models — output tokens per model; `model` is the dominant one
 }
 ```
@@ -78,12 +80,15 @@ producers may add the optional extras at the end.
   `cache_creation` + `cache_read` to it. Uncached input = `input_tokens − cache_read_tokens −
   cache_creation_tokens`, and that is what the input rate is applied to.
 - **A turn is one row**, however many model requests it took. Claude Code's transcript holds one
-  entry per content block, all sharing a `requestId` and the same usage — the producer sums once
-  per request. Codex reports a cumulative `turn_token_usage`; the producer takes the latest record
+  entry per content block, all sharing a `requestId` — the producer counts each request once.
+  The blocks do **not** all carry the same usage: an early block can hold the streaming-start
+  placeholder (`output_tokens: 8`) while the request's last block holds the final count, so the
+  producer keeps the block with the most output tokens (#155 — keeping the first undercounted a
+  subagent's output about fourfold). Codex reports a cumulative `turn_token_usage`; the producer takes the latest record
   for the exact `turn_id`.
 - **Missing data is `null`, never `0`.** If the transcript can't be read or has no usage for the
-  turn, the token and cost fields are `null` and the hook prints a warning on stderr. A `0` means
-  the provider said zero.
+  turn, the token and cost fields are `null`, `usage_missing` records which of the three causes
+  it was, and the hook prints a warning on stderr. A `0` means the provider said zero.
 - **`cost_usd` is an estimate at API list prices.** `cost_basis` says how to read it:
   `actual-api` when the harness authenticates with an API key (Anthropic key, Bedrock/Vertex,
   `OPENAI_API_KEY`/`CODEX_API_KEY`) and the number is what you would be billed; `api-equivalent`
@@ -116,7 +121,8 @@ flight prompt-log summary --session <session_id> [--session <id> …] [--since <
 
 prints a Markdown block for the issue comment: one line per harness × model with turns, tokens,
 and cost; a total; the cost basis; and notes when subagent rows are included or when rows had no
-usage (then the total is a lower bound). With no rows for the session it says so explicitly —
+usage (then the total is a lower bound) — broken down by `usage_missing` cause, with rows that
+predate the field counted as "reason not recorded". With no rows for the session it says so explicitly —
 "estimate only" is claimed only when there truly is no data. `--json` returns the same aggregate
 for scripting. `working-an-issue` Step 4 and the `queue-batches` worker prompt call this.
 
@@ -139,7 +145,18 @@ overrides it — the tests use that).
 Claude Code has no `Interrupt` hook: an interrupted turn produces no row until the next `Stop`,
 which then covers everything since the last prompt. Its `SubagentStop` payload names the
 subagent's transcript (`agent_transcript_path`); the producer sums every assistant request in it
-and prices per model, since subagents often run a different model than the main loop.
+and prices per model, since subagents often run a different model than the main loop. A payload
+with no `agent_transcript_path` falls back to the parent `transcript_path`, counting only the
+sidechain entries whose `agentId` is this agent's.
+
+**Harness-helper stops.** Claude Code also fires `SubagentStop` for short-lived internal helpers
+— observed about every 30 seconds per running background agent — whose payload has an `agent_id`
+but no `agent_type`, and whose transcript is never written to disk. They are not agents anyone
+launched and nothing about them is measurable, so a `SubagentStop` with **no `agent_type` and no
+usage** writes no row (a warning on stderr says so). Before #155 each one became a null row, which
+is how one batch run reached 997 "unmeasured" rows out of 1,007. `summary` sets those legacy rows
+aside (`helper_stop_rows`) instead of counting them as unmeasured. Whatever tokens the helpers
+themselves consume is invisible to the hook, so it is not in any total.
 
 Transcript formats are internal to each harness and can change between CLI versions. Each
 producer recognises the shapes it was verified against (Claude Code JSONL with `type:

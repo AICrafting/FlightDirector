@@ -11,9 +11,14 @@ Claude Code hook payloads carry no turn_id and no model, so:
 - `stop` / `interrupt` read that active turn, then sum every assistant message in
   the transcript that belongs to the turn (timestamp >= start, not a sidechain),
   de-duplicated by requestId — Claude Code writes one JSONL entry per content
-  block, all sharing the request's usage, so naive summing would over-count.
+  block of a request, so naive summing would over-count. The blocks do not all carry
+  the same usage: an early block can hold the streaming-start placeholder
+  (`output_tokens: 8`) while the last holds the final count, so the entry with the
+  most output tokens stands for the request (#155).
 - `subagent-stop` reads the subagent's own transcript and appends a `subagent: true`
-  row keyed by agent_id, keeping the parent session_id.
+  row keyed by agent_id, keeping the parent session_id. The harness also fires
+  SubagentStop for its own short-lived helpers (about every 30 s per running
+  background agent): no agent_type, no transcript on disk. Those get no row (#155).
 
 Anthropic reports `input_tokens` as the *uncached* portion, separate from the cache
 counters. The shared record format defines `input_tokens` as the *total* prompt
@@ -129,23 +134,25 @@ def add_usage(total: dict[str, int], usage: dict[str, Any]) -> bool:
 	return True
 
 
-def parse_transcript(path: str | None, since: float | None, sidechain: bool) -> dict[str, Any]:
+def parse_transcript(path: str | None, since: float | None, sidechain: bool, agent_id: str | None = None) -> dict[str, Any]:
 	"""Sum the assistant usage of one turn.
 
 	Main turn: entries with isSidechain false and timestamp >= `since`.
-	Subagent transcript (`sidechain=True`): every assistant entry in the file.
+	Subagent transcript (`sidechain=True`): every assistant entry in the file — or, when
+	`agent_id` is given (the file is the parent's, shared by every agent), only that agent's.
 	Usage is grouped by model so a turn that changed model is priced per model.
-	Returns {"by_model": {model: usage}, "requests": n, "model": dominant} or
-	by_model None when nothing usable was found.
+	Returns {"by_model": {model: usage}, "requests": n, "model": dominant, "missing": None}
+	or, when nothing usable was found, by_model None and `missing` naming the cause:
+	"no-path", "unreadable" or "no-usage".
 	"""
-	result: dict[str, Any] = {"by_model": None, "requests": 0, "model": None}
+	result: dict[str, Any] = {"by_model": None, "requests": 0, "model": None, "missing": None}
 	if not path:
 		warn("no transcript path in the hook payload; token and cost fields are null")
+		result["missing"] = "no-path"
 		return result
 
-	by_model: dict[str, dict[str, int]] = {}
-	seen_requests: set[str] = set()
-	order: list[str] = []
+	# One (model, usage) per API request: the content block with the most output tokens.
+	requests: dict[str, tuple[str, dict[str, int]]] = {}
 	try:
 		with Path(path).open(encoding="utf-8") as transcript:
 			for line_number, line in enumerate(transcript, 1):
@@ -161,6 +168,8 @@ def parse_transcript(path: str | None, since: float | None, sidechain: bool) -> 
 					continue
 				if bool(entry.get("isSidechain")) != sidechain:
 					continue
+				if agent_id is not None and entry.get("agentId") != agent_id:
+					continue
 				if since is not None:
 					stamp = parse_timestamp(entry.get("timestamp"))
 					if stamp is not None and stamp < since:
@@ -171,28 +180,37 @@ def parse_transcript(path: str | None, since: float | None, sidechain: bool) -> 
 				usage = message.get("usage")
 				if not isinstance(usage, dict):
 					continue
-				request_id = entry.get("requestId")
-				key = request_id if isinstance(request_id, str) and request_id else entry.get("uuid")
-				if isinstance(key, str):
-					if key in seen_requests:
-						continue	# another content block of the same API request
-					seen_requests.add(key)
-				model = message.get("model")
-				model = model if isinstance(model, str) and model else "unknown"
-				bucket = by_model.setdefault(model, empty_usage())
-				if not add_usage(bucket, usage):
+				counted = empty_usage()
+				if not add_usage(counted, usage):
 					warn(f"assistant entry at {path}:{line_number} has an unusable usage block; skipped")
 					continue
-				result["requests"] += 1
-				if model not in order:
-					order.append(model)
+				request_id = entry.get("requestId")
+				key = request_id if isinstance(request_id, str) and request_id else entry.get("uuid")
+				if not isinstance(key, str):
+					key = f"line-{line_number}"
+				model = message.get("model")
+				model = model if isinstance(model, str) and model else "unknown"
+				previous = requests.get(key)
+				if previous is None or counted["output_tokens"] >= previous[1]["output_tokens"]:
+					requests[key] = (model, counted)	# a later block of the same request supersedes
 	except OSError as error:
 		warn(f"cannot read transcript {path}: {error}; token and cost fields are null")
+		result["missing"] = "unreadable"
 		return result
 
-	if result["requests"] == 0:
+	if not requests:
 		warn(f"no assistant usage found in {path} for this turn; token and cost fields are null")
+		result["missing"] = "no-usage"
 		return result
+	by_model: dict[str, dict[str, int]] = {}
+	order: list[str] = []
+	for model, counted in requests.values():
+		bucket = by_model.setdefault(model, empty_usage())
+		for field in bucket:
+			bucket[field] += counted[field]
+		if model not in order:
+			order.append(model)
+	result["requests"] = len(requests)
 	result["by_model"] = by_model
 	# Dominant model = most output tokens; ties resolve to the last model seen.
 	result["model"] = max(reversed(order), key=lambda m: by_model[m]["output_tokens"])
@@ -225,13 +243,22 @@ def make_record(event: dict[str, Any], delegated: bool) -> tuple[Path, dict[str,
 		agent_id = event.get("agent_id")
 		agent_id = agent_id if isinstance(agent_id, str) and agent_id else "subagent"
 		turn_id = agent_id
-		transcript = event.get("agent_transcript_path") or event.get("transcript_path")
-		parsed = parse_transcript(transcript if isinstance(transcript, str) else None, None, sidechain=True)
+		transcript = event.get("agent_transcript_path")
+		shared = None
+		if not (isinstance(transcript, str) and transcript):
+			# Older harnesses inline subagent turns in the parent transcript; take only this agent's.
+			transcript, shared = event.get("transcript_path"), agent_id
+		parsed = parse_transcript(transcript if isinstance(transcript, str) else None, None, sidechain=True, agent_id=shared)
 		repo_root = main_worktree(event.get("cwd"))
 		prompt = f"[subagent {agent_id}]"
 		agent_type = event.get("agent_type")
 		if isinstance(agent_type, str) and agent_type:
 			prompt = f"[subagent {agent_id} ({agent_type})]"
+		elif not parsed["by_model"]:
+			# Not an agent anyone launched: a harness-internal helper stop. A null row here
+			# would only inflate the summary's unmeasured count (997 of 1,007 rows in #155).
+			warn(f"SubagentStop for {agent_id} has no agent_type and no usage ({parsed['missing']}); no row written")
+			return None
 		duration = None
 		state = None
 	else:
@@ -275,6 +302,8 @@ def make_record(event: dict[str, Any], delegated: bool) -> tuple[Path, dict[str,
 		"cost_basis": auth_cost_basis() if cost is not None else None,
 		"duration_seconds": round(duration, 3) if duration is not None else None,
 	}
+	if usage is None:
+		record["usage_missing"] = parsed["missing"]
 	if by_model and len(by_model) > 1:
 		record["models"] = {m: u["output_tokens"] for m, u in by_model.items()}
 	if delegated:

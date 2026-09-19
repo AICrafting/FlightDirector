@@ -15,6 +15,22 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Fixed
 
+- **The prompt ledger no longer fills with unmeasurable subagent rows, and subagent output tokens
+  are no longer undercounted** (#155, user-submitted). Two separate faults in the Claude Code
+  producer. (1) Claude Code fires `SubagentStop` about every 30 seconds per running background
+  agent for an internal helper that has no `agent_type` and never gets a transcript on disk; the
+  hook wrote a null row for each, so a batch run showed "997 of 1,007 rows had no usage" while its
+  ten real workers were in fact measured. Such a stop now writes no row, and `prompt-log summary`
+  sets the rows older versions already logged aside as `helper_stop_rows` rather than counting
+  them as unmeasured. (2) The per-request de-duplication kept the *first* content block of each
+  request, but in a subagent transcript that block carries the streaming-start placeholder
+  (`output_tokens: 8`) and only the last carries the real count — one worker's 33,686 output
+  tokens were logged as 8,427. The producer now keeps the block with the most output tokens.
+  Costs logged for subagents before this fix are therefore low on the output side. Also: a
+  null-usage row now records why (`usage_missing`: `no-path` / `unreadable` / `no-usage`, both
+  harnesses) and the summary names the causes instead of always saying "hook could not read the
+  transcript"; and the parent-transcript fallback only counts the stopping agent's own entries.
+
 - **`ci watch` no longer reports a run where nothing executed as green** (#150). `skipped` used to
   be folded into the success side of the aggregate, so a workflow whose runs were all skipped (a
   path filter that matched nothing, a `needs:` whose dependency was skipped, a conditional that
