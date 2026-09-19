@@ -27,6 +27,7 @@ while [ $# -gt 0 ]; do
 	esac
 done
 printf '%s\n' "$url" >>"${CURL_LOG:?}"
+[ -z "$data" ] || printf '%s\n' "$data" >>"${CURL_DATA_LOG:-/dev/null}"
 
 # field <name> — the query parameter's value, or exit 1 if it isn't in the URL.
 field() {
@@ -104,11 +105,12 @@ chmod +x "$SANDBOX/bin/curl"
 export PATH="$SANDBOX/bin:$PATH"
 export LS_API=https://forge.invalid/api/v1 LS_OWNER=o LS_REPO=r LS_TOKEN=t
 export CURL_LOG="$SANDBOX/curl.log"
+export CURL_DATA_LOG="$SANDBOX/curl-data.log"
 
 fail() { printf 'paging: %s\n' "$*" >&2; exit 1; }
 # run [VAR=value…] cmd… — the fake forge reads its dataset from the environment,
 # so per-case knobs go through `env` rather than being exported around the call.
-run() { : >"$CURL_LOG"; env "$@" >"$SANDBOX/out" 2>"$SANDBOX/err"; }
+run() { : >"$CURL_LOG"; : >"$CURL_DATA_LOG"; env "$@" >"$SANDBOX/out" 2>"$SANDBOX/err"; }
 rows() { wc -l <"$SANDBOX/out" | tr -d ' '; }
 reqs() { wc -l <"$CURL_LOG" | tr -d ' '; }
 
@@ -197,5 +199,43 @@ grep -q '^l108		$' "$SANDBOX/out" || fail "the last jira label was dropped"
 run CAP=50 TOTAL=70 "$ADAPTERS/jira/issues" comments --number ACME-1
 [ "$(grep -c '^dave	' "$SANDBOX/out")" = 70 ] || fail "jira comments returned $(grep -c '^dave	' "$SANDBOX/out") of 70"
 grep -q '^c69$' "$SANDBOX/out" || fail "the newest jira comment was dropped"
+
+# --- Every interpolated query value is percent-encoded ------------------------
+# A default status label (`status/to test`) carries a space and a slash. Dropped
+# raw into the query string, curl refuses the whole request ("Malformed input to
+# a URL function") and the board cross-check in cleaning-up-branches cannot run.
+# Every backend that puts the name in the URL must send the encoded form.
+LABEL='status/to test'
+ENC='status%2Fto%20test'
+
+run "$ADAPTERS/forgejo/issues" list --state open --label "$LABEL" --limit 20
+grep -q "labels=$ENC" "$CURL_LOG" \
+	|| fail "forgejo list did not encode the label: $(head -1 "$CURL_LOG")"
+! grep -q 'labels=[^&]*[ ]' "$CURL_LOG" || fail "forgejo list left a raw space in the URL"
+
+run "$ADAPTERS/github/issues" list --state open --label "$LABEL" --limit 20
+grep -q "labels=$ENC" "$CURL_LOG" \
+	|| fail "github list did not encode the label: $(head -1 "$CURL_LOG")"
+
+run "$ADAPTERS/gitlab/issues" list --state open --label "$LABEL" --limit 20
+grep -q "labels=$ENC" "$CURL_LOG" \
+	|| fail "gitlab list did not encode the label: $(head -1 "$CURL_LOG")"
+
+# Two labels comma-join as two encoded values, not one encoded comma.
+run "$ADAPTERS/forgejo/issues" list --state open --label "$LABEL" --label 'type/bug' --limit 20
+grep -q "labels=$ENC,type%2Fbug" "$CURL_LOG" \
+	|| fail "forgejo list mangled a two-label filter: $(head -1 "$CURL_LOG")"
+
+# --state is caller input too, so it is encoded rather than trusted.
+run "$ADAPTERS/forgejo/issues" list --state 'a b' --limit 20
+grep -q 'state=a%20b' "$CURL_LOG" || fail "forgejo list did not encode --state"
+
+# Jira puts the label in a JQL string literal in the POST body, not in the URL,
+# so what must hold there is the quoting — the space stays, the quotes wrap it.
+export LS_EMAIL=dev@example.invalid LS_PROJECT=ACME
+run "$ADAPTERS/jira/issues" list --state open --label "$LABEL" --limit 20
+jql="$(jq -rs '.[0].jql' "$CURL_DATA_LOG")"
+grep -q 'labels IN ("status/to test")' <<<"$jql" \
+	|| fail "jira list did not quote the label in its JQL: $jql"
 
 printf 'paging tests passed\n'

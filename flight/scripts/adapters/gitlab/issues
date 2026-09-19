@@ -35,8 +35,12 @@ case "$verb" in
       all)    q="" ;;
       *) die "issues list: --state must be open|closed|all" ;;
     esac
+    # Percent-encoded before it goes in the URL: `status/to test` and friends
+    # carry spaces and slashes, and curl refuses the whole URL over a raw space.
     if [ ${#labels[@]} -gt 0 ]; then
-      old="$IFS"; IFS=,; q="${q:+$q&}labels=${labels[*]}"; IFS="$old"
+      enc=()
+      for l in "${labels[@]}"; do enc+=("$(urlenc "$l")"); done
+      old="$IFS"; IFS=,; q="${q:+$q&}labels=${enc[*]}"; IFS="$old"
     fi
     # _paged_get honours --limit as a ceiling and pages underneath it, so a limit
     # above the server's cap returns what it says rather than one clamped page.
