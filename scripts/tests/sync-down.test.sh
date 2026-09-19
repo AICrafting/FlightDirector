@@ -122,7 +122,7 @@ promote develop qa
 before_qa="$(osha qa)"; count_before="$(git -C "$P" rev-list --count "origin/qa")"
 run --from qa; rc=$?
 check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(err)"
-check "develop row says fast-forwarded" "$(line develop | grep -q $'^develop\tfast-forwarded\t' && echo 1 || echo 0)" "$(out)"
+check "develop row says fast-forwarded" "$(grep -q $'^develop\tfast-forwarded\t' < <(line develop) && echo 1 || echo 0)" "$(out)"
 check "origin/develop == qa tip" "$([ "$(osha develop)" = "$before_qa" ] && echo 1 || echo 0)"
 check "local develop (checked out in R) == qa tip" "$([ "$(sha develop)" = "$before_qa" ] && echo 1 || echo 0)"
 check "no new commit was created" "$([ "$(git -C "$P" rev-list --count origin/develop)" = "$count_before" ] && echo 1 || echo 0)"
@@ -162,7 +162,7 @@ promote develop qa; promote qa main
 dev_before="$(osha develop)"; qa_before="$(osha qa)"
 run --from main; rc=$?
 check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(err)"
-check "qa row says skipped (syncDown: none)" "$(line qa | grep -q $'^qa\tskipped\tsyncDown: none' && echo 1 || echo 0)" "$(out)"
+check "qa row says skipped (syncDown: none)" "$(grep -q $'^qa\tskipped\tsyncDown: none' < <(line qa) && echo 1 || echo 0)" "$(out)"
 check "cascade stops: no develop row" "$([ -z "$(line develop)" ] && echo 1 || echo 0)" "$(out)"
 check "origin/qa untouched" "$([ "$(osha qa)" = "$qa_before" ] && echo 1 || echo 0)"
 check "origin/develop untouched" "$([ "$(osha develop)" = "$dev_before" ] && echo 1 || echo 0)"
@@ -178,7 +178,7 @@ git -C "$R" pull -q --ff-only origin develop
 dev_before="$(osha develop)"
 run --from qa; rc=$?
 check "exit non-zero" "$([ "$rc" != 0 ] && echo 1 || echo 0)"
-check "develop row says stopped: conflict" "$(line develop | grep -q $'^develop\tstopped\tconflict' && echo 1 || echo 0)" "$(out)"
+check "develop row says stopped: conflict" "$(grep -q $'^develop\tstopped\tconflict' < <(line develop) && echo 1 || echo 0)" "$(out)"
 check "origin/develop unchanged" "$([ "$(osha develop)" = "$dev_before" ] && echo 1 || echo 0)"
 check "local develop unchanged" "$([ "$(sha develop)" = "$dev_before" ] && echo 1 || echo 0)"
 check "no merge left in progress in the checkout" "$([ ! -e "$R/.git/MERGE_HEAD" ] && echo 1 || echo 0)"
@@ -193,7 +193,7 @@ git -C "$R" pull -q --ff-only origin develop
 promote develop qa squash
 run --from qa; rc=$?
 check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(err)"
-check "develop row says merged (a true merge commit)" "$(line develop | grep -q $'^develop\tmerged\t' && echo 1 || echo 0)" "$(out)"
+check "develop row says merged (a true merge commit)" "$(grep -q $'^develop\tmerged\t' < <(line develop) && echo 1 || echo 0)" "$(out)"
 check "develop and qa now have identical trees" "$([ "$(git -C "$R" rev-parse "develop^{tree}")" = "$(git -C "$R" rev-parse "origin/qa^{tree}")" ] && echo 1 || echo 0)"
 check "the merge commit has two parents" "$([ "$(git -C "$R" rev-list --parents -n1 develop | wc -w)" -eq 3 ] && echo 1 || echo 0)"
 commit_on "$P" develop c C
@@ -215,7 +215,7 @@ check "pr open called with --head qa --base develop" "$(grep -q '^pr open .*--he
 check "ci watch called by --pr" "$(grep -q '^ci watch --pr 7' "$STUB_LOG" && echo 1 || echo 0)"
 check "pr merge uses --strategy merge (never the stage's promotion strategy)" "$(grep -q '^pr merge --number 7 --strategy merge$' "$STUB_LOG" && echo 1 || echo 0)" "$(cat "$STUB_LOG")"
 check "calls happen in order open → watch → merge" "$([ "$(cut -d' ' -f1,2 "$STUB_LOG" | paste -sd, -)" = "pr open,ci watch,pr merge" ] && echo 1 || echo 0)"
-check "develop row says pr-merged #7" "$(line develop | grep -q $'^develop\tpr-merged\t#7' && echo 1 || echo 0)" "$(out)"
+check "develop row says pr-merged #7" "$(grep -q $'^develop\tpr-merged\t#7' < <(line develop) && echo 1 || echo 0)" "$(out)"
 check "origin/develop now contains qa" "$(git -C "$P" fetch -q origin && git -C "$P" merge-base --is-ancestor "$qa_tip" origin/develop && echo 1 || echo 0)"
 check "local develop (checked out, clean) fast-forwarded to the merged tip" "$([ "$(sha develop)" = "$(osha develop)" ] && echo 1 || echo 0)"
 # the default mode is the stage's own merge value: qa is merge:pr with no syncDown → pr
@@ -236,11 +236,11 @@ promote develop qa
 dev_before="$(osha develop)"
 STUB_CI_STATUS=failure STUB_CI_FAILED=1 run --from qa; rc=$?
 check "red CI → exit non-zero" "$([ "$rc" != 0 ] && echo 1 || echo 0)"
-check "row says stopped, names the open PR and the CI status" "$(line develop | grep -q $'^develop\tstopped\tPR #7 left open.*failure' && echo 1 || echo 0)" "$(out)"
+check "row says stopped, names the open PR and the CI status" "$(grep -q $'^develop\tstopped\tPR #7 left open.*failure' < <(line develop) && echo 1 || echo 0)" "$(out)"
 check "pr merge was NOT called" "$(grep -q '^pr merge' "$STUB_LOG" && echo 0 || echo 1)"
 check "origin/develop untouched" "$([ "$(osha develop)" = "$dev_before" ] && echo 1 || echo 0)"
 STUB_CI_RC=1 run --from qa; rc=$?
-check "ci watch timeout (non-zero) → stopped, PR left open" "$([ "$rc" != 0 ] && line develop | grep -q $'^develop\tstopped\tPR #7 left open' && ! grep -q '^pr merge' "$STUB_LOG" && echo 1 || echo 0)" "$(out)"
+check "ci watch timeout (non-zero) → stopped, PR left open" "$([ "$rc" != 0 ] && grep -q $'^develop\tstopped\tPR #7 left open' < <(line develop) && ! grep -q '^pr merge' "$STUB_LOG" && echo 1 || echo 0)" "$(out)"
 
 # ── 8. dirty checkout: merge in a throwaway worktree, push, report behind ────
 echo "── direct: dirty checkout"
@@ -253,7 +253,7 @@ printf 'uncommitted\n' >"$R/base"          # tracked file modified in the main c
 run --from qa; rc=$?
 check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(err)"
 check "origin/develop == qa tip" "$([ "$(osha develop)" = "$qa_tip" ] && echo 1 || echo 0)"
-check "row reports the local checkout is behind" "$(line develop | grep -q 'local checkout .* is behind' && echo 1 || echo 0)" "$(out)"
+check "row reports the local checkout is behind" "$(grep -q 'local checkout .* is behind' < <(line develop) && echo 1 || echo 0)" "$(out)"
 check "local develop ref was not moved under the dirty checkout" "$([ "$(sha develop)" = "$dev_local" ] && echo 1 || echo 0)"
 check "the uncommitted edit is intact" "$([ "$(cat "$R/base")" = "uncommitted" ] && echo 1 || echo 0)"
 check "throwaway worktree removed" "$([ "$(git -C "$R" worktree list | wc -l)" -eq 1 ] && echo 1 || echo 0)"
@@ -269,12 +269,12 @@ printf 'local-only\n' >"$R/local"; git -C "$R" add local; git -C "$R" commit -qm
 dev_origin="$(osha develop)"; dev_local="$(sha develop)"
 run --from qa; rc=$?
 check "ahead → exit non-zero" "$([ "$rc" != 0 ] && echo 1 || echo 0)"
-check "row says stopped: local develop is ahead of origin/develop" "$(line develop | grep -q $'^develop\tstopped\t.*ahead of origin/develop' && echo 1 || echo 0)" "$(out)"
+check "row says stopped: local develop is ahead of origin/develop" "$(grep -q $'^develop\tstopped\t.*ahead of origin/develop' < <(line develop) && echo 1 || echo 0)" "$(out)"
 check "origin/develop untouched" "$([ "$(osha develop)" = "$dev_origin" ] && echo 1 || echo 0)"
 check "local develop untouched" "$([ "$(sha develop)" = "$dev_local" ] && echo 1 || echo 0)"
 commit_on "$P" develop other x            # now origin moved too → diverged
 run --from qa; rc=$?
-check "diverged → exit non-zero, says diverged" "$([ "$rc" != 0 ] && line develop | grep -q 'diverged' && echo 1 || echo 0)" "$(out)"
+check "diverged → exit non-zero, says diverged" "$([ "$rc" != 0 ] && grep -q 'diverged' < <(line develop) && echo 1 || echo 0)" "$(out)"
 
 # behind (not checked out): the local ref is fast-forwarded before the merge
 fresh
@@ -283,7 +283,7 @@ promote develop qa; promote qa main
 commit_on "$P" qa hot fix                  # qa moved on origin; R's local qa is behind
 git -C "$R" pull -q --ff-only origin develop
 run --from main; rc=$?
-check "behind lower stage is fast-forwarded first, then merged (main → qa is a real merge)" "$([ "$rc" = 0 ] && line qa | grep -q $'^qa\tmerged\t' && echo 1 || echo 0)" "$(out) $(err)"
+check "behind lower stage is fast-forwarded first, then merged (main → qa is a real merge)" "$([ "$rc" = 0 ] && grep -q $'^qa\tmerged\t' < <(line qa) && echo 1 || echo 0)" "$(out) $(err)"
 check "origin/qa contains both main and the hotfix" "$(git -C "$P" fetch -q origin && git -C "$P" merge-base --is-ancestor origin/main origin/qa && git -C "$P" diff --quiet origin/qa origin/qa -- && [ "$(git -C "$P" show origin/qa:hot)" = fix ] && echo 1 || echo 0)"
 check "develop then fast-forwards to the new qa" "$([ "$(osha develop)" = "$(osha qa)" ] && echo 1 || echo 0)"
 

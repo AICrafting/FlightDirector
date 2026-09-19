@@ -359,5 +359,9 @@ coordinates from the git remote on first run, so in the normal case you set noth
 ## Context note
 
 List verbs project with `jq` to minimal TSV before anything reaches the conversation, so listing
-issues is cheap on context. Still pass a sane `--limit` and paginate rather than pulling hundreds
-at once.
+issues is cheap on context. Still pass a sane `--limit` rather than pulling hundreds at once: the
+adapter pages underneath the limit, so a big number really does fetch that many rows.
+
+When a limit hides rows, the adapter says so on **stderr** (`warning: showing 50 of 109 rows …`)
+and leaves stdout clean. Read that line: it is the only reliable signal that a list is partial,
+since a full page on its own proves nothing.

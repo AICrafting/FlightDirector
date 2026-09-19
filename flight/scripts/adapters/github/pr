@@ -30,13 +30,12 @@ case "$verb" in
     # GitHub *does* filter by branch server-side — `head` wants owner:ref. Send it
     # (cheap, and keeps the fetch inside --limit), then re-check client-side so the
     # output is identical to the backends that can only filter locally.
-    q="state=${api_state}&per_page=${limit}"
+    q="state=${api_state}"
     [ -n "$head" ] && q="${q}&head=${LS_OWNER}:${head}"
     [ -n "$base" ] && q="${q}&base=${base}"
-    _api GET "/pulls?${q}" \
+    _paged_get "/pulls" "$q" "$limit" \
       | jq -r --arg h "$head" --arg b "$base" --argjson m "$merged_only" '
-          .[]
-          | select($h == "" or .head.ref == $h)
+          select($h == "" or .head.ref == $h)
           | select($b == "" or .base.ref == $b)
           | select($m == 0 or (.merged_at != null))
           | [ (.number|tostring),

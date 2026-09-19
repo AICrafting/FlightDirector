@@ -8,6 +8,28 @@ nothing here (bumping versions, adapters, the test rigs) is something a plugin
 Rule of thumb for where a doc belongs: *"would someone who only installed the
 plugin ever do this?"* If no, it goes here; if yes, it goes in `GUIDE.md`.
 
+## Prerequisites
+
+Everything a *user* needs — `curl`, `jq`, `git`, and `python3` (standard library only) if
+the [cost ledger](flight/GUIDE.md#cost-ledger-optional) is on — is listed under
+[**What you need**](flight/GUIDE.md#what-you-need) in the guide. Working *on* the repo adds
+two more:
+
+- **`shellcheck`** and **`yamllint`** on your `PATH`. The pre-push check
+  [`scripts/checks/lint.sh`](scripts/checks/lint.sh) runs each of them; a linter that isn't
+  installed can't lint, so without both your push is unchecked locally and the CI `lint`
+  workflow is the first thing to see the problem. Install them from your distro's package
+  manager or Homebrew; on Windows, winget, scoop and choco all carry shellcheck, and yamllint
+  comes from `pip install yamllint`.
+- **`python3`** regardless of whether you enable the ledger — the prompt-logger scripts under
+  `flight/scripts/prompt-logger/` are Python, and their unit tests are part of
+  `scripts/run-tests.sh`.
+
+Platform-wise, contributing works anywhere the plugin does: Linux, macOS (stock bash 3.2 and
+BSD tools; nothing to install) and Windows via Git Bash / MSYS. All three run in CI on every
+change, so a contribution that is green only on Linux is not finished — see
+[Branch / PR conventions](#branch--pr-conventions).
+
 ## Repo layout
 
 This is a monorepo of Claude Code + Codex tools. Each tool owns its own directory,
@@ -65,6 +87,9 @@ There are three distinct layers — keep them straight:
 scripts/run-checks.sh    # lint + signature checks (what the pre-push hook runs)
 scripts/run-tests.sh     # all scripts/tests/*.test.sh
 ```
+
+`lint.sh` can only run the linters you have: install `yamllint` and `shellcheck` first
+(see [Prerequisites](#prerequisites)), or the local lint pass covers less than CI's does.
 
 Enable the pre-push hook once per clone:
 
@@ -133,7 +158,22 @@ flight develops itself through its own pipeline: **feature → develop → qa �
 - **`working-an-issue`** — one branch + worktree per issue under `.worktrees/`, status
   labels that track the board, an explicit human merge gate.
 - **`promoting-a-branch`** — advances a branch one hop, applying that hop's merge
-  strategy and gate; the `feature → develop` hop is a direct `--no-ff` merge.
+  strategy and gate. Every hop in this repo is configured `merge: pr`, `feature → develop`
+  included (`develop` and `qa` also carry `gate: post-merge-qa`), so promoting a feature
+  branch pushes it, opens a pull request, watches CI, and merges on green with the default
+  `merge` strategy — not a direct `--no-ff` merge.
+
+About that PR hop:
+
+- **Bring a branch level with its target by merging, not rebasing.** Merge `develop` into
+  the feature branch; a rebase rewrites the commits and their signatures with them, and
+  signed commits are required (below).
+- **CI runs four blocking legs on a PR**, all in
+  [`.github/workflows/tests.yml`](.github/workflows/tests.yml): bash 5, bash 3.2 (the
+  interpreter macOS ships), macOS (BSD userland) and Windows (MSYS). A test that is green
+  locally on Linux can still go red on bash 3.2 or on BSD/MSYS tools, so expect to read all
+  four. [`.github/workflows/lint.yml`](.github/workflows/lint.yml) (yamllint + shellcheck)
+  runs alongside them.
 
 Other conventions:
 

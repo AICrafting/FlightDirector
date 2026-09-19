@@ -18,10 +18,12 @@ verb="${1:-}"; shift || true
 
 case "$verb" in
   list)
-    # /rest/api/3/label returns the instance's labels, paginated. Colour and
-    # description don't exist on Jira labels, so both columns are empty.
-    _api GET "/rest/api/3/label?maxResults=1000" \
-      | jq -r '(.values // [])[] | [., "", ""] | @tsv'
+    # /rest/api/3/label returns the instance's labels, paginated: Jira clamps
+    # maxResults to its own ceiling, so page through startAt rather than asking for
+    # a big number. Colour and description don't exist on Jira labels, so both
+    # columns are empty.
+    _offset_get "/rest/api/3/label" "" values "" \
+      | jq -r '[., "", ""] | @tsv'
     ;;
 
   resolve)

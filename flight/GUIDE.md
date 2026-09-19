@@ -240,8 +240,10 @@ lands in the final stage.
 - `squash` — collapses the whole branch into a single commit on the target.
 - `rebase` — replays the branch's commits onto the target with no merge commit.
 
-If you don't say, it's `merge`. (This applies to `pr` hops only — a `direct` hop like
-feature → `develop` always merges with `--no-ff` and has no strategy option.)
+If you don't say, it's `merge`. (This applies to `pr` hops only — a hop configured `direct`
+always merges with `--no-ff` and has no strategy option. Which hops are which is up to your
+`code.stages`: `feature → develop` is a common `direct` hop, but it can just as well be a
+`pr` one.)
 
 **After a stage-to-stage promotion, the lower stages are synced back down.** Once `develop → qa`
 (or `qa → main`) lands, **promoting-a-branch** merges the target back into the source and cascades

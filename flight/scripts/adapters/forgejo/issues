@@ -19,12 +19,18 @@ case "$verb" in
       --label) labels+=("$2"); shift 2 ;;
       *) die "issues list: unknown arg '$1'" ;;
     esac; done
-    q="type=issues&state=${state}&limit=${limit}"
+    # Every interpolated value is percent-encoded: `status/to test` and friends
+    # carry spaces and slashes, and curl refuses the whole URL over a raw space.
+    q="type=issues&state=$(urlenc "$state")"
     if [ ${#labels[@]} -gt 0 ]; then
-      old="$IFS"; IFS=,; q="${q}&labels=${labels[*]}"; IFS="$old"
+      enc=()
+      for l in "${labels[@]}"; do enc+=("$(urlenc "$l")"); done
+      old="$IFS"; IFS=,; q="${q}&labels=${enc[*]}"; IFS="$old"
     fi
-    _api GET "/issues?${q}" \
-      | jq -r '.[] | [(.number|tostring), .title, ([.labels[].name] | join(","))] | @tsv'
+    # _paged_get honours --limit as a ceiling and pages underneath it, so a limit
+    # above the server's cap returns what it says rather than one clamped page.
+    _paged_get "/issues" "$q" "$limit" \
+      | jq -r '[(.number|tostring), .title, ([.labels[].name] | join(","))] | @tsv'
     ;;
 
   get)
@@ -47,6 +53,10 @@ case "$verb" in
     [ -n "$number" ] || die "issues comments: --number required"
     # One block per comment, oldest-first: `author⇥created_at` header, the raw
     # body, then a blank separator. Empty output (exit 0) means no comments.
+    # Deliberately NOT paged: this endpoint ignores `limit` and `page` and returns
+    # the whole thread (verified against a 53-comment issue), so a page-until-empty
+    # loop would re-fetch the same rows forever. The GitHub and GitLab adapters do
+    # page their comment endpoints, which cap for real.
     _api GET "/issues/${number}/comments" \
       | jq -r '.[] | ([(.user.login // "?"), .created_at] | @tsv), (.body // ""), ""'
     ;;
