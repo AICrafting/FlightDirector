@@ -60,11 +60,11 @@ fi
 "$BM" write --run-id RUN2 --zone flight --issues "12 7" --zone rig --issues "50"
 groups_out="$("$BM" groups | sort)"
 check "groups lists flight union sorted (7,12,18,93)" \
-	"$(printf '%s\n' "$groups_out" | grep -qxF "$(printf 'flight\t7,12,18,93')" && echo 1 || echo 0)"
+	"$(grep -qxF "$(printf 'flight\t7,12,18,93')" <<<"$groups_out" && echo 1 || echo 0)"
 check "groups lists docs (40,41)" \
-	"$(printf '%s\n' "$groups_out" | grep -qxF "$(printf 'docs\t40,41')" && echo 1 || echo 0)"
+	"$(grep -qxF "$(printf 'docs\t40,41')" <<<"$groups_out" && echo 1 || echo 0)"
 check "groups lists rig (50)" \
-	"$(printf '%s\n' "$groups_out" | grep -qxF "$(printf 'rig\t50')" && echo 1 || echo 0)"
+	"$(grep -qxF "$(printf 'rig\t50')" <<<"$groups_out" && echo 1 || echo 0)"
 
 # --- heal: keep only live issues; drop empty zones; delete empty manifests ---
 # Live set keeps only docs's 40,41. RUN1 loses flight but keeps docs;
