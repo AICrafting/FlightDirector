@@ -221,7 +221,8 @@ cat >>"$R/.flightdirector/prompt-log.jsonl" <<'EOF'
 EOF
 J4="$(cd "$R" && "$DISP" prompt-log summary --session S6 --json)"
 check "legacy helper-stop rows are set aside, a typed unmeasured agent is not" "$(jq -e '.helper_stop_rows==1 and .unmeasured_rows==1 and .rows==1 and .subagent_rows==1' <<<"$J4" >/dev/null && echo 1 || echo 0)"
-check "markdown summary mentions the ignored helper rows" "$(cd "$R" && "$DISP" prompt-log summary --session S6 | grep -q '1 untyped SubagentStop row(s) from harness helpers ignored' && echo 1 || echo 0)"
+MD8="$(cd "$R" && "$DISP" prompt-log summary --session S6)"
+check "markdown summary mentions the ignored helper rows" "$(grep -q '1 untyped SubagentStop row(s) from harness helpers ignored' <<<"$MD8" && echo 1 || echo 0)"
 MD2="$(cd "$R" && "$DISP" prompt-log summary --session NOPE)"
 check "no rows → explicit 'estimate only' line" "$(grep -q 'estimate only' <<<"$MD2" && echo 1 || echo 0)"
 J3="$(cd "$R" && "$DISP" prompt-log summary --session S2 --json)"
