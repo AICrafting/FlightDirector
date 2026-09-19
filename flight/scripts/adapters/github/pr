@@ -31,8 +31,10 @@ case "$verb" in
     # (cheap, and keeps the fetch inside --limit), then re-check client-side so the
     # output is identical to the backends that can only filter locally.
     q="state=${api_state}"
-    [ -n "$head" ] && q="${q}&head=${LS_OWNER}:${head}"
-    [ -n "$base" ] && q="${q}&base=${base}"
+    # Branch names are caller input: encode each value, leaving the ':' that
+    # separates owner from ref as the delimiter GitHub expects.
+    [ -n "$head" ] && q="${q}&head=$(urlenc "$LS_OWNER"):$(urlenc "$head")"
+    [ -n "$base" ] && q="${q}&base=$(urlenc "$base")"
     _paged_get "/pulls" "$q" "$limit" \
       | jq -r --arg h "$head" --arg b "$base" --argjson m "$merged_only" '
           select($h == "" or .head.ref == $h)

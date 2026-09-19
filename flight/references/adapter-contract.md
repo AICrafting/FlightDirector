@@ -64,6 +64,26 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
   one-line reason on stderr. Skills must check it — a non-zero exit is a hard stop, never a
   silent no-op.
 
+## URL encoding
+
+**Every caller-supplied value an adapter puts in a URL — query parameter or path segment — is
+percent-encoded, through the one shared `urlenc` in `flight/scripts/_portable.sh`.** Adapters do
+not define their own; `_portable.sh` is sourced by every adapter and by `_authlib.sh`, so `urlenc`
+is simply in scope. It is `jq`'s `@uri`, which leaves the RFC 3986 unreserved set alone
+(`A-Z a-z 0-9 - _ . ~`) and encodes everything else as UTF-8 bytes. It goes through `_portable.sh`'s
+`jq` wrapper, so a Windows `jq.exe` cannot smuggle a CR into the URL.
+
+Encode the **value**, never the assembled URL: the `?`, `&` and `=` that separate parameters, a
+fixed path prefix such as `refs/heads/`, and GitHub's `owner:ref` colon are delimiters, so they are
+written around what `urlenc` returns rather than passed through it.
+
+Branch names, label names, states and usernames are all caller input and all reach a query string.
+Unencoded, a space makes curl refuse the whole request outright ("Malformed input to a URL
+function") and a `#` truncates the query at the fragment — the second is the dangerous one, because
+the request succeeds and the lookup silently matches nothing. Values the adapter itself produced,
+and backend ids that are verified integers or hex SHAs, need no encoding; encoding them anyway is
+harmless and byte-identical.
+
 ## Paging
 
 Every backend clamps a list request to its own maximum and reports the clamp only in a header:
@@ -169,7 +189,7 @@ skills exercise, and the token's expiry where the backend exposes it. Rules:
 
 | Verb    | Args                                              | stdout |
 |---------|---------------------------------------------------|--------|
-| `watch` | `--pr N` \| `--sha SHA` `[--status-file PATH] [--timeout SECS]` | one line per state change: `ci runs=<n> pending=<p> failed=<f> status=<pending\|success\|failure>`; **aggregates all runs** for the SHA — stays watching while any is pending, verdict is `failure` if any run failed. Exits 0 once none pending. `--pr` resolves the PR's head SHA (the SHA the run reports — prefer it; a local `--sha` may be unpushed). `--timeout` (env `LS_CI_WATCH_TIMEOUT` / config `code.ciWatchTimeout`; default 900; 0 disables) exits non-zero rather than polling forever. **Superseded runs don't count**: only the latest attempt per (workflow, trigger event) is scored — a retried-to-green flake watches green — and a newest manual re-dispatch (`workflow_dispatch`; GitLab: `web` pipeline) supersedes that workflow's earlier runs outright. Background-friendly for the `Monitor` tool. |
+| `watch` | `--pr N` \| `--sha SHA` `[--status-file PATH] [--timeout SECS]` | one line per state change: `ci runs=<n> pending=<p> failed=<f> status=<pending\|success\|failure>`; **aggregates all runs** for the SHA — stays watching while any is pending, verdict is `failure` if any run failed. Exits 0 once none pending. `--pr` resolves the PR's head SHA (the SHA the run reports — prefer it; a local `--sha` may be unpushed). **Two clocks**: `--timeout` (env `LS_CI_WATCH_TIMEOUT` / config `code.ciWatchTimeout`; default 900; 0 disables) bounds how long a run may **execute**, while `--queue-timeout` (env `LS_CI_QUEUE_TIMEOUT` / config `code.ciQueueTimeout`; default 3600; 0 disables) bounds time in which every job of every non-terminal run is waiting for a runner. Queued time does not count against `--timeout`, so a healthy run serialized behind a scarce runner is no longer reported as a hang; each message names which cap fired and the key that raises it. The run-level status cannot tell the two apart — every backend reports a run as running once ANY job starts — so a run that looks executing is confirmed against its own job list (`/actions/runs/{id}/jobs`, GitLab `/pipelines/{id}/jobs`), and anything unreadable counts as executing, i.e. keeps the shorter cap in charge. "No run found at all" is a trigger/push problem rather than a queue and stays bounded by `--timeout`. **Superseded runs don't count**: only the latest attempt per (workflow, trigger event) is scored — a retried-to-green flake watches green — and a newest manual re-dispatch (`workflow_dispatch`; GitLab: `web` pipeline) supersedes that workflow's earlier runs outright. Background-friendly for the `Monitor` tool. |
 | `log`   | `--sha SHA` (or `--failed BRANCH`)                | failed jobs' plaintext logs to stdout, one `── job <id>: <name> ──` header per job, fetched via the backend's per-job logs API (Forgejo 16+: `/actions/jobs/{id}/logs`) |
 
 ### `branches` (dispatcher-owned, not a backend adapter)
