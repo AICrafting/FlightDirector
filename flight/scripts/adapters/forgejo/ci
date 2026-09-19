@@ -15,11 +15,13 @@ case "$verb" in
   # is swallowed and the poll continues, rather than killing the watcher.
   watch)
     sha=""; pr=""; status_file=""; timeout="${LS_CI_WATCH_TIMEOUT:-900}"
+    queue_timeout="${LS_CI_QUEUE_TIMEOUT:-3600}"
     while [ $# -gt 0 ]; do case "$1" in
-      --sha)         sha="$2"; shift 2 ;;
-      --pr)          pr="$2"; shift 2 ;;
-      --status-file) status_file="$2"; shift 2 ;;
-      --timeout)     timeout="$2"; shift 2 ;;
+      --sha)           sha="$2"; shift 2 ;;
+      --pr)            pr="$2"; shift 2 ;;
+      --status-file)   status_file="$2"; shift 2 ;;
+      --timeout)       timeout="$2"; shift 2 ;;
+      --queue-timeout) queue_timeout="$2"; shift 2 ;;
       *) die "ci watch: unknown arg '$1'" ;;
     esac; done
     # --pr is authoritative: the PR head commit IS the SHA the run reports as
@@ -40,6 +42,10 @@ case "$verb" in
 
     poll="${LS_CI_POLL_SECONDS:-30}"
     start="$(date +%s)"; seen=0; last_sig=""
+    # Two clocks (#171): `timeout` bounds EXECUTION, `queue_timeout` bounds time
+    # spent waiting for a runner. `tick` is the start of the interval currently
+    # being attributed; `prev_*` is the state observed at that interval's start.
+    exec_secs=0; queue_secs=0; tick="$start"; prev_seen=0; prev_queued=0
     while true; do
       # /actions/runs (not /actions/tasks): a task only exists once a runner has
       # picked the job up, so a run still `waiting` is invisible to the tasks
@@ -85,13 +91,59 @@ case "$verb" in
         fi
         [ "$pending" -eq 0 ] && exit 0
       fi
-      # Hang guard: never poll forever. --timeout 0 disables the cap.
-      if [ "$timeout" -gt 0 ] && [ "$(( $(date +%s) - start ))" -ge "$timeout" ]; then
-        if [ "$seen" = 1 ]; then
-          die "ci watch: timed out after ${timeout}s waiting for run ${sha:0:12} to reach a terminal state"
-        else
-          die "ci watch: timed out after ${timeout}s — no CI run found for ${sha:0:12} (is the branch pushed and does a workflow trigger for it?)"
+
+      # Queued or executing? The run-level status alone cannot say. Forgejo
+      # marks a run `running` the moment ANY job starts, so a run with three
+      # legs green and the fourth still waiting for its runner reads `running`
+      # while nothing at all is executing — which is exactly the 19-minute case
+      # this guard exists for. So every run that LOOKS executing is confirmed
+      # against its own job list before its time counts as execution.
+      queued=0
+      if [ "$pending" -gt 0 ]; then
+        queued=1
+        run_ids="$(printf '%s' "$body" | jq -r --arg sha "$sha" '
+          .workflow_runs[]? | select((.commit_sha // .head_sha // "")|startswith($sha))
+          | select((.status // "") == "running") | .id' 2>/dev/null || true)"
+        while IFS= read -r rid; do
+          [ -n "$rid" ] || continue
+          jobs="$(curl -sS -H "Authorization: token ${LS_TOKEN}" \
+            "${REPO_API}/actions/runs/${rid}/jobs" 2>/dev/null || true)"
+          jm="$(printf '%s' "$jobs" | jq -r '
+            [.[]? | .status // ""] as $s
+            | ([$s[] | select(. == "running")] | length) as $r
+            | ([$s[] | select(. as $x | ["waiting","queued","blocked"] | index($x))] | length) as $w
+            | "\($r) \($w)"' 2>/dev/null || true)"
+          jrun=""; jwait=""
+          read -r jrun jwait <<<"$jm" || true
+          # Conservative on anything unclear: an unreadable job list, a job
+          # actually running, or a run whose jobs are all terminal while the run
+          # is not, all count as executing — so a blip can only ever leave the
+          # SHORTER cap in charge, never silently extend the wait to an hour.
+          if [ -z "$jrun" ] || [ "${jrun:-0}" -gt 0 ] || [ "${jwait:-0}" -eq 0 ]; then
+            queued=0; break
+          fi
+        done <<<"$run_ids"
+      fi
+
+      # Attribute the interval that just ended to the state seen at its start.
+      now="$(date +%s)"; delta=$(( now - tick )); tick="$now"
+      if [ "$prev_seen" = 1 ]; then
+        if [ "$prev_queued" = 1 ]; then queue_secs=$(( queue_secs + delta ))
+        else exec_secs=$(( exec_secs + delta )); fi
+      fi
+      prev_seen="$seen"; prev_queued="$queued"
+
+      # Hang guards: never poll forever. Either timeout set to 0 disables that
+      # cap. Each message names the cap that fired and the key that raises it.
+      if [ "$seen" = 1 ]; then
+        if [ "$timeout" -gt 0 ] && [ "$exec_secs" -ge "$timeout" ]; then
+          die "ci watch: timed out after ${exec_secs}s of execution waiting for run ${sha:0:12} to reach a terminal state (plus ${queue_secs}s queued; raise --timeout / code.ciWatchTimeout)"
         fi
+        if [ "$queue_timeout" -gt 0 ] && [ "$queue_secs" -ge "$queue_timeout" ]; then
+          die "ci watch: gave up after ${queue_secs}s queued — run ${sha:0:12} never started executing, every job is still waiting for a runner (raise --queue-timeout / code.ciQueueTimeout)"
+        fi
+      elif [ "$timeout" -gt 0 ] && [ "$(( now - start ))" -ge "$timeout" ]; then
+        die "ci watch: timed out after ${timeout}s — no CI run found for ${sha:0:12} (is the branch pushed and does a workflow trigger for it?)"
       fi
       sleep "$poll"
     done
