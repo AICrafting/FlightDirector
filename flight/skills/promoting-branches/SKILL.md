@@ -63,6 +63,8 @@ Candidates are local `feature/*` branches whose linked issue is at `to-test`:
 # Resolve the to-test *role* to this repo's label name (as triaging-issues does),
 # then keep issues whose labels column carries it:
 TT="$("$DISP" config '.labels.status["to-test"] // "to-test"')"
+# --limit 100 is a ceiling the adapter pages up to; if it warns on stderr that it is
+# showing 100 of more, raise it and re-list, or the LIVE set silently loses candidates.
 "$DISP" issues list --state open --limit 100   # keep rows whose labels column contains "$TT"
 # local feature branches:
 git -C "$MAIN" for-each-ref --format='%(refname:short)' refs/heads/feature

@@ -28,13 +28,12 @@ case "$verb" in
       all)    api_state="all" ;;
       *) die "pr list: --state must be open|closed|merged|all" ;;
     esac
-    q="state=${api_state}&per_page=${limit}"
+    q="state=${api_state}"
     [ -n "$head" ] && q="${q}&source_branch=${head}"
     [ -n "$base" ] && q="${q}&target_branch=${base}"
-    _api GET "/merge_requests?${q}" \
+    _paged_get "/merge_requests" "$q" "$limit" \
       | jq -r --arg h "$head" --arg b "$base" '
-          .[]
-          | select($h == "" or .source_branch == $h)
+          select($h == "" or .source_branch == $h)
           | select($b == "" or .target_branch == $b)
           | [ (.iid|tostring), .state, .source_branch, .target_branch, .title ] | @tsv'
     ;;

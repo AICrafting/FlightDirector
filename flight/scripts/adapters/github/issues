@@ -19,15 +19,17 @@ case "$verb" in
       --label) labels+=("$2"); shift 2 ;;
       *) die "issues list: unknown arg '$1'" ;;
     esac; done
-    q="state=${state}&per_page=${limit}"
+    q="state=${state}"
     if [ ${#labels[@]} -gt 0 ]; then
       enc=()
       for l in "${labels[@]}"; do enc+=("$(urlenc "$l")"); done
       old="$IFS"; IFS=,; q="${q}&labels=${enc[*]}"; IFS="$old"
     fi
-    _api GET "/issues?${q}" \
-      | jq -r '.[] | select(.pull_request | not)
-               | [(.number|tostring), .title, ([.labels[].name] | join(","))] | @tsv'
+    # /issues mixes pull requests in, so drop them inside the pager: it is the
+    # issues that must count against --limit, not the rows the endpoint happens
+    # to conflate with them.
+    _paged_get "/issues" "$q" "$limit" '.[] | select(.pull_request | not)' \
+      | jq -r '[(.number|tostring), .title, ([.labels[].name] | join(","))] | @tsv'
     ;;
 
   get)
@@ -50,8 +52,11 @@ case "$verb" in
     [ -n "$number" ] || die "issues comments: --number required"
     # One block per comment, oldest-first: `author⇥created_at` header, the raw
     # body, then a blank separator. Empty output (exit 0) means no comments.
-    _api GET "/issues/${number}/comments" \
-      | jq -r '.[] | ([(.user.login // "?"), .created_at] | @tsv), (.body // ""), ""'
+    # Paged to exhaustion: GitHub's default is 30 per page and the thread renders
+    # oldest-first, so an unpaged fetch drops the NEWEST comments — precisely the
+    # ones "the later comment wins" depends on.
+    _paged_get "/issues/${number}/comments" "" "" \
+      | jq -r '([(.user.login // "?"), .created_at] | @tsv), (.body // ""), ""'
     ;;
 
   create)
