@@ -133,7 +133,22 @@ flight develops itself through its own pipeline: **feature → develop → qa �
 - **`working-an-issue`** — one branch + worktree per issue under `.worktrees/`, status
   labels that track the board, an explicit human merge gate.
 - **`promoting-a-branch`** — advances a branch one hop, applying that hop's merge
-  strategy and gate; the `feature → develop` hop is a direct `--no-ff` merge.
+  strategy and gate. Every hop in this repo is configured `merge: pr`, `feature → develop`
+  included (`develop` and `qa` also carry `gate: post-merge-qa`), so promoting a feature
+  branch pushes it, opens a pull request, watches CI, and merges on green with the default
+  `merge` strategy — not a direct `--no-ff` merge.
+
+About that PR hop:
+
+- **Bring a branch level with its target by merging, not rebasing.** Merge `develop` into
+  the feature branch; a rebase rewrites the commits and their signatures with them, and
+  signed commits are required (below).
+- **CI runs four blocking legs on a PR**, all in
+  [`.github/workflows/tests.yml`](.github/workflows/tests.yml): bash 5, bash 3.2 (the
+  interpreter macOS ships), macOS (BSD userland) and Windows (MSYS). A test that is green
+  locally on Linux can still go red on bash 3.2 or on BSD/MSYS tools, so expect to read all
+  four. [`.github/workflows/lint.yml`](.github/workflows/lint.yml) (yamllint + shellcheck)
+  runs alongside them.
 
 Other conventions:
 
