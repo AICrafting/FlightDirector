@@ -12,7 +12,11 @@ jobs:
     name: yamllint
     runs-on: ubuntu-latest
     container:
-      image: cytopia/yamllint:latest
+      # Pinned rather than `latest` so a new yamllint release cannot turn this
+      # job red on unchanged YAML (#167). `1` is the newest tag this image
+      # publishes — it has no per-version tags — and currently resolves to
+      # yamllint 1.32.0 on Alpine 3.16.6, the same build `latest` serves.
+      image: cytopia/yamllint:1
     steps:
       - name: Setup Node
         run: |
@@ -29,7 +33,20 @@ jobs:
     name: shellcheck
     runs-on: ubuntu-latest
     container:
-      image: koalaman/shellcheck-alpine:latest
+      # Pinned by digest, not by tag, and deliberately to a development build
+      # (#167). `latest` here is a dev build that moves without notice: that is
+      # how SC2337 arrived and turned this job red on unchanged code (#152).
+      # But the newest shellcheck *release*, 0.11.0, predates SC2337, so
+      # pinning to it would drop CI's guard against the very SIGPIPE pattern
+      # #152 fixed. This digest is the `latest` of 2026-09-19, which reports
+      # `v0.11.0-102-g24d9671` and does know SC2337: the check is kept and the
+      # image can no longer change underneath a run.
+      #
+      # The cost of that choice: a contributor's distro shellcheck (0.11.0)
+      # will not flag SC2337, so this job can be red on code that is clean
+      # locally. `scripts/checks/lint.sh` and CI agree again once the first
+      # release containing SC2337 is out — pin to that tag then.
+      image: koalaman/shellcheck-alpine@sha256:20df6cbd55b3604d0959c6e5e30440e9624cd67842eea6b6c55947f7a22b9d54
     steps:
       - name: Setup Node
         run: |
