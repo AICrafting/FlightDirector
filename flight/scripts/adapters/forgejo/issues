@@ -19,9 +19,13 @@ case "$verb" in
       --label) labels+=("$2"); shift 2 ;;
       *) die "issues list: unknown arg '$1'" ;;
     esac; done
-    q="type=issues&state=${state}"
+    # Every interpolated value is percent-encoded: `status/to test` and friends
+    # carry spaces and slashes, and curl refuses the whole URL over a raw space.
+    q="type=issues&state=$(urlenc "$state")"
     if [ ${#labels[@]} -gt 0 ]; then
-      old="$IFS"; IFS=,; q="${q}&labels=${labels[*]}"; IFS="$old"
+      enc=()
+      for l in "${labels[@]}"; do enc+=("$(urlenc "$l")"); done
+      old="$IFS"; IFS=,; q="${q}&labels=${enc[*]}"; IFS="$old"
     fi
     # _paged_get honours --limit as a ceiling and pages underneath it, so a limit
     # above the server's cap returns what it says rather than one clamped page.

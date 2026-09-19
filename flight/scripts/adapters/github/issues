@@ -19,7 +19,8 @@ case "$verb" in
       --label) labels+=("$2"); shift 2 ;;
       *) die "issues list: unknown arg '$1'" ;;
     esac; done
-    q="state=${state}"
+    # `state` is unvalidated caller input, so it is encoded alongside the labels.
+    q="state=$(urlenc "$state")"
     if [ ${#labels[@]} -gt 0 ]; then
       enc=()
       for l in "${labels[@]}"; do enc+=("$(urlenc "$l")"); done
