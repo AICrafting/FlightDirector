@@ -70,18 +70,18 @@ R="$(mkrepo plain)"
 # --- 1. issues create --body: signature appended after a blank line ----------
 run "$R" issues create --title T --body 'hello body'
 check "issues create exits 0" "$([ "$RC" = 0 ] && echo 1 || echo 0)" "$(cat "$SANDBOX/err")"
-check "body keeps its text" "$(printf '%s' "$BODY" | head -1 | grep -qx 'hello body' && echo 1 || echo 0)" "$BODY"
+check "body keeps its text" "$(grep -qx 'hello body' < <(head -1 <<<"$BODY") && echo 1 || echo 0)" "$BODY"
 check "signature is the last two lines: rule + via FlightDirector:flight@<version>" \
 	"$([ "$(last_two "$BODY")" = "$(printf -- '---\nvia FlightDirector:flight@%s' "$VERSION")" ] && echo 1 || echo 0)" "$BODY"
-check "a blank line separates body and rule" "$(printf '%s' "$BODY" | sed -n 2p | grep -qx '' && echo 1 || echo 0)" "$BODY"
-check "no model → no 'with' clause" "$(printf '%s' "$BODY" | grep -q ' with ' && echo 0 || echo 1)" "$BODY"
+check "a blank line separates body and rule" "$(grep -qx '' < <(sed -n 2p <<<"$BODY") && echo 1 || echo 0)" "$BODY"
+check "no model → no 'with' clause" "$(grep -q ' with ' <<<"$BODY" && echo 0 || echo 1)" "$BODY"
 
 # --- 2. --body-file, plus --model → 'with Fable/5.1' -------------------------
 printf 'line one\nline two\n' >"$SANDBOX/body.md"
 run "$R" issues comment --number 1 --body-file "$SANDBOX/body.md" --model claude-fable-5-1
-check "issues comment --body-file is signed" "$(printf '%s' "$BODY" | grep -qE "$SIG_RE" && echo 1 || echo 0)" "$BODY"
+check "issues comment --body-file is signed" "$(grep -qE "$SIG_RE" <<<"$BODY" && echo 1 || echo 0)" "$BODY"
 check "--model claude-fable-5-1 renders as 'with Fable/5.1'" \
-	"$(printf '%s' "$BODY" | tail -1 | grep -qx "via FlightDirector:flight@$VERSION with Fable/5.1" && echo 1 || echo 0)" "$(tail -1 <<<"$BODY")"
+	"$(grep -qx "via FlightDirector:flight@$VERSION with Fable/5.1" < <(tail -1 <<<"$BODY") && echo 1 || echo 0)" "$(tail -1 <<<"$BODY")"
 check "--model is stripped before the adapter sees the args" "$([ ! -s "$SANDBOX/err" ] && echo 1 || echo 0)" "$(cat "$SANDBOX/err")"
 check "the body file on disk is untouched" "$([ "$(cat "$SANDBOX/body.md")" = "$(printf 'line one\nline two')" ] && echo 1 || echo 0)"
 
@@ -89,12 +89,12 @@ check "the body file on disk is untouched" "$([ "$(cat "$SANDBOX/body.md")" = "$
 for pair in 'gpt-5.6-sol=Sol/5.6' 'claude-opus-4-7=Opus/4.7' 'claude-haiku-4-5-20251001=Haiku/4.5' 'gpt-5=GPT/5' 'anthropic/claude-sonnet-5=Sonnet/5'; do
 	id="${pair%%=*}"; want="${pair#*=}"
 	run "$R" issues comment --number 1 --body x --model "$id"
-	check "model '$id' → 'with $want'" "$(tail -1 <<<"$BODY" | grep -qx "via FlightDirector:flight@$VERSION with $want" && echo 1 || echo 0)" "$(tail -1 <<<"$BODY")"
+	check "model '$id' → 'with $want'" "$(grep -qx "via FlightDirector:flight@$VERSION with $want" < <(tail -1 <<<"$BODY") && echo 1 || echo 0)" "$(tail -1 <<<"$BODY")"
 done
 FLIGHT_MODEL=claude-fable-5-1 run "$R" issues comment --number 1 --body x
-check "FLIGHT_MODEL env is honoured when --model is absent" "$(tail -1 <<<"$BODY" | grep -q 'with Fable/5.1' && echo 1 || echo 0)" "$(tail -1 <<<"$BODY")"
+check "FLIGHT_MODEL env is honoured when --model is absent" "$(grep -q 'with Fable/5.1' < <(tail -1 <<<"$BODY") && echo 1 || echo 0)" "$(tail -1 <<<"$BODY")"
 FLIGHT_MODEL=claude-opus-4-7 run "$R" issues comment --number 1 --body x --model claude-fable-5-1
-check "--model beats FLIGHT_MODEL" "$(tail -1 <<<"$BODY" | grep -q 'with Fable/5.1' && echo 1 || echo 0)" "$(tail -1 <<<"$BODY")"
+check "--model beats FLIGHT_MODEL" "$(grep -q 'with Fable/5.1' < <(tail -1 <<<"$BODY") && echo 1 || echo 0)" "$(tail -1 <<<"$BODY")"
 
 # --- 4. update replaces an old signature instead of stacking -----------------
 # bare (pre-'via') shape on purpose: both shapes must be replaced, not stacked
@@ -102,17 +102,17 @@ old="$(printf 'edited text\n\n---\nFlightDirector:flight@0.1.0 with Opus/4.7\n')
 run "$R" issues update --number 1 --body "$old" --model claude-fable-5-1
 check "issues update: exactly one signature" "$([ "$(grep -c 'FlightDirector:flight@' <<<"$BODY")" = 1 ] && echo 1 || echo 0)" "$BODY"
 check "issues update: the old version/model is replaced by the current one" \
-	"$(tail -1 <<<"$BODY" | grep -qx "via FlightDirector:flight@$VERSION with Fable/5.1" && echo 1 || echo 0)" "$(tail -1 <<<"$BODY")"
-check "issues update: the body text above the signature survives" "$(head -1 <<<"$BODY" | grep -qx 'edited text' && echo 1 || echo 0)" "$BODY"
+	"$(grep -qx "via FlightDirector:flight@$VERSION with Fable/5.1" < <(tail -1 <<<"$BODY") && echo 1 || echo 0)" "$(tail -1 <<<"$BODY")"
+check "issues update: the body text above the signature survives" "$(grep -qx 'edited text' < <(head -1 <<<"$BODY") && echo 1 || echo 0)" "$BODY"
 run "$R" issues update --number 1 --body "$old"
-check "issues update without a model drops the old 'with' clause too" "$(tail -1 <<<"$BODY" | grep -qx "via FlightDirector:flight@$VERSION" && echo 1 || echo 0)" "$(tail -1 <<<"$BODY")"
+check "issues update without a model drops the old 'with' clause too" "$(grep -qx "via FlightDirector:flight@$VERSION" < <(tail -1 <<<"$BODY") && echo 1 || echo 0)" "$(tail -1 <<<"$BODY")"
 run "$R" issues update --number 1 --title 'only a title'
 check "issues update with no body sends no body (title-only patch untouched)" "$([ "$RC" = 0 ] && [ -z "$BODY" ] && echo 1 || echo 0)" "$BODY"
 
 # --- 5. pr open / pr update ------------------------------------------------------
 printf 'PR body\n' >"$SANDBOX/pr.md"
 run "$R" pr open --head feature/x --base develop --title T --body-file "$SANDBOX/pr.md" --model claude-fable-5-1
-check "pr open --body-file is signed" "$([ "$RC" = 0 ] && tail -1 <<<"$BODY" | grep -q "flight@$VERSION with Fable/5.1" && echo 1 || echo 0)" "$BODY $(cat "$SANDBOX/err")"
+check "pr open --body-file is signed" "$([ "$RC" = 0 ] && grep -q "flight@$VERSION with Fable/5.1" < <(tail -1 <<<"$BODY") && echo 1 || echo 0)" "$BODY $(cat "$SANDBOX/err")"
 run "$R" pr update --number 42 --body 'new pr body'
 check "pr update --body is signed" "$([ "$RC" = 0 ] && grep -qE "$SIG_RE" <<<"$BODY" && echo 1 || echo 0)" "$BODY $(cat "$SANDBOX/err")"
 

@@ -318,6 +318,11 @@ while [ $# -gt 0 ]; do
 done
 printf '%s\n' "$url" >>"$FAKE_RESP/urls.log"
 body="$(cat "$FAKE_RESP/pulls.json")"
+# The adapters page, so anything past the first page must come back empty.
+case "$url" in
+  *"?page=1"|*"&page=1") ;;
+  *page=*) body='[]' ;;
+esac
 if [ -n "$outfile" ]; then printf '%s' "$body" >"$outfile"; else printf '%s' "$body"; fi
 [ "$want_code" = 1 ] && printf '200'
 exit 0
@@ -391,7 +396,8 @@ check "gitlab: pr list projects iid/source/target into the same TSV" \
 check "gitlab: uses the native merged state and source_branch filter" \
 	"$(grep -q 'state=merged' "$RESP/urls.log" && grep -q 'source_branch=feature/6-squashed' "$RESP/urls.log" && echo 1 || echo 0)" \
 	"$(cat "$RESP/urls.log")"
-out="$(pr_list gitlab --state open >/dev/null; grep -o 'state=[a-z]*' "$RESP/urls.log")"
+# One line per page fetched, so collapse them before comparing.
+out="$(pr_list gitlab --state open >/dev/null; grep -o 'state=[a-z]*' "$RESP/urls.log" | sort -u)"
 check "gitlab: --state open maps to GitLab's 'opened'" \
 	"$([ "$out" = "state=opened" ] && echo 1 || echo 0)" "out=$out"
 

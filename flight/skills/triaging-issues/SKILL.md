@@ -37,7 +37,9 @@ Output is one issue per line, tab-separated:
 ```
 
 It's already projected to just these fields, so it stays light in context — keep `--limit`
-reasonable and raise it only if a full page came back. If there's no `.flightdirector/config.json`, the
+reasonable. The adapter pages underneath it, and warns on **stderr** when the limit hid rows
+(`warning: showing 50 of 109 rows for /issues`); that warning, not a full page, is the cue to
+raise `--limit` and list again. If there's no `.flightdirector/config.json`, the
 dispatcher errors clearly; that's the cue to run `setting-up-a-repo` first.
 
 ## Step 2: Apply the workable filter
@@ -72,4 +74,5 @@ recommendation if one stands out.
 - Applying the workable filter when the user actually asked for *all* open issues or a
   general overview — the filter is only for "what should I work on."
 - Dumping full issue bodies into a wall of text. Keep it a pick-list.
-- Pulling hundreds of issues into context with a huge `--limit`. Paginate instead.
+- Pulling hundreds of issues into context with a huge `--limit`. Keep it sane and raise it only
+  when the adapter's truncation warning says the list was short.

@@ -17,6 +17,7 @@ out=""; method=GET; url=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		-o) out="$2"; shift 2 ;;
+		-D) shift 2 ;;
 		-w|-X|-H|-u|--data-binary) [ "$1" = -X ] && method="$2"; shift 2 ;;
 		-L|-sS) shift ;;
 		*) url="$1"; shift ;;
@@ -24,7 +25,7 @@ while [ $# -gt 0 ]; do
 done
 if [ "$method" = GET ]; then
 	case "$url" in
-		*/labels\?*page=1*) printf '%s' '[{"id":7,"name":"model/gpt-5","color":"d97757","description":"old"},{"id":8,"name":"status/in progress","color":"1f9d55"}]' >"$out" ;;
+		*/labels\?*page=1) printf '%s' '[{"id":7,"name":"model/gpt-5","color":"d97757","description":"old"},{"id":8,"name":"status/in progress","color":"1f9d55"}]' >"$out" ;;
 		*/labels\?*) printf '%s' '[]' >"$out" ;;
 		*/issues\?*|*/merge_requests\?*)
 			printf '%s\t%s\n' "$method" "$url" >>"${CURL_LOG:?}"
@@ -59,7 +60,7 @@ deleted() { grep -Eq "^DELETE	$1\$" "$CURL_LOG"; }
 # --- forgejo -------------------------------------------------------------
 IN_USE=3 run forgejo --name model/gpt-5
 check "forgejo: refuses while in use (exit 1)" "$([ "$RC" = 1 ] && echo 1 || echo 0)"
-check "forgejo: refusal names the count and --force" "$(printf '%s' "$ERR" | grep -q "3 issue" && printf '%s' "$ERR" | grep -q -- '--force' && echo 1 || echo 0)"
+check "forgejo: refusal names the count and --force" "$(grep -q "3 issue" <<<"$ERR" && grep -q -- '--force' <<<"$ERR" && echo 1 || echo 0)"
 check "forgejo: in-use probe spans issues+PRs, all states, by name" "$(grep -Eq $'^GET\thttps://example.invalid/api/repos/acme/widget/issues\\?state=all&labels=model%2Fgpt-5&limit=50$' "$CURL_LOG" && echo 1 || echo 0)"
 check "forgejo: nothing deleted on refusal" "$(deleted 'https://example.invalid/api/repos/acme/widget/labels/7' && echo 0 || echo 1)"
 
@@ -71,28 +72,28 @@ IN_USE=0 run forgejo --name model/gpt-5
 check "forgejo: deletes when unused" "$([ "$RC" = 0 ] && deleted 'https://example.invalid/api/repos/acme/widget/labels/7' && echo 1 || echo 0)"
 
 IN_USE=50 run forgejo --name "status/in progress"
-check "forgejo: full page reports 50+ (name url-encoded incl. space)" "$([ "$RC" = 1 ] && printf '%s' "$ERR" | grep -q '50+ issue' && grep -q 'labels=status%2Fin%20progress' "$CURL_LOG" && echo 1 || echo 0)"
+check "forgejo: full page reports 50+ (name url-encoded incl. space)" "$([ "$RC" = 1 ] && grep -q '50+ issue' <<<"$ERR" && grep -q 'labels=status%2Fin%20progress' "$CURL_LOG" && echo 1 || echo 0)"
 
 run forgejo --name nope
-check "forgejo: unknown label name errors, no requests beyond the label list" "$([ "$RC" = 1 ] && printf '%s' "$ERR" | grep -q "not found" && [ ! -s "$CURL_LOG" ] && echo 1 || echo 0)"
+check "forgejo: unknown label name errors, no requests beyond the label list" "$([ "$RC" = 1 ] && grep -q "not found" <<<"$ERR" && [ ! -s "$CURL_LOG" ] && echo 1 || echo 0)"
 
 run forgejo
-check "forgejo: --name is required" "$([ "$RC" = 1 ] && printf '%s' "$ERR" | grep -q -- '--name required' && echo 1 || echo 0)"
+check "forgejo: --name is required" "$([ "$RC" = 1 ] && grep -q -- '--name required' <<<"$ERR" && echo 1 || echo 0)"
 
 # --- github --------------------------------------------------------------
 IN_USE=2 run github --name model/gpt-5
-check "github: refuses while in use" "$([ "$RC" = 1 ] && printf '%s' "$ERR" | grep -q '2 issue' && echo 1 || echo 0)"
+check "github: refuses while in use" "$([ "$RC" = 1 ] && grep -q '2 issue' <<<"$ERR" && echo 1 || echo 0)"
 check "github: probe uses state=all + encoded labels" "$(grep -Eq $'^GET\thttps://example.invalid/api/repos/acme/widget/issues\\?state=all&labels=model%2Fgpt-5&per_page=50$' "$CURL_LOG" && echo 1 || echo 0)"
 IN_USE=0 run github --name model/gpt-5
 check "github: deletes by encoded name" "$([ "$RC" = 0 ] && deleted 'https://example.invalid/api/repos/acme/widget/labels/model%2Fgpt-5' && echo 1 || echo 0)"
 IN_USE=2 run github --name model/gpt-5 --force
 check "github: --force deletes" "$([ "$RC" = 0 ] && deleted 'https://example.invalid/api/repos/acme/widget/labels/model%2Fgpt-5' && echo 1 || echo 0)"
 run github --name nope
-check "github: unknown name errors" "$([ "$RC" = 1 ] && printf '%s' "$ERR" | grep -q 'not found' && echo 1 || echo 0)"
+check "github: unknown name errors" "$([ "$RC" = 1 ] && grep -q 'not found' <<<"$ERR" && echo 1 || echo 0)"
 
 # --- gitlab --------------------------------------------------------------
 IN_USE=2 run gitlab --name model/gpt-5
-check "gitlab: refuses; issues + MRs are summed" "$([ "$RC" = 1 ] && printf '%s' "$ERR" | grep -q '4 issue' && echo 1 || echo 0)"
+check "gitlab: refuses; issues + MRs are summed" "$([ "$RC" = 1 ] && grep -q '4 issue' <<<"$ERR" && echo 1 || echo 0)"
 check "gitlab: probes both /issues and /merge_requests" "$(grep -q 'projects/acme%2Fwidget/issues?labels=model%2Fgpt-5' "$CURL_LOG" && grep -q 'projects/acme%2Fwidget/merge_requests?labels=model%2Fgpt-5' "$CURL_LOG" && echo 1 || echo 0)"
 IN_USE=0 run gitlab --name model/gpt-5
 check "gitlab: deletes by encoded name" "$([ "$RC" = 0 ] && deleted 'https://example.invalid/api/projects/acme%2Fwidget/labels/model%2Fgpt-5' && echo 1 || echo 0)"
@@ -102,7 +103,7 @@ check "gitlab: --force deletes" "$([ "$RC" = 0 ] && deleted 'https://example.inv
 # --- jira ----------------------------------------------------------------
 export LS_EMAIL=dev@example.invalid LS_PROJECT=ACME
 run jira --name model/gpt-5
-check "jira: always errors and points at issues label-remove" "$([ "$RC" = 1 ] && printf '%s' "$ERR" | grep -q 'label-remove' && [ ! -s "$CURL_LOG" ] && echo 1 || echo 0)"
+check "jira: always errors and points at issues label-remove" "$([ "$RC" = 1 ] && grep -q 'label-remove' <<<"$ERR" && [ ! -s "$CURL_LOG" ] && echo 1 || echo 0)"
 
 # Summary: plain when nothing failed, red when something did (#123).
 [ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''

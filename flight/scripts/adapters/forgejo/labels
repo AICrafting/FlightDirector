@@ -11,7 +11,9 @@ verb="${1:-}"; shift || true
 
 case "$verb" in
   list)
-    _api GET "/labels?limit=100" | jq -r '.[] | [.name, .color, (.description // "")] | @tsv'
+    # Through the same paged cache label_id uses, so listing and resolution can
+    # never disagree about which labels exist.
+    _all_labels | jq -r '.[] | [.name, .color, (.description // "")] | @tsv'
     ;;
 
   resolve)

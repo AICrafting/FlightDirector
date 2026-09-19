@@ -65,7 +65,7 @@ lsp issues comment --number "$K" --body $'rig comment\n\n```\ncode block\n```' &
 CMTS="$(lsp issues comments --number "$K")"
 grep -q "rig comment" <<<"$CMTS" && ok "comments returns the posted body" || no "comments returns the posted body" "$CMTS"
 grep -q "code block" <<<"$CMTS" && ok "comment code block round-trips" || no "comment code block round-trips" "$CMTS"
-head -1 <<<"$CMTS" | grep -q $'\t' && ok "comments header is author⇥timestamp TSV" || no "comments header is TSV" "$(head -1 <<<"$CMTS")"
+grep -q $'\t' < <(head -1 <<<"$CMTS") && ok "comments header is author⇥timestamp TSV" || no "comments header is TSV" "$(head -1 <<<"$CMTS")"
 
 echo "── close / reopen (workflow transitions) ──"
 lsp issues close --number "$K" && ok "close exits 0 (Done transition)" || no "close exits 0"

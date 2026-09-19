@@ -76,7 +76,9 @@ Render the current board (Display format below) and push back:
    ```bash
    flight issues list --state open --limit 50
    ```
-   Output is `<number>⇥<title>⇥<labels>`. Paginate if a full page returns.
+   Output is `<number>⇥<title>⇥<labels>`; the adapter pages underneath `--limit`. If it warns on
+   stderr that it is showing 50 of more, raise `--limit` and list again — otherwise the batch can
+   only ever be drawn from the same slice of the backlog, however many agents are aimed at it.
 2. Apply the **workable filter** (identical rule to `triaging-issues`): **exclude** any issue
    whose label column carries any configured `labels.status` role (in-progress, to-test, review,
    qa, blocked, deferred) — it's already in the workflow, not a fresh pick.

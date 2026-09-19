@@ -42,11 +42,11 @@ case "$verb" in
       jql="$jql AND labels IN ($inlist)"
     fi
     jql="$jql ORDER BY created DESC"
-    payload="$(jq -n --arg j "$jql" --argjson m "$limit" '{jql:$j, maxResults:$m, fields:["summary","labels"]}')"
     # Enhanced-JQL search endpoint. (The legacy POST /rest/api/3/search was
-    # decommissioned by Atlassian — /search/jql is its replacement.)
-    _api POST "/rest/api/3/search/jql" "$payload" \
-      | jq -r '.issues[]? | [.key, (.fields.summary // ""), ((.fields.labels // []) | join(","))] | @tsv'
+    # decommissioned by Atlassian; /search/jql is its replacement.) It pages with
+    # an opaque nextPageToken, which _jql_search follows up to --limit.
+    _jql_search "$jql" '["summary","labels"]' "$limit" \
+      | jq -r '[.key, (.fields.summary // ""), ((.fields.labels // []) | join(","))] | @tsv'
     ;;
 
   get)
@@ -71,9 +71,11 @@ case "$verb" in
     [ -n "$number" ] || die "issues comments: --number required"
     # One block per comment, oldest-first: `author⇥created` header, the body as
     # plain text, then a blank separator. Empty output (exit 0) means no comments.
-    _api GET "/rest/api/3/issue/${number}/comment" \
+    # Paged to exhaustion: this endpoint returns 50 comments per request and the
+    # thread renders oldest-first, so an unpaged fetch drops the NEWEST comments —
+    # precisely the ones "the later comment wins" depends on.
+    _offset_get "/rest/api/3/issue/${number}/comment" "" comments "" \
       | jq -r "$ADF_JQ"'
-          .comments[]? |
           ([(.author.displayName // .author.emailAddress // "?"), (.created // "")] | @tsv),
           ((.body // "") | if type=="string" then . else adf_to_text end),
           ""'

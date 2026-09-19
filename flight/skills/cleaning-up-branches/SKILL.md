@@ -115,6 +115,11 @@ flight issues list --state open --label "status/to test" --limit 200
 flight issues list --state open --label "status/qa"    --limit 200   # …and each later stage
 ```
 
+`--limit 200` really does fetch up to 200 rows: the adapter pages underneath the limit. If one of
+these prints `warning: showing 200 of N rows …` on stderr, the accepted set is incomplete — raise
+the limit past N and re-read before judging anything, because a branch whose issue fell off the
+end looks like a board mismatch and gets skipped for the wrong reason.
+
 Then judge each row:
 
 - Issue is **closed**, or **open carrying the merged stage's status or any later stage's** →

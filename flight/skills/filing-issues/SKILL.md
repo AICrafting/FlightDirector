@@ -53,8 +53,13 @@ you'll upload them after the issue is created (Step 7).
 flight issues list --state open --limit 50
 ```
 
-Output is `number⇥title⇥labels` per line — already projected, so it's light in context; raise
-`--limit` only if a full page came back. Distill the proposed title + description into a few
+Output is `number⇥title⇥labels` per line — already projected, so it's light in context. The
+adapter pages underneath `--limit`, so 50 rows means 50 rows; what tells you the scan was partial
+is a **stderr** line like `warning: showing 50 of 109 rows for /issues`. If you see it, raise
+`--limit` past the total it names and run the scan again before filing. Do not treat a full page
+as proof of anything either way: at a server's cap a full page always comes back. This is the
+dedupe scan, and filing a near-duplicate while reporting "no meaningful overlap" is exactly the
+failure this skill exists to prevent. Distill the proposed title + description into a few
 specific keywords/phrases a near-duplicate would also use (`advantage|modifier key|shift.click`
 beats `roll` — too broad) and scan titles for overlap. Pull a candidate's full text with
 `issues get --number N` if a title looks close.
@@ -171,4 +176,6 @@ so the change history stays visible, and add a comment explaining what changed a
   create the label.
 - Editing an existing issue without confirming, because the user's phrasing sounded like "just
   fix it." Confirm anyway.
-- Pulling hundreds of issues into context with a huge `--limit`. Paginate.
+- Pulling hundreds of issues into context with a huge `--limit`. Keep it sane and raise it only
+  when the adapter's truncation warning says the scan was short.
+- Treating a full page as "that's all of them". It is not evidence; the stderr warning is.
