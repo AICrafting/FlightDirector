@@ -375,9 +375,11 @@ for backend in forgejo github; do
 done
 
 # GitHub is the one backend that can filter server-side; it must actually do so.
+# The branch name is a percent-encoded query VALUE (#169), so its '/' arrives as
+# %2F — the ':' between owner and ref is the delimiter and stays literal.
 pr_list github --state merged --head feature/6-squashed --base develop >/dev/null
 check "github: sends head=owner:branch and base= server-side" \
-	"$(grep -q 'head=o:feature/6-squashed' "$RESP/urls.log" && grep -q 'base=develop' "$RESP/urls.log" && echo 1 || echo 0)" \
+	"$(grep -q 'head=o:feature%2F6-squashed' "$RESP/urls.log" && grep -q 'base=develop' "$RESP/urls.log" && echo 1 || echo 0)" \
 	"$(cat "$RESP/urls.log")"
 pr_list forgejo --state merged --head feature/6-squashed >/dev/null
 check "forgejo: asks for closed PRs (it has no merged state)" \
@@ -394,7 +396,7 @@ out="$(pr_list gitlab --state merged --head feature/6-squashed)"
 check "gitlab: pr list projects iid/source/target into the same TSV" \
 	"$([ "$out" = "$(printf '31\tmerged\tfeature/6-squashed\tdevelop\tSquashed')" ] && echo 1 || echo 0)" "out=$out"
 check "gitlab: uses the native merged state and source_branch filter" \
-	"$(grep -q 'state=merged' "$RESP/urls.log" && grep -q 'source_branch=feature/6-squashed' "$RESP/urls.log" && echo 1 || echo 0)" \
+	"$(grep -q 'state=merged' "$RESP/urls.log" && grep -q 'source_branch=feature%2F6-squashed' "$RESP/urls.log" && echo 1 || echo 0)" \
 	"$(cat "$RESP/urls.log")"
 # One line per page fetched, so collapse them before comparing.
 out="$(pr_list gitlab --state open >/dev/null; grep -o 'state=[a-z]*' "$RESP/urls.log" | sort -u)"

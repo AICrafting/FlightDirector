@@ -40,7 +40,7 @@ else
 fi
 
 # 3. Read probes.
-probe_row "issue search" "Browse Projects" GET "${SITE}/rest/api/3/search/jql?jql=$(printf '%s' "project = ${LS_PROJECT}" | jq -sRr @uri)&maxResults=1"
+probe_row "issue search" "Browse Projects" GET "${SITE}/rest/api/3/search/jql?jql=$(urlenc "project = ${LS_PROJECT}")&maxResults=1"
 probe_row "labels read"  "Browse Projects" GET "${SITE}/rest/api/3/label?maxResults=1"
 
 # 4. Account permissions on the project — the token itself is unscoped, so this

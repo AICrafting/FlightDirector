@@ -258,7 +258,7 @@ case "$verb" in
     [ ${#users[@]} -gt 0 ] || die "issues assign: at least one --user required"
     ids="[]"
     for u in "${users[@]}"; do
-      uid="$(curl -sS "${GL_HEADERS[@]}" "${LS_API%/}/users?username=${u}" \
+      uid="$(curl -sS "${GL_HEADERS[@]}" "${LS_API%/}/users?username=$(urlenc "$u")" \
         | jq -r '.[0].id // empty')"
       [ -n "$uid" ] || die "issues assign: no GitLab user '${u}'"
       ids="$(printf '%s' "$ids" | jq -c --argjson id "$uid" '. + [$id]')"

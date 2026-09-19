@@ -238,4 +238,55 @@ jql="$(jq -rs '.[0].jql' "$CURL_DATA_LOG")"
 grep -q 'labels IN ("status/to test")' <<<"$jql" \
 	|| fail "jira list did not quote the label in its JQL: $jql"
 
+# --- Branch names reach the query string too (#169) ---------------------------
+# `pr list --head/--base` and `ci log --failed` interpolate a caller-supplied
+# branch name. A space makes curl refuse the whole request; a '#' is worse — the
+# request succeeds with everything after it cut off as a fragment, so the lookup
+# silently matches nothing. What is asserted here is only the URL the adapter
+# built: the fake forge answers these endpoints with issue-shaped rows, so the
+# adapter may well exit non-zero afterwards, which says nothing about encoding.
+BRANCH='feat/a b#c'
+BENC='feat%2Fa%20b%23c'
+
+# urls [VAR=value…] cmd… — run it and keep the request log; the exit status is
+# deliberately ignored (see above), the log is the evidence.
+urls() { : >"$CURL_LOG"; env "$@" >"$SANDBOX/out" 2>"$SANDBOX/err" || true; }
+logged() { grep -q -- "$1" "$CURL_LOG"; }
+# No raw space and no raw '#' may survive anywhere in a requested URL.
+no_raw() { ! grep -qE '[ #]' "$CURL_LOG"; }
+
+urls "$ADAPTERS/github/pr" list --state open --head "$BRANCH" --limit 5
+logged "head=o:$BENC" || fail "github pr list did not encode --head: $(cat "$CURL_LOG")"
+no_raw || fail "github pr list left a raw space or '#' in the URL: $(cat "$CURL_LOG")"
+
+urls "$ADAPTERS/github/pr" list --state open --base "$BRANCH" --limit 5
+logged "base=$BENC" || fail "github pr list did not encode --base: $(cat "$CURL_LOG")"
+
+urls "$ADAPTERS/gitlab/pr" list --state open --head "$BRANCH" --base main --limit 5
+logged "source_branch=$BENC" || fail "gitlab pr list did not encode --head: $(cat "$CURL_LOG")"
+logged 'target_branch=main' || fail "gitlab pr list dropped --base: $(cat "$CURL_LOG")"
+no_raw || fail "gitlab pr list left a raw space or '#' in the URL: $(cat "$CURL_LOG")"
+
+# Forgejo filters --head/--base client-side, so its URL carries no branch at all —
+# assert that rather than pretending it encodes something.
+urls "$ADAPTERS/forgejo/pr" list --state open --head "$BRANCH" --limit 5
+no_raw || fail "forgejo pr list put a raw branch in the URL: $(cat "$CURL_LOG")"
+
+urls "$ADAPTERS/github/ci" log --failed "$BRANCH"
+logged "branch=$BENC" || fail "github ci log did not encode --failed: $(cat "$CURL_LOG")"
+no_raw || fail "github ci log left a raw space or '#' in the URL: $(cat "$CURL_LOG")"
+
+urls "$ADAPTERS/gitlab/ci" log --failed "$BRANCH"
+logged "ref=$BENC" || fail "gitlab ci log did not encode --failed: $(cat "$CURL_LOG")"
+no_raw || fail "gitlab ci log left a raw space or '#' in the URL: $(cat "$CURL_LOG")"
+
+# Forgejo's `refs/heads/` prefix is the adapter's own and stays literal; only the
+# branch name is encoded, so an ordinary branch sends exactly the URL it always did.
+urls "$ADAPTERS/forgejo/ci" log --failed "$BRANCH"
+logged "ref=refs/heads/$BENC" || fail "forgejo ci log did not encode --failed: $(cat "$CURL_LOG")"
+no_raw || fail "forgejo ci log left a raw space or '#' in the URL: $(cat "$CURL_LOG")"
+
+urls "$ADAPTERS/forgejo/ci" log --failed develop
+logged 'ref=refs/heads/develop&' || fail "forgejo ci log over-encoded a plain branch: $(cat "$CURL_LOG")"
+
 printf 'paging tests passed\n'

@@ -28,6 +28,21 @@ case "${OSTYPE:-}" in
 		;;
 esac
 
+# urlenc <string> — percent-encode one caller-supplied value for a URL query
+# parameter or path segment. THE encoder: every adapter sources this file, so
+# there is one implementation rather than one per backend.
+#
+# Defined after the shim above on purpose — the `jq` here resolves at call time,
+# so on Windows it is the CRLF-stripping wrapper and not the raw jq.exe.
+#
+# `@uri` leaves only the RFC 3986 unreserved set alone (A-Z a-z 0-9 - _ . ~) and
+# encodes everything else, non-ASCII included, as UTF-8 bytes. Label names carry
+# spaces and '/' (`status/to test`) and curl rejects a raw space outright
+# ("Malformed input to a URL function") rather than sending a broken filter.
+# Encode the VALUE, never the whole URL: the '?', '&' and '=' that separate the
+# parameters, and any fixed path prefix, are assembled around what this returns.
+urlenc() { printf '%s' "$1" | jq -sRr @uri; }
+
 # flight_path_norm <path> — the form git prints, on every platform.
 #
 # Git for Windows reports Windows-native paths ("C:/src/repo") while MSYS bash
