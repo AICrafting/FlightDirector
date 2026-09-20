@@ -81,9 +81,15 @@ auth_check_secrets() {	# auth_check_secrets FILE [VAR=value …] — the same, a
 }
 from() { sed -n 's/.*(from \(.*\))$/\1/p' | sed -n '1p'; }	# first match only; no `| head` (SIGPIPE, #110)
 
+# A function, not an inline `case` inside $(…): bash 3.2 (the macOS CI leg) ends
+# the substitution at the pattern's own `)`. Same reason as quiet()/noted() below.
+names_secrets() { case "$1" in */.flightdirector/secrets.json) echo 1 ;; *) echo 0 ;; esac; }
+
 named="$(auth_check | from)"
 check "auth check names the secrets file when it is the source" \
-	"$(case "$named" in */.flightdirector/secrets.json) echo 1 ;; *) echo 0 ;; esac)"
+	"$(names_secrets "$named")"
+check "the path it names resolves from the main checkout too" \
+	"$( (cd "$R" && [ -f "$named" ]) && echo 1 || echo 0)"
 # shellcheck disable=SC2016  # the literal env-var NAME is what the output must contain
 check "auth check names \$FORGEJO_TOKEN when the legacy env var is the source" \
 	"$([ "$(auth_check FORGEJO_TOKEN=from-forgejo | from)" = '$FORGEJO_TOKEN' ] && echo 1 || echo 0)"
@@ -136,7 +142,7 @@ wt_named="$( (cd "$R/.worktrees/x" && env -u LS_TOKEN -u FLIGHT_TOKEN -u FORGEJO
 	-u LS_SECRETS_FILE PATH="$FAKE_DIR:$PATH" "$DISP" auth check 2>/dev/null) | from)"
 
 check "auth check from a linked worktree still names the secrets file" \
-	"$(case "$wt_named" in */.flightdirector/secrets.json) echo 1 ;; *) echo 0 ;; esac)"
+	"$(names_secrets "$wt_named")"
 # The guard that matters: the relative form does NOT resolve from the worktree, so
 # a $sec_rel regression fails here even though the case above would still pass.
 check "the path it names resolves from the worktree's own directory" \
