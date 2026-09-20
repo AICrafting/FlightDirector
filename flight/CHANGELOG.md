@@ -13,6 +13,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Changed
+
+- **The signature flight appends to issue, comment and PR bodies now starts with 🤖** (#183):
+  `🤖 via FlightDirector:flight@<version> with <Model/ver>`, so agent-written text is recognisable
+  at a glance. Re-signing still replaces rather than stacks: an `issues update` / `pr update` over
+  a body signed in any earlier shape (bare, `via …`, or `🤖 via …`) ends with exactly one
+  signature. `--no-signature` and `code.signature.enabled: false` are unchanged. Anything of yours
+  that matches the signature text should allow for the prefix.
+
 ### Fixed
 
 - **The prompt ledger no longer fills with unmeasurable subagent rows, and subagent output tokens
