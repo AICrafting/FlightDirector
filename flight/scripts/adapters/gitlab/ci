@@ -155,34 +155,57 @@ case "$verb" in
     done
     ;;
 
-  # Dump the failed jobs' traces for a commit (or the latest failed pipeline on a branch).
+  # Dump the failed jobs' traces for an MR, a commit, or the latest failed pipeline on a branch.
+  # A commit can carry several pipelines (branch + merge-request), so --sha/--pr
+  # dump EVERY failed one (#138). A merge-request pipeline's ref is
+  # refs/merge-requests/<iid>/head, never the branch, so --failed falls back to
+  # the branch's head commit when nothing failed under the branch ref itself.
   log)
-    sha=""; failed_branch=""
+    sha=""; failed_branch=""; pr=""
     while [ $# -gt 0 ]; do case "$1" in
       --sha)    sha="$2"; shift 2 ;;
+      --pr)     pr="$2"; shift 2 ;;
       --failed) failed_branch="$2"; shift 2 ;;
       *) die "ci log: unknown arg '$1'" ;;
     esac; done
-    [ -n "$sha" ] || [ -n "$failed_branch" ] || die "ci log: --sha or --failed required"
+    [ -n "$sha" ] || [ -n "$failed_branch" ] || [ -n "$pr" ] || die "ci log: --pr, --sha or --failed required"
 
-    if [ -n "$sha" ]; then
-      pipeline_id="$(_api GET "/pipelines?sha=${sha}&order_by=id&sort=desc&per_page=20" \
-        | jq -r 'first(.[]? | select(.status != "success" and .status != "skipped") | .id) // (.[0].id // empty)')"
-    else
-      pipeline_id="$(_api GET "/pipelines?ref=$(urlenc "$failed_branch")&status=failed&order_by=id&sort=desc&per_page=1" \
-        | jq -r '.[0].id // empty')"
+    if [ -n "$pr" ]; then
+      sha="$(_api GET "/merge_requests/${pr}" | jq -r '.sha // .diff_refs.head_sha // empty')"
+      [ -n "$sha" ] || die "ci log: could not resolve head sha for MR !${pr}"
     fi
-    [ -n "$pipeline_id" ] || die "ci log: no pipeline found"
 
-    job_ids="$(_api GET "/pipelines/${pipeline_id}/jobs?scope=failed&per_page=100" \
-      | jq -r '.[]? | .id')"
-    [ -n "$job_ids" ] || { echo "(no failed jobs for pipeline ${pipeline_id})"; exit 0; }
+    pipeline_ids=""
+    if [ -z "$sha" ]; then
+      pipeline_ids="$(_api GET "/pipelines?ref=$(urlenc "$failed_branch")&status=failed&order_by=id&sort=desc&per_page=1" \
+        | jq -r '.[0].id // empty')"
+      if [ -z "$pipeline_ids" ]; then
+        sha="$(_api GET "/repository/branches/$(urlenc "$failed_branch")" 2>/dev/null | jq -r '.commit.id // empty' 2>/dev/null || true)"
+        [ -n "$sha" ] || die "ci log: no pipeline found"
+      fi
+    fi
+    if [ -n "$sha" ]; then
+      pipelines="$(_api GET "/pipelines?sha=${sha}&order_by=id&sort=asc&per_page=20")"
+      [ "$(printf '%s' "$pipelines" | jq 'length')" -gt 0 ] || die "ci log: no pipeline found"
+      pipeline_ids="$(printf '%s' "$pipelines" | jq -r '.[]? | select(.status=="failed") | .id')"
+      if [ -z "$pipeline_ids" ]; then
+        printf '%s' "$pipelines" | jq -r '"(no failed jobs for pipeline \(map(.id|tostring)|join(", ")))"'
+        exit 0
+      fi
+    fi
 
-    while IFS= read -r jid; do
-      [ -n "$jid" ] || continue
-      echo "── job ${jid} ──"
-      curl -sS "${GL_HEADERS[@]}" "${PROJECT_API}/jobs/${jid}/trace" || true
-    done <<< "$job_ids"
+    while IFS= read -r pipeline_id; do
+      [ -n "$pipeline_id" ] || continue
+      echo "pipeline ${pipeline_id}"
+      job_ids="$(_api GET "/pipelines/${pipeline_id}/jobs?scope=failed&per_page=100" \
+        | jq -r '.[]? | .id')"
+      [ -n "$job_ids" ] || { echo "(no failed jobs for pipeline ${pipeline_id})"; continue; }
+      while IFS= read -r jid; do
+        [ -n "$jid" ] || continue
+        echo "── job ${jid} ──"
+        curl -sS "${GL_HEADERS[@]}" "${PROJECT_API}/jobs/${jid}/trace" || true
+      done <<< "$job_ids"
+    done <<< "$pipeline_ids"
     ;;
 
   *) die "unknown verb '${verb}' (ci: watch log)" ;;
