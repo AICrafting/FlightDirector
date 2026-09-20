@@ -90,6 +90,64 @@ else
   printf '\033[33m  ⚠ ci watch did not reach success (soft — Actions may be slow)\033[0m\n'
 fi
 
+echo "── ci log on a red pull_request run (#138) ──"
+# A PR whose head carries two pull_request workflows — one red (while `rig-fail` exists),
+# one green — so one commit holds a failed and a passed run that started together. The
+# workflow files live on the rig head branch only; pull_request runs read them from there.
+put_file() {	# put_file <branch> <path> <local-file|-> [content]
+  local content; if [ "$3" = "-" ]; then content="$4"; else content="$(cat "$3")"; fi
+  curl -fsS "${H[@]}" -X PUT "$REPO_API/contents/$2" \
+    -d "$(jq -n --arg m "[rig] add $2" --arg c "$(printf '%s' "$content" | base64 | tr -d '\n')" --arg b "$1" \
+          '{message:$m, content:$c, branch:$b}')" >/dev/null
+}
+CBASE="rig/$TS-cibase"; CHEAD="rig/$TS-cihead"
+for b in "$CBASE" "$CHEAD"; do
+  curl -fsS "${H[@]}" -X POST "$REPO_API/git/refs" \
+    -d "$(jq -n --arg r "refs/heads/$b" --arg s "$MAIN_SHA" '{ref:$r, sha:$s}')" >/dev/null
+done
+seeded=1
+put_file "$CHEAD" ".github/workflows/rig-pr-red.yml"   "$RIG_DIR/workflows/rig-pr-red.yml"   || seeded=0
+put_file "$CHEAD" ".github/workflows/rig-pr-green.yml" "$RIG_DIR/workflows/rig-pr-green.yml" || seeded=0
+put_file "$CHEAD" "rig-fail" - "fail until removed ($TS)" || seeded=0
+[ "$seeded" = 1 ] && ok "seeded red + green pull_request workflows on $CHEAD" \
+  || no "seeded the pull_request workflows (token needs the 'workflow' scope)"
+CPR="$(lsp pr open --head "$CHEAD" --base "$CBASE" --title "[rig] ci-log pr $TS" --body "rig ci log")"
+cprnum="$(awk -F'\t' '{print $1}' <<<"$CPR")"
+CHEAD_SHA="$(curl -fsS "${H[@]}" "$REPO_API/git/ref/heads/$CHEAD" | jq -r '.object.sha')"
+[[ "$cprnum" =~ ^[0-9]+$ ]] && ok "opened the ci-log PR (#$cprnum)" || no "opened the ci-log PR" "got '$CPR'"
+
+LINES="$(cd "$WORK" && "$DISP" ci watch --pr "$cprnum" --timeout 300 2>&1 || true)"
+if ! grep -qE "^ci runs=[0-9]+ .*status=(failure|success|skipped)" <<<"$LINES"; then
+  printf '\033[33m  ⚠ no terminal CI verdict for the ci-log PR (soft — Actions may be disabled or slow); ci log checks skipped\033[0m\n'
+  printf '\033[33m    %s\033[0m\n' "$(tail -1 <<<"$LINES")"
+else
+  grep -q "status=failure" < <(tail -1 <<<"$LINES") && ok "ci watch --pr ends at status=failure" || no "ci watch --pr ends at status=failure" "$(tail -1 <<<"$LINES")"
+  for form in "--pr $cprnum" "--sha $CHEAD_SHA" "--failed $CHEAD"; do
+    # shellcheck disable=SC2086  # $form is a flag and its value, split on purpose
+    LOG="$(lsp ci log $form 2>&1)"
+    if grep -q "RIG-RED-OUTPUT" <<<"$LOG" && ! grep -q "RIG-GREEN-OUTPUT" <<<"$LOG"; then
+      ok "ci log ${form%% *} shows the red job's log and not the green one's"
+    else
+      no "ci log ${form%% *} shows the red job's log and not the green one's" "$(head -5 <<<"$LOG")"
+    fi
+  done
+
+  # Remove rig-fail → the PR's new head commit goes green → ci log has nothing to show.
+  fsha="$(curl -fsS "${H[@]}" "$REPO_API/contents/rig-fail?ref=$CHEAD" | jq -r '.sha')"
+  curl -fsS "${H[@]}" -X DELETE "$REPO_API/contents/rig-fail" \
+    -d "$(jq -n --arg m "[rig] remove rig-fail" --arg s "$fsha" --arg b "$CHEAD" '{message:$m, sha:$s, branch:$b}')" >/dev/null
+  sleep 5	# let the synchronize event create the new runs before watching
+  LINES="$(cd "$WORK" && "$DISP" ci watch --pr "$cprnum" --timeout 300 2>&1 || true)"
+  if grep -q "status=success" < <(tail -1 <<<"$LINES"); then
+    ok "after the fix the PR's new head watches green"
+    LOG="$(lsp ci log --pr "$cprnum" 2>&1)"; rc=$?
+    [ "$rc" = 0 ] && grep -q "no failed jobs" <<<"$LOG" && ok "ci log --pr on a green head says '(no failed jobs …)', exit 0" \
+      || no "ci log --pr on a green head says '(no failed jobs …)', exit 0" "rc=$rc $(head -3 <<<"$LOG")"
+  else
+    printf '\033[33m  ⚠ the fixed head did not watch green in time (soft): %s\033[0m\n' "$(tail -1 <<<"$LINES")"
+  fi
+fi
+
 echo
 echo "passed=$pass failed=$fail"
 [ "$fail" -eq 0 ]
