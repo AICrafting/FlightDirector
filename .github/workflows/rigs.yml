@@ -58,7 +58,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install the docker CLI and compose plugin
+      - name: Install the docker CLI, compose plugin and jq
         run: |
           set -euo pipefail
           # This forge runs jobs inside a container that has the docker SOCKET but no docker
@@ -66,6 +66,9 @@ jobs:
           # checksummed rather than piped from a convenience script — same rule as the Windows
           # jq install in tests.yml: the step performs the download, so verify before trusting.
           # Only the client binary is taken out of the tarball; the daemon is the host's.
+          # jq too: unlike the other rigs this job has no `container:`, so it runs in whatever
+          # image the runner picked and cannot assume the rig's tools are there.
+          JQ_SHA=5942c9b0934e510ee61eb3e30273f1b3fe2590df93933a93d7c58b81d19c8ff5
           DOCKER_VER=29.8.1
           DOCKER_SHA=d8db66739d2e28d4933786d73e918d9be643a67fbd835db1bf740d650a259e70
           COMPOSE_VER=v5.5.1
@@ -80,6 +83,12 @@ jobs:
             "https://github.com/docker/compose/releases/download/${COMPOSE_VER}/docker-compose-linux-x86_64"
           printf '%s  %s\n' "$COMPOSE_SHA" "$HOME/.docker/cli-plugins/docker-compose" | sha256sum -c -
           chmod 0755 "$HOME/.docker/cli-plugins/docker-compose"
+          if ! command -v jq >/dev/null 2>&1; then
+            curl -fsSL --retry 3 --retry-delay 5 -o "$HOME/bin/jq" \
+              https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+            printf '%s  %s\n' "$JQ_SHA" "$HOME/bin/jq" | sha256sum -c -
+            chmod 0755 "$HOME/bin/jq"
+          fi
 
       - name: Reach the daemon, and find the host
         id: docker
@@ -87,6 +96,7 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/bin:$PATH"
           docker version --format 'client {{.Client.Version}} / server {{.Server.Version}}'
+          jq --version; git --version
           docker compose version
           # The rig's containers are started on the HOST daemon, so its published port lands on
           # the host — `localhost` in here is this job container. The host is this container's
