@@ -15,6 +15,16 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
+- **The repo's three floating CI images are pinned** (#167). `alpine:latest` → `alpine:3.22.6`
+  (so the two Linux legs differ only in the interpreter), `cytopia/yamllint:latest` →
+  `cytopia/yamllint:1`, and `koalaman/shellcheck-alpine:latest` → the same image by digest. A run
+  of an unchanged commit could previously get a different toolchain than the run before it, which
+  already cost a day when shellcheck's `latest` dev build gained SC2337 (#152). The dev build is
+  pinned rather than the newest release, because release 0.11.0 predates SC2337 and pinning to it
+  would drop CI's guard against the SIGPIPE pattern #152 fixed; the consequence — a contributor's
+  distro shellcheck will not flag SC2337 locally — is recorded beside the pin. Dev-facing only;
+  nothing a consuming repo sees.
+
 - **The signature flight appends to issue, comment and PR bodies now starts with 🤖** (#183):
   `🤖 via FlightDirector:flight@<version> with <Model/ver>`, so agent-written text is recognisable
   at a glance. Re-signing still replaces rather than stacks: an `issues update` / `pr update` over
@@ -72,6 +82,58 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   instead of treating not-failed as passed. This is the false-green counterpart to #43's false red.
   **Note for anything parsing the output line:** `status=` can now be `skipped`, and `skipped=<s>`
   sits between `failed=` and `status=`.
+
+- **The Windows CI leg fails at the download when its `jq` fetch goes wrong** (#166). The job
+  fetched `jq.exe` with `curl -sSL`; with no `-f`, an HTTP error page was saved as `jq.exe` and
+  curl exited 0, so the leg died a line later on `jq.exe: line 1: <!DOCTYPE html>` — naming neither
+  the download nor the reason. That is what failed the 0.15.1 release PR while the other three legs
+  passed. Now `curl -fsSL` with `--retry 3 --retry-delay 5` (a transient 5xx no longer fails the
+  leg at all; a genuine 404 still fails immediately), and the download is verified against the
+  sha256 jq publishes for the pinned 1.7.1 asset before it is executed. Dev-facing only; nothing a
+  consuming repo sees.
+
+- **`cleaning-up-branches` now finds the `batch/*` branches `promoting-branches` leaves behind**
+  (#168). A `pr`-hop batch promote opens a `batch/<group>-<short>` integration branch per group and
+  nothing removes it afterwards, but `flight branches` only considered `feature/*`, `bugfix/*` and
+  `release/*` — so the documented cleanup pass never saw them and they accumulated on origin.
+  `batch/*` is now one of the built-in default patterns, and the places that state that list
+  (`flight-setup.md`, `cleaning-up-branches`) agree again. A `batch/*` branch carries no issue
+  number, so it is reported as "no cross-check was possible" rather than silently trusted.
+  `promoting-branches` still does not delete the branch itself, and now says so. Also documented
+  explicitly: a configured `code.branches.patterns` **replaces** the defaults outright rather than
+  adding to them.
+
+- **Every interpolated value in the `pr`, `ci` and `labels` adapters is URL-encoded** (#169).
+  Branch names, label names, usernames and states are caller input that ends up in a query string.
+  Unencoded, a space made curl refuse the whole request ("Malformed input to a URL function"), and
+  a `#` was worse: the request succeeded with everything after it cut off as a fragment, so a PR or
+  CI-log lookup silently matched nothing. Now encoded: `pr list --head/--base` (GitHub, GitLab),
+  `ci log --failed` (all three), and `issues assign --user` (GitLab). Delimiters are assembled
+  around the encoded value rather than through it — Forgejo's `refs/heads/` prefix and GitHub's
+  `owner:ref` colon stay literal — so a branch with no special character sends exactly the URL it
+  always did. The encoder now lives once in `_portable.sh`.
+
+- **`lint.sh` rejects an unknown filter instead of silently linting nothing** (#170). The filter was
+  matched against `all`, `yaml` and `shell`, and when it matched none the script simply ran no
+  check — so `lint.sh yml`, or any typo, printed `Passed: 0  Failed: 0` and exited 0, green having
+  linted nothing. That is the trap #135 closed for a missing linter, arriving by a different door.
+  The filter is now validated before any linter runs: an unrecognised value names itself and the
+  accepted values on stderr and exits 2. The `Passed: N  Failed: N` summary contract (#123, #135)
+  is untouched for every accepted filter. Dev-facing only; nothing a consuming repo sees.
+
+- **`ci watch` no longer reports a healthy run as a hang just because it sat in a queue** (#171).
+  The watcher counted every second since it started against `code.ciWatchTimeout` (default 900),
+  which on a repo with one runner per platform is mostly queue time: a run that took 19m29s wall
+  clock with almost all of it waiting for a runner had its watcher die at 900s calling it a hang.
+  There are now two clocks. **`--timeout` / `code.ciWatchTimeout` changed meaning**: it bounds how
+  long a run may *execute*, not how long the watch may last. Time in which every job of every
+  non-terminal run is waiting for a runner is bounded separately by the new **`--queue-timeout` /
+  `LS_CI_QUEUE_TIMEOUT` / `code.ciQueueTimeout`** (default 3600; `0` disables either cap, as
+  before). Each message names which cap fired and the key that raises it. Because every backend
+  marks a run running as soon as *any* job starts, a run that looks like it is executing is
+  confirmed against its own job list first; anything unreadable counts as executing, so a blip can
+  only ever leave the shorter cap in charge. "No run found at all" is a trigger or push problem,
+  not a queue, and stays bounded by `--timeout` as it was.
 
 ## [0.15.1] - 2026-09-19
 
