@@ -41,10 +41,16 @@ The dispatcher:
    (`auth check --axis issues` overrides that one) — applying `code → issues` inheritance when the
    `issues` block is omitted.
 3. Exports the resolved coordinates + token into the adapter's environment: `LS_API`,
-   `LS_OWNER`, `LS_REPO`, `LS_TOKEN`, `LS_TRUNK` (code's trunk branch), `LS_LABELS_JSON`
-   (the `labels` map, for role→name resolution), and `LS_BACKEND`. Token precedence:
-   `LS_TOKEN` / `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a legacy
-   name), else the secrets file (axis, `code → issues`).
+   `LS_OWNER`, `LS_REPO`, `LS_TOKEN`, `LS_TOKEN_SOURCE`, `LS_TRUNK` (code's trunk branch),
+   `LS_LABELS_JSON` (the `labels` map, for role→name resolution), and `LS_BACKEND`. Token
+   precedence: `LS_TOKEN` / `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a
+   legacy name), else the secrets file (axis, `code → issues`). `LS_TOKEN_SOURCE` names which
+   of those won — the env var as `$FLIGHT_TOKEN` (leading `$`), or the secrets file's
+   repo-relative path — and is empty when no token resolved. It exists so `auth check` can say
+   where the token came from instead of leaving a 401 to be blamed on the file (#177). On top of
+   that, and only for the legacy `FORGEJO_TOKEN`, the dispatcher notes on stderr when it shadows
+   a present secrets file holding a different token — the backend-neutral names are a deliberate
+   override and stay quiet on the every-verb path.
 4. **Signs the body** on `issues create|update|comment` and `pr open|update` (see **Body
    signature** below), and strips its own flags (`--model`, `--no-signature`) from the args.
 5. Execs `adapters/<backend>/<group> <verb> [args…]`.

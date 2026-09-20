@@ -29,11 +29,12 @@ expires=""; scopes=""
 # 1. Identity. GitHub returns the token's expiry and (for classic PATs) its
 # scopes in response headers, so capture them from this first call.
 if probe GET "${SITE}/user"; then
-	pass "authenticates" "$(body_field '.login // "?"') ($(body_field '.type // "user"')) — token $(mask "$LS_TOKEN")"
+	pass "authenticates" "$(body_field '.login // "?"') ($(body_field '.type // "user"')) — token $(token_desc)"
 	expires="$(hdr github-authentication-token-expiration)"
 	scopes="$(hdr x-oauth-scopes)"
 else
 	fail "authenticates" "$(why)"
+	hint "token $(token_desc)"
 	hint "fine-grained PATs: https://github.com/settings/personal-access-tokens ; classic: https://github.com/settings/tokens"
 fi
 
