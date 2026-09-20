@@ -44,10 +44,12 @@ Run workflow**, with the input `all`, or a space-separated subset (`github gitla
   the reminder.
 - **Secrets.** The SaaS rigs read `FLIGHT_GH_REPO` / `FLIGHT_GH_TOKEN` and `FLIGHT_GITLAB_TOKEN` /
   `_API` / `_PROJECT` from the repo's Actions secrets — scoped to the throwaway test repos only,
-  and they expire, so check the dates when a rig starts failing on auth. A job whose secrets are
-  missing **skips with a notice** instead of failing, which is also what keeps the workflow inert
-  on the public GitHub mirror, where those secrets do not exist. (`FLIGHT_GH_API` is only needed
-  for GitHub Enterprise Server.)
+  and they expire, so check the dates when a rig starts failing on auth. Missing secrets **skip**
+  on the public GitHub mirror — this workflow is mirrored there and those secrets never will be —
+  but **fail** anywhere else, because on the forge that owns them their absence means a rig did
+  not run, and that must not report green. An expired token is caught either way: the secret is
+  there, so the rig runs and dies on a real 401. (`FLIGHT_GH_API` is only needed for GitHub
+  Enterprise Server.)
 - **`RIG_STRICT=1`.** Locally, a rig that cannot reach a CI verdict — no runner, or CI too slow —
   warns and carries on. Unattended, a warning nobody reads is a silent skip, so the workflow sets
   `RIG_STRICT=1` and those cases fail the job instead. `up.sh`/`smoke.sh` honour it anywhere.
