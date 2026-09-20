@@ -13,6 +13,18 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Changed
+
+- **The repo's three floating CI images are pinned** (#167). `alpine:latest` → `alpine:3.22.6`
+  (so the two Linux legs differ only in the interpreter), `cytopia/yamllint:latest` →
+  `cytopia/yamllint:1`, and `koalaman/shellcheck-alpine:latest` → the same image by digest. A run
+  of an unchanged commit could previously get a different toolchain than the run before it, which
+  already cost a day when shellcheck's `latest` dev build gained SC2337 (#152). The dev build is
+  pinned rather than the newest release, because release 0.11.0 predates SC2337 and pinning to it
+  would drop CI's guard against the SIGPIPE pattern #152 fixed; the consequence — a contributor's
+  distro shellcheck will not flag SC2337 locally — is recorded beside the pin. Dev-facing only;
+  nothing a consuming repo sees.
+
 ### Fixed
 
 - **`ci watch` no longer reports a run where nothing executed as green** (#150). `skipped` used to
@@ -26,6 +38,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   instead of treating not-failed as passed. This is the false-green counterpart to #43's false red.
   **Note for anything parsing the output line:** `status=` can now be `skipped`, and `skipped=<s>`
   sits between `failed=` and `status=`.
+
+- **The Windows CI leg fails at the download when its `jq` fetch goes wrong** (#166). The job
+  fetched `jq.exe` with `curl -sSL`; with no `-f`, an HTTP error page was saved as `jq.exe` and
+  curl exited 0, so the leg died a line later on `jq.exe: line 1: <!DOCTYPE html>` — naming neither
+  the download nor the reason. That is what failed the 0.15.1 release PR while the other three legs
+  passed. Now `curl -fsSL` with `--retry 3 --retry-delay 5` (a transient 5xx no longer fails the
+  leg at all; a genuine 404 still fails immediately), and the download is verified against the
+  sha256 jq publishes for the pinned 1.7.1 asset before it is executed. Dev-facing only; nothing a
+  consuming repo sees.
 
 - **`cleaning-up-branches` now finds the `batch/*` branches `promoting-branches` leaves behind**
   (#168). A `pr`-hop batch promote opens a `batch/<group>-<short>` integration branch per group and
@@ -47,6 +68,14 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   around the encoded value rather than through it — Forgejo's `refs/heads/` prefix and GitHub's
   `owner:ref` colon stay literal — so a branch with no special character sends exactly the URL it
   always did. The encoder now lives once in `_portable.sh`.
+
+- **`lint.sh` rejects an unknown filter instead of silently linting nothing** (#170). The filter was
+  matched against `all`, `yaml` and `shell`, and when it matched none the script simply ran no
+  check — so `lint.sh yml`, or any typo, printed `Passed: 0  Failed: 0` and exited 0, green having
+  linted nothing. That is the trap #135 closed for a missing linter, arriving by a different door.
+  The filter is now validated before any linter runs: an unrecognised value names itself and the
+  accepted values on stderr and exits 2. The `Passed: N  Failed: N` summary contract (#123, #135)
+  is untouched for every accepted filter. Dev-facing only; nothing a consuming repo sees.
 
 - **`ci watch` no longer reports a healthy run as a hang just because it sat in a queue** (#171).
   The watcher counted every second since it started against `code.ciWatchTimeout` (default 900),
