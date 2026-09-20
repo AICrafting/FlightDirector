@@ -101,12 +101,15 @@ check "auth check --secrets names the candidate file, not a shadowing env var" \
 # A deliberate LS_TOKEN/FLIGHT_TOKEN override must not nag a two-forge setup on
 # every single call; `auth check` names the source for those, which is enough.
 # `issues list` is used here, not `auth check`, to prove it is the general path.
+# Both of these wrap their `case` in a function on purpose: bash 3.2 (the macOS CI
+# leg) mis-parses a `case` written inline inside `$(…)`, ending the substitution at
+# the pattern's own `)`. Quoting the pattern does not help; only the function does.
 quiet() { case "$(cat "$SANDBOX/err")" in *overrides*) echo 0 ;; *) echo 1 ;; esac; }
+# shellcheck disable=SC2016  # the literal env-var NAME is what the output must contain
+noted() { case "$(cat "$SANDBOX/err")" in *'$FORGEJO_TOKEN is set and overrides .flightdirector/secrets.json'*) echo 1 ;; *) echo 0 ;; esac; }
 
 run FORGEJO_TOKEN=from-forgejo >/dev/null
-# shellcheck disable=SC2016  # the literal env-var NAME is what the output must contain
-check "the legacy FORGEJO_TOKEN shadowing a differing secrets file notes it on stderr" \
-	"$(case "$(cat "$SANDBOX/err")" in *'$FORGEJO_TOKEN is set and overrides .flightdirector/secrets.json'*) echo 1 ;; *) echo 0 ;; esac)"
+check "the legacy FORGEJO_TOKEN shadowing a differing secrets file notes it on stderr" "$(noted)"
 run FORGEJO_TOKEN=from-secrets >/dev/null
 check "a legacy env token that merely repeats the secrets file stays quiet" "$(quiet)"
 run FLIGHT_TOKEN=from-flight >/dev/null
