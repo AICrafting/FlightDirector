@@ -20,6 +20,14 @@ lsp() { ( cd "$WORK" && "$DISP" "$@" ); }
 pass=0; fail=0
 ok() { printf '\033[32m  ✓ %s\033[0m\n' "$1"; pass=$((pass+1)); }
 no() { printf '\033[31m  ✗ %s\033[0m  %s\n' "$1" "${2:-}"; fail=$((fail+1)); }
+# A condition the rig cannot control: no runner, or CI too slow to reach a verdict. Locally
+# that is a warning — the rig still proves everything it could reach. Under RIG_STRICT=1 (what
+# the CI workflow sets) it is a failure instead: in an unattended run a warning nobody reads is
+# a silent skip, and "the rig was green" would then mean "the rig checked nothing" (#187).
+soft() {
+	if [ "${RIG_STRICT:-0}" = 1 ]; then no "$1" "${2:-}"
+	else printf '\033[33m  ⚠ %s (soft)\033[0m\n' "$1"; [ -z "${2:-}" ] || printf '\033[33m    %s\033[0m\n' "$2"; fi
+}
 
 echo "── issues create / list / get ──"
 N="$(lsp issues create --title "First issue" --body "hello body")"
@@ -124,8 +132,7 @@ CHEAD_SHA="$(curl -fsS "${AUTH[@]}" "$REPO_API/branches/$(printf '%s' "$CHEAD" |
 watch_pr() { ( cd "$WORK" && LS_CI_POLL_SECONDS=3 "$DISP" ci watch --pr "$cprnum" --timeout 180 2>&1 ) || true; }
 LINES="$(watch_pr)"
 if ! grep -qE "^ci runs=[0-9]+ .*status=(failure|success|skipped)" <<<"$LINES"; then
-  printf '\033[33m  ⚠ no terminal CI verdict for the ci-log PR (soft — is the rig runner online? see up.sh output); ci checks skipped\033[0m\n'
-  printf '\033[33m    %s\033[0m\n' "$(tail -1 <<<"$LINES")"
+  soft "no terminal CI verdict for the ci-log PR — is the rig runner online? see up.sh output; ci checks skipped" "$(tail -1 <<<"$LINES")"
 else
   ok "ci watch streams aggregate status lines"
   grep -q "runs=2 .*status=failure" < <(tail -1 <<<"$LINES") && ok "ci watch --pr sees both runs and ends at status=failure" \

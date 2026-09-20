@@ -110,6 +110,8 @@ out="$(run flight --dry-run)"
 check "dry-run resolves version and tag from plugin.json at origin/main" "$(grep -q 'flight 0.12.0 at origin/main' <<<"$out" && grep -q 'tag flight-0.12.0' <<<"$out" && echo 1 || echo 0)"
 check "dry-run prints the notes" "$(grep -q 'Thing one' <<<"$out" && echo 1 || echo 0)"
 check "dry-run creates no tag and no Release" "$(! git -C "$R" rev-parse -q --verify refs/tags/flight-0.12.0 >/dev/null && [ ! -s "$CURL_LOG" ] && echo 1 || echo 0)"
+# The live rigs are manual (#187), so the release is where the reminder has to land.
+check "dry-run reminds you to run the live test rigs (#187)" "$(grep -q 'run the live test rigs' <<<"$out" && grep -q 'test-rig/' <<<"$out" && echo 1 || echo 0)"
 
 # --- the real thing ---
 : >"$CURL_LOG"; rm -f "$CURL_BODY"
@@ -125,6 +127,7 @@ check "Release POSTed to <api>/repos/<owner>/<repo>/releases with the secrets to
 check "Release payload: tag, name, target sha, notes, not draft/prerelease" \
 	"$(jq -e --arg s "$SHA" '.tag_name=="flight-0.12.0" and .name=="flight-0.12.0" and .target_commitish==$s and (.body|contains("Thing one")) and .draft==false and .prerelease==false' "$CURL_BODY" >/dev/null && echo 1 || echo 0)"
 check "prints the Release URL" "$(grep -q 'releases/tag/flight-0.12.0' <<<"$out" && echo 1 || echo 0)"
+check "a real run reminds you to run the live test rigs too (#187)" "$(grep -q 'run the live test rigs' <<<"$out" && echo 1 || echo 0)"
 
 # --- immutability ---
 : >"$CURL_LOG"

@@ -1,0 +1,140 @@
+---
+# The live test rigs (#187). These are the only tests that talk to a real backend, and they
+# were previously run only when someone remembered to — #138's GitHub and GitLab fixes were
+# covered by stubs alone until the rigs were run by hand.
+#
+# MANUAL ONLY, on purpose. Each rig waits on real CI for minutes and writes to a shared
+# throwaway repo, so this must not fire on every push. `CONTRIBUTING.md` → "Cutting a release"
+# makes a run part of the release checklist, and `scripts/tag-release.sh` prints the reminder.
+#
+# Secrets: the SaaS rigs need FLIGHT_GH_REPO / FLIGHT_GH_TOKEN and
+# FLIGHT_GITLAB_TOKEN / _API / _PROJECT, scoped to the throwaway test repos only. A job whose
+# secrets are absent SKIPS with a note rather than failing — which is also what keeps this
+# workflow inert on the public GitHub mirror, where those secrets do not exist.
+#
+# RIG_STRICT=1 is set for every rig: locally a missing runner is a warning, but in an
+# unattended run a warning nobody reads is a silent skip, so here it fails the job.
+name: rigs
+on:
+  workflow_dispatch:
+    inputs:
+      rigs:
+        description: 'Which rigs to run: all | forgejo | github | gitlab (space-separated for several)'
+        required: false
+        default: 'all'
+
+# One rig run at a time. The rigs share throwaway repos, and every down.sh deletes ALL rig/*
+# branches and closes ALL [rig] issues/PRs — two concurrent runs would tear down each other's
+# work mid-flight. This does not (and cannot) protect against someone running a rig locally at
+# the same time; see test-rig/README.md.
+concurrency:
+  group: live-test-rigs
+  cancel-in-progress: false
+
+jobs:
+  forgejo-rig:
+    name: forgejo rig (container + runner)
+    if: ${{ inputs.rigs == 'all' || contains(inputs.rigs, 'forgejo') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Deliberately NO `container:`: this rig brings up its own Forgejo and an Actions runner
+    # with docker compose, so it needs the host's docker rather than a container of its own.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check for docker
+        id: docker
+        run: |
+          if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+            echo "have=1" >>"$GITHUB_OUTPUT"
+            docker --version; docker compose version
+          else
+            echo "have=0" >>"$GITHUB_OUTPUT"
+            echo "::warning::no docker + compose on this runner — the Forgejo rig cannot run here"
+          fi
+
+      - name: Up, smoke, down
+        if: steps.docker.outputs.have == '1'
+        env:
+          RIG_STRICT: '1'
+          # Not 3000: a self-hosted runner may already have something on the default port.
+          RIG_PORT: '3737'
+        run: |
+          set -euo pipefail
+          cd test-rig/forgejo
+          ./up.sh
+          ./smoke.sh
+
+      - name: Tear down
+        if: always() && steps.docker.outputs.have == '1'
+        env:
+          RIG_PORT: '3737'
+        run: |
+          cd test-rig/forgejo && ./down.sh || true
+
+  github-rig:
+    name: github rig (live repo)
+    if: ${{ inputs.rigs == 'all' || contains(inputs.rigs, 'github') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: alpine:3.22.6
+    steps:
+      - name: Setup tools
+        run: apk add --update npm bash curl jq git coreutils   # npm: actions/checkout is a JS action and needs node
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Up, smoke, down
+        env:
+          # Through env, never interpolated into the script body.
+          FLIGHT_GH_REPO: ${{ secrets.FLIGHT_GH_REPO }}
+          FLIGHT_GH_TOKEN: ${{ secrets.FLIGHT_GH_TOKEN }}
+          FLIGHT_GH_API: ${{ secrets.FLIGHT_GH_API }}
+          RIG_STRICT: '1'
+        run: |
+          set -uo pipefail
+          if [ -z "${FLIGHT_GH_TOKEN:-}" ] || [ -z "${FLIGHT_GH_REPO:-}" ]; then
+            echo "::notice::FLIGHT_GH_REPO / FLIGHT_GH_TOKEN are not set — skipping the GitHub rig"
+            exit 0
+          fi
+          cd test-rig/github
+          rc=0
+          ./up.sh && ./smoke.sh || rc=$?
+          # Always tear down: a red smoke run must not leave rig branches and open PRs behind.
+          ./down.sh || true
+          exit "$rc"
+
+  gitlab-rig:
+    name: gitlab rig (live project)
+    if: ${{ inputs.rigs == 'all' || contains(inputs.rigs, 'gitlab') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: alpine:3.22.6
+    steps:
+      - name: Setup tools
+        run: apk add --update npm bash curl jq git coreutils   # npm: actions/checkout is a JS action and needs node
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Up, smoke, down
+        env:
+          FLIGHT_GITLAB_TOKEN: ${{ secrets.FLIGHT_GITLAB_TOKEN }}
+          FLIGHT_GITLAB_API: ${{ secrets.FLIGHT_GITLAB_API }}
+          FLIGHT_GITLAB_PROJECT: ${{ secrets.FLIGHT_GITLAB_PROJECT }}
+          RIG_STRICT: '1'
+        run: |
+          set -uo pipefail
+          if [ -z "${FLIGHT_GITLAB_TOKEN:-}" ] || [ -z "${FLIGHT_GITLAB_PROJECT:-}" ]; then
+            echo "::notice::FLIGHT_GITLAB_* are not set — skipping the GitLab rig"
+            exit 0
+          fi
+          cd test-rig/gitlab
+          rc=0
+          ./up.sh && ./smoke.sh || rc=$?
+          ./down.sh || true
+          exit "$rc"

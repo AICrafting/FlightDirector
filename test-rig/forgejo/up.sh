@@ -92,6 +92,7 @@ else
        --instance http://forgejo:3000 --token "$REG" --name flight-rig --labels rig:host >/dev/null 2>&1; then
     say "  registered (host mode, label 'rig')"; RUNNER=registered
   else
+    if [ "${RIG_STRICT:-0}" = 1 ]; then die "could not register the runner (RIG_STRICT=1)"; fi
     printf '\033[33m  ⚠ could not register the runner — ci watch / ci log checks will be skipped\033[0m\n'
   fi
 fi

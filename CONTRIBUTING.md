@@ -247,6 +247,19 @@ Release with the same notes using the coordinates in `.flightdirector/config.jso
 in `.flightdirector/secrets.json` (`--no-release` to skip). `scripts/release-notes.sh` is the
 changelog-section extractor it uses; both are repo tooling, not part of the plugin.
 
+**Run the live test rigs.** They are the only tests that talk to a real backend, and they are
+manual on purpose — each waits minutes on real CI and writes to a shared throwaway repo — so a
+release is the moment to run them. In the Forgejo web UI: *Actions → `rigs` → Run workflow*, with
+the input `all` (or one of `forgejo` / `github` / `gitlab`). They can also be run locally:
+
+```bash
+( cd test-rig/github && ./up.sh && ./smoke.sh && ./down.sh )   # same under forgejo/ and gitlab/
+```
+
+The workflow sets `RIG_STRICT=1`, so a rig that cannot reach a CI verdict fails rather than
+warning. `scripts/tag-release.sh` prints this reminder too. See
+[test-rig/README.md](test-rig/README.md) for what each rig needs.
+
 **Publishing to the GitHub mirror.** `origin` (Forgejo) is the source of truth; GitHub is a
 mirror that is pushed by hand. After tagging, run:
 
