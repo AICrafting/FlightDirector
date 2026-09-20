@@ -19,7 +19,7 @@ WORK="$RIG_DIR/.work"
 MAIN="$(cd "$(git -C "$RIG_DIR" rev-parse --git-common-dir)/.." && pwd)"
 _env_port="${RIG_PORT:-}"; _env_image="${FORGEJO_IMAGE:-}"; _env_user="${FLIGHT_FORGEJO_USER:-}"
 _env_pass="${FLIGHT_FORGEJO_PASS:-}"; _env_email="${FLIGHT_FORGEJO_EMAIL:-}"; _env_repo="${FLIGHT_FORGEJO_REPO:-}"
-_env_runner="${FORGEJO_RUNNER_IMAGE:-}"
+_env_runner="${FORGEJO_RUNNER_IMAGE:-}"; _env_host="${RIG_HOST:-}"
 # shellcheck disable=SC1091  # .env is gitignored; shellcheck can't follow it
 if [ -f "$MAIN/test-rig/forgejo/.env" ]; then . "$MAIN/test-rig/forgejo/.env"
 elif [ -f "$RIG_DIR/.env" ]; then . "$RIG_DIR/.env"; fi
@@ -27,7 +27,13 @@ elif [ -f "$RIG_DIR/.env" ]; then . "$RIG_DIR/.env"; fi
 PORT="${_env_port:-${RIG_PORT:-3000}}"
 IMAGE="${_env_image:-${FORGEJO_IMAGE:-code.forgejo.org/forgejo/forgejo:16}}"
 RUNNER_IMAGE="${_env_runner:-${FORGEJO_RUNNER_IMAGE:-code.forgejo.org/forgejo/runner:13}}"
-API="http://localhost:${PORT}/api/v1"
+# Where the *rig scripts* reach Forgejo. `localhost` is right when up.sh runs on the machine
+# publishing the port. In CI the scripts run inside a job container driving the host's docker
+# through its socket, so the published port lands on the host, not on `localhost` here — the
+# workflow sets RIG_HOST to the host's address (#187). The compose network is unaffected:
+# the runner container still reaches Forgejo as http://forgejo:3000 whatever this says.
+HOST="${_env_host:-${RIG_HOST:-localhost}}"
+API="http://${HOST}:${PORT}/api/v1"
 USER="${_env_user:-${FLIGHT_FORGEJO_USER:-rig}}"
 PASS="${_env_pass:-${FLIGHT_FORGEJO_PASS:-rigpass123}}"
 EMAIL="${_env_email:-${FLIGHT_FORGEJO_EMAIL:-rig@example.com}}"
@@ -42,7 +48,7 @@ command -v jq >/dev/null || die "jq not found"
 say "Starting Forgejo (port $PORT)…"
 # Pass the resolved values explicitly so compose sees the same ones even when the .env
 # lives at the main repo root rather than next to compose.yaml.
-compose() { ( cd "$RIG_DIR" && RIG_PORT="$PORT" FORGEJO_IMAGE="$IMAGE" FORGEJO_RUNNER_IMAGE="$RUNNER_IMAGE" docker compose "$@" ); }
+compose() { ( cd "$RIG_DIR" && RIG_PORT="$PORT" RIG_HOST="$HOST" FORGEJO_IMAGE="$IMAGE" FORGEJO_RUNNER_IMAGE="$RUNNER_IMAGE" docker compose "$@" ); }
 compose up -d
 
 say "Waiting for the API to come up…"
@@ -111,7 +117,7 @@ jq -n --arg t "$TOKEN" '{ code: { token:$t } }' > "$WORK/.flightdirector/secrets
 cat <<EOF
 
 $(printf '\033[32m✓ Rig ready.\033[0m')
-  Web:    http://localhost:$PORT/    (login: $USER / $PASS)
+  Web:    http://$HOST:$PORT/    (login: $USER / $PASS)
   API:    $API
   Repo:   $USER/$REPO
   Workdir:$WORK   (git repo with .flightdirector/config.json + secrets)

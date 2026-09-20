@@ -15,6 +15,11 @@
 # RIG_STRICT=1 is set for every rig: locally a missing runner is a warning, but in an
 # unattended run a warning nobody reads is a silent skip, so here it fails the job.
 #
+# The Forgejo rig brings up its own instance and Actions runner with compose. This forge runs
+# jobs inside a container that has the docker socket but no docker CLI, so that job installs a
+# pinned client and drives the HOST's daemon through the socket — which also means the rig's
+# port is published on the host, and RIG_HOST points the rig scripts at it.
+#
 # Every rig step unsets LS_TOKEN / FLIGHT_TOKEN / FORGEJO_TOKEN first. The dispatcher resolves
 # those env names BEFORE the repo's secrets.json and says nothing about which won (#177), and an
 # Actions job has a forge token in its environment — so without this the rigs authenticate to
@@ -43,61 +48,80 @@ jobs:
     name: forgejo rig (container + runner)
     if: ${{ inputs.rigs == 'all' || contains(inputs.rigs, 'forgejo') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    # Deliberately NO `container:`: this rig brings up its own Forgejo and an Actions runner
-    # with docker compose, so it needs the host's docker rather than a container of its own.
+    timeout-minutes: 25
+    env:
+      # Not 3000: the rig's port is published on the RUNNER HOST, which may already have
+      # something there (including a developer's own rig).
+      RIG_PORT: '3737'
+      RIG_STRICT: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Check for docker
-        id: docker
-        run: |
-          # This runner executes jobs inside a container, so "docker" means the CLI plus a
-          # socket reaching a daemon. Report both: a socket without the CLI is fixable here,
-          # neither is not.
-          have=0
-          if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-            have=1; docker --version; docker compose version
-          else
-            command -v docker >/dev/null 2>&1 && echo "docker CLI: present (compose missing)" || echo "docker CLI: absent"
-            [ -S /var/run/docker.sock ] && echo "docker socket: present at /var/run/docker.sock" || echo "docker socket: absent"
-            echo "::warning::no usable docker + compose in this job — the Forgejo rig cannot run here"
-          fi
-          echo "have=$have" >>"$GITHUB_OUTPUT"
-
-      - name: Up, smoke, down
-        if: steps.docker.outputs.have == '1'
-        env:
-          RIG_STRICT: '1'
-          # Not 3000: a self-hosted runner may already have something on the default port.
-          RIG_PORT: '3737'
+      - name: Install the docker CLI and compose plugin
         run: |
           set -euo pipefail
+          # This forge runs jobs inside a container that has the docker SOCKET but no docker
+          # CLI, so install one and drive the host's daemon through the socket. Pinned and
+          # checksummed rather than piped from a convenience script — same rule as the Windows
+          # jq install in tests.yml: the step performs the download, so verify before trusting.
+          # Only the client binary is taken out of the tarball; the daemon is the host's.
+          DOCKER_VER=29.8.1
+          DOCKER_SHA=d8db66739d2e28d4933786d73e918d9be643a67fbd835db1bf740d650a259e70
+          COMPOSE_VER=v5.5.1
+          COMPOSE_SHA=db1889184726840f75c4f9c001048430d4f25b3be3cb084d3ddd762bc0aed576
+          mkdir -p "$HOME/bin" "$HOME/.docker/cli-plugins"
+          curl -fsSL --retry 3 --retry-delay 5 -o /tmp/docker.tgz \
+            "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VER}.tgz"
+          printf '%s  %s\n' "$DOCKER_SHA" /tmp/docker.tgz | sha256sum -c -
+          tar -xzf /tmp/docker.tgz -C /tmp docker/docker
+          install -m 0755 /tmp/docker/docker "$HOME/bin/docker"
+          curl -fsSL --retry 3 --retry-delay 5 -o "$HOME/.docker/cli-plugins/docker-compose" \
+            "https://github.com/docker/compose/releases/download/${COMPOSE_VER}/docker-compose-linux-x86_64"
+          printf '%s  %s\n' "$COMPOSE_SHA" "$HOME/.docker/cli-plugins/docker-compose" | sha256sum -c -
+          chmod 0755 "$HOME/.docker/cli-plugins/docker-compose"
+
+      - name: Reach the daemon, and find the host
+        id: docker
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/bin:$PATH"
+          docker version --format 'client {{.Client.Version}} / server {{.Server.Version}}'
+          docker compose version
+          # The rig's containers are started on the HOST daemon, so its published port lands on
+          # the host — `localhost` in here is this job container. The host is this container's
+          # default gateway. Read it from /proc rather than `ip route`: iproute2 is not
+          # guaranteed to be in whatever image the runner picked.
+          gw_hex="$(awk '$2 == "00000000" { print $3; exit }' /proc/net/route)"
+          [ -n "$gw_hex" ] || { echo "no default route — cannot locate the host" >&2; exit 1; }
+          host="$(printf '%d.%d.%d.%d' "0x${gw_hex:6:2}" "0x${gw_hex:4:2}" "0x${gw_hex:2:2}" "0x${gw_hex:0:2}")"
+          echo "host (default gateway): $host"
+          echo "host=$host" >>"$GITHUB_OUTPUT"
+
+      - name: Up, smoke
+        env:
+          RIG_HOST: ${{ steps.docker.outputs.host }}
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/bin:$PATH"
           # See the header: an Actions job carries a forge token in its environment and the
-          # dispatcher prefers it over the rig's own secrets.json (#177). Names only — never
-          # print a token's value.
-          echo "token-ish variables in this job: $(env | sed 's/=.*//' | grep -iE 'token' | sort | tr '\n' ' ')"
+          # dispatcher prefers it over the rig's own secrets.json (#177).
           unset LS_TOKEN FLIGHT_TOKEN FORGEJO_TOKEN
           cd test-rig/forgejo
+          # A previous run that died before teardown would leave containers on the host and the
+          # fixed names would collide. Serialised by the workflow's concurrency group, so this
+          # can only be clearing up after ourselves.
+          ./down.sh >/dev/null 2>&1 || true
           ./up.sh
           ./smoke.sh
 
       - name: Tear down
-        if: always() && steps.docker.outputs.have == '1'
+        if: always()
         env:
-          RIG_PORT: '3737'
+          RIG_HOST: ${{ steps.docker.outputs.host }}
         run: |
+          export PATH="$HOME/bin:$PATH"
           cd test-rig/forgejo && ./down.sh || true
-
-      # A rig that did not run must not report green. This is the same rule RIG_STRICT applies
-      # inside the rigs, applied to the one skip the workflow itself can take.
-      - name: Fail if the rig was skipped
-        if: steps.docker.outputs.have != '1'
-        run: |
-          echo "the Forgejo rig needs docker + compose in the job; this runner provides neither" >&2
-          echo "run it locally instead: ( cd test-rig/forgejo && ./up.sh && ./smoke.sh && ./down.sh )" >&2
-          exit 1
 
   github-rig:
     name: github rig (live repo)

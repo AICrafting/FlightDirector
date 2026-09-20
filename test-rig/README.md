@@ -56,6 +56,14 @@ Run workflow**, with the input `all`, or a space-separated subset (`github gitla
   `down.sh` deletes *all* `rig/*` branches and closes *all* `[rig]` issues/PRs — two concurrent
   runs would tear down each other's work. That cannot protect against someone running a rig
   **locally** while CI runs: the two would collide the same way, so don't.
-- **The Forgejo rig needs the host's docker**, since it brings up its own instance and runner with
-  compose; its job therefore runs without a `container:` and probes for `docker compose` first,
-  warning and skipping the rig if the runner cannot provide it.
+- **The forge token has to be unshadowed.** A Forgejo Actions job is handed `FORGEJO_TOKEN` in
+  its environment, and the dispatcher resolves `LS_TOKEN` / `FLIGHT_TOKEN` / `FORGEJO_TOKEN`
+  ahead of the repo's `secrets.json` without reporting which won (#177) — so a rig would
+  authenticate to GitHub or GitLab with a *Forgejo* token and 401 on every call, while its own
+  `up.sh` (which uses its own variable and curl directly) provisions happily. Each rig step
+  therefore `unset`s the three names first. Remove that once #177 lands.
+- **The Forgejo rig needs docker + compose inside the job**, since it brings up its own instance
+  and runner with compose. Its job runs without a `container:` and probes first. On this forge's
+  runners the job itself runs in a container that has the docker **socket** but no docker **CLI**,
+  so the rig is skipped — and because a rig that did not run must not read as green, the job
+  fails rather than passing quietly. Run that one locally.
