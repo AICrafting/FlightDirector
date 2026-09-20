@@ -171,7 +171,7 @@ case "$verb" in
     # Atomic single-status: remove every OTHER managed status label present, add target.
     current="$(_api GET "/rest/api/3/issue/${number}?fields=labels" | jq -c '.fields.labels // []')"
     others="$(printf '%s' "$labels_json" | jq -c --arg t "$target_name" --argjson cur "$current" \
-      '[(.status // {} | .[]) | select(. != $t) | select(. as $n | $cur | index($n) != null)]')"
+      '[(.status // {} | .[]) | select(type == "string") | select(. != $t) | select(. as $n | $cur | index($n) != null)]')"
     ops="$(jq -n --arg t "$target_name" --argjson rm "$others" \
       '[$rm[] | {remove:.}] + [{add:$t}]')"
     _api PUT "/rest/api/3/issue/${number}" "$(jq -n --argjson o "$ops" '{update:{labels:$o}}')" >/dev/null

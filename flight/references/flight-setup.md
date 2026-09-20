@@ -69,6 +69,7 @@ Backend, coordinates, and preferences, across two independent axes:
   "issues": { "backend": "forgejo", "owner": "acme", "repo": "planning" }, // omit to inherit code
   "labels": {
     "status": {
+      "new":         "status/new",
       "in-progress": "status/in progress",
       "to-test":     "status/to test",
       "blocked":     "status/blocked",
