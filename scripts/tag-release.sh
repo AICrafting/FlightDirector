@@ -35,6 +35,14 @@ SEC="$REPO_ROOT/.flightdirector/secrets.json"
 
 die() { printf '\033[0;31mtag-release: %s\033[0m\n' "$1" >&2; exit 1; }
 say() { printf '\033[0;32mtag-release:\033[0m %s\n' "$1"; }
+# The live rigs are the only tests that touch a real backend, and they are manual by design
+# (#187) — so a release is the moment to have run them. Nothing here checks that they were;
+# this is a reminder at the point where it is still cheap to act on.
+rig_reminder() {
+	printf '\033[0;33mtag-release: reminder — run the live test rigs for this release:\033[0m\n'
+	printf '  the rigs workflow (Actions -> rigs -> Run workflow, input "all"), or locally:\n'
+	printf '    ( cd test-rig/<forgejo|github|gitlab> && ./up.sh && ./smoke.sh && ./down.sh )\n'
+}
 command -v jq >/dev/null 2>&1 || die "jq is required"
 
 PLUGIN=""; REF="origin/main"; DRY=0; RELEASE=1; PUSH_TO=()
@@ -93,6 +101,7 @@ if [ "$DRY" = 1 ]; then
 	for remote in "${PUSH_TO[@]}"; do say "[dry-run] would: git push $remote refs/tags/$TAG"; done
 	[ "$RELEASE" = 1 ] && say "[dry-run] would: create Forgejo Release '$TAG' via $(jq -r '.code.api // "?"' "$CFG" 2>/dev/null)/repos/…/releases"
 	printf '\n--- notes ---\n%s\n' "$(cat "$NOTES_FILE")"
+	rig_reminder
 	exit 0
 fi
 
@@ -105,7 +114,7 @@ for remote in "${PUSH_TO[@]}"; do
 done
 
 # --- Forgejo Release -----------------------------------------------------------
-[ "$RELEASE" = 1 ] || { say "skipping backend Release (--no-release)"; exit 0; }
+[ "$RELEASE" = 1 ] || { say "skipping backend Release (--no-release)"; rig_reminder; exit 0; }
 [ -f "$CFG" ] || die "no $CFG — cannot create the Forgejo Release (tag is pushed; use --no-release to silence)"
 API="$(jq -r '.code.api // empty' "$CFG")"; OWNER="$(jq -r '.code.owner // empty' "$CFG")"; REPO="$(jq -r '.code.repo // empty' "$CFG")"
 [ -n "$API" ] && [ -n "$OWNER" ] && [ -n "$REPO" ] || die "code.api/owner/repo missing in $CFG"
@@ -119,3 +128,4 @@ CODE="$(curl -sS -o "$RESP" -w '%{http_code}' -X POST -H "Authorization: token $
 	--data-binary "$PAYLOAD" "${API%/}/repos/$OWNER/$REPO/releases")" || die "curl failed creating the Release (tag is pushed)"
 [ "$CODE" -lt 400 ] || die "Release creation → HTTP $CODE: $(jq -r '.message // empty' "$RESP" 2>/dev/null) (tag is pushed)"
 say "Forgejo Release: $(jq -r '.html_url // "created"' "$RESP")"
+rig_reminder

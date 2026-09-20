@@ -1,0 +1,227 @@
+---
+# The live test rigs (#187). These are the only tests that talk to a real backend, and they
+# were previously run only when someone remembered to — #138's GitHub and GitLab fixes were
+# covered by stubs alone until the rigs were run by hand.
+#
+# MANUAL ONLY, on purpose. Each rig waits on real CI for minutes and writes to a shared
+# throwaway repo, so this must not fire on every push. `CONTRIBUTING.md` → "Cutting a release"
+# makes a run part of the release checklist, and `scripts/tag-release.sh` prints the reminder.
+#
+# Secrets: the SaaS rigs need FLIGHT_GH_REPO / FLIGHT_GH_TOKEN and
+# FLIGHT_GITLAB_TOKEN / _API / _PROJECT, scoped to the throwaway test repos only.
+#
+# Missing secrets SKIP on the public GitHub mirror — this file is mirrored there, those secrets
+# will never exist there, and a permanently red job is noise. Anywhere else, missing secrets
+# FAIL: on the forge that owns them their absence means someone removed them or they were never
+# added, and a rig that did not run must not report green — the same rule RIG_STRICT applies
+# inside the rigs. An expired token is caught either way: the secret is present, so the rig runs
+# and dies on a real 401.
+#
+# RIG_STRICT=1 is set for every rig: locally a missing runner is a warning, but in an
+# unattended run a warning nobody reads is a silent skip, so here it fails the job.
+#
+# The Forgejo rig brings up its own instance and Actions runner with compose. This forge runs
+# jobs inside a container that has the docker socket but no docker CLI, so that job installs a
+# pinned client and drives the HOST's daemon through the socket — which also means the rig's
+# port is published on the host, and RIG_HOST points the rig scripts at it.
+#
+# Every rig step unsets LS_TOKEN / FLIGHT_TOKEN / FORGEJO_TOKEN first. The dispatcher resolves
+# those env names BEFORE the repo's secrets.json and says nothing about which won (#177), and an
+# Actions job has a forge token in its environment — so without this the rigs authenticate to
+# GitHub and GitLab with a Forgejo token and every call 401s, while `up.sh`'s own curls (which
+# use their own variable) sail through. Drop this once #177 makes secrets.json win, or reports
+# the source.
+name: rigs
+on:
+  workflow_dispatch:
+    inputs:
+      rigs:
+        description: 'Which rigs to run: all | forgejo | github | gitlab (space-separated for several)'
+        required: false
+        default: 'all'
+
+# One rig run at a time. The rigs share throwaway repos, and every down.sh deletes ALL rig/*
+# branches and closes ALL [rig] issues/PRs — two concurrent runs would tear down each other's
+# work mid-flight. This does not (and cannot) protect against someone running a rig locally at
+# the same time; see test-rig/README.md.
+concurrency:
+  group: live-test-rigs
+  cancel-in-progress: false
+
+jobs:
+  forgejo-rig:
+    name: forgejo rig (container + runner)
+    if: ${{ inputs.rigs == 'all' || contains(inputs.rigs, 'forgejo') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # Not 3000: the rig's port is published on the RUNNER HOST, which may already have
+      # something there (including a developer's own rig).
+      RIG_PORT: '3737'
+      RIG_STRICT: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install the docker CLI, compose plugin and jq
+        run: |
+          set -euo pipefail
+          # This forge runs jobs inside a container that has the docker SOCKET but no docker
+          # CLI, so install one and drive the host's daemon through the socket. Pinned and
+          # checksummed rather than piped from a convenience script — same rule as the Windows
+          # jq install in tests.yml: the step performs the download, so verify before trusting.
+          # Only the client binary is taken out of the tarball; the daemon is the host's.
+          # jq too: unlike the other rigs this job has no `container:`, so it runs in whatever
+          # image the runner picked and cannot assume the rig's tools are there.
+          JQ_SHA=5942c9b0934e510ee61eb3e30273f1b3fe2590df93933a93d7c58b81d19c8ff5
+          DOCKER_VER=29.8.1
+          DOCKER_SHA=d8db66739d2e28d4933786d73e918d9be643a67fbd835db1bf740d650a259e70
+          COMPOSE_VER=v5.5.1
+          COMPOSE_SHA=db1889184726840f75c4f9c001048430d4f25b3be3cb084d3ddd762bc0aed576
+          mkdir -p "$HOME/bin" "$HOME/.docker/cli-plugins"
+          curl -fsSL --retry 3 --retry-delay 5 -o /tmp/docker.tgz \
+            "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VER}.tgz"
+          printf '%s  %s\n' "$DOCKER_SHA" /tmp/docker.tgz | sha256sum -c -
+          tar -xzf /tmp/docker.tgz -C /tmp docker/docker
+          install -m 0755 /tmp/docker/docker "$HOME/bin/docker"
+          curl -fsSL --retry 3 --retry-delay 5 -o "$HOME/.docker/cli-plugins/docker-compose" \
+            "https://github.com/docker/compose/releases/download/${COMPOSE_VER}/docker-compose-linux-x86_64"
+          printf '%s  %s\n' "$COMPOSE_SHA" "$HOME/.docker/cli-plugins/docker-compose" | sha256sum -c -
+          chmod 0755 "$HOME/.docker/cli-plugins/docker-compose"
+          if ! command -v jq >/dev/null 2>&1; then
+            curl -fsSL --retry 3 --retry-delay 5 -o "$HOME/bin/jq" \
+              https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+            printf '%s  %s\n' "$JQ_SHA" "$HOME/bin/jq" | sha256sum -c -
+            chmod 0755 "$HOME/bin/jq"
+          fi
+
+      - name: Reach the daemon, and find the host
+        id: docker
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/bin:$PATH"
+          docker version --format 'client {{.Client.Version}} / server {{.Server.Version}}'
+          jq --version; git --version
+          docker compose version
+          # The rig's containers are started on the HOST daemon, so its published port lands on
+          # the host — `localhost` in here is this job container. The host is this container's
+          # default gateway. Read it from /proc rather than `ip route`: iproute2 is not
+          # guaranteed to be in whatever image the runner picked.
+          gw_hex="$(awk '$2 == "00000000" { print $3; exit }' /proc/net/route)"
+          [ -n "$gw_hex" ] || { echo "no default route — cannot locate the host" >&2; exit 1; }
+          host="$(printf '%d.%d.%d.%d' "0x${gw_hex:6:2}" "0x${gw_hex:4:2}" "0x${gw_hex:2:2}" "0x${gw_hex:0:2}")"
+          echo "host (default gateway): $host"
+          echo "host=$host" >>"$GITHUB_OUTPUT"
+
+      - name: Up, smoke
+        env:
+          RIG_HOST: ${{ steps.docker.outputs.host }}
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/bin:$PATH"
+          # See the header: an Actions job carries a forge token in its environment and the
+          # dispatcher prefers it over the rig's own secrets.json (#177).
+          unset LS_TOKEN FLIGHT_TOKEN FORGEJO_TOKEN
+          cd test-rig/forgejo
+          # A previous run that died before teardown would leave containers on the host and the
+          # fixed names would collide. Serialised by the workflow's concurrency group, so this
+          # can only be clearing up after ourselves.
+          ./down.sh >/dev/null 2>&1 || true
+          ./up.sh
+          ./smoke.sh
+
+      - name: Tear down
+        if: always()
+        env:
+          RIG_HOST: ${{ steps.docker.outputs.host }}
+        run: |
+          export PATH="$HOME/bin:$PATH"
+          cd test-rig/forgejo && ./down.sh || true
+
+  github-rig:
+    name: github rig (live repo)
+    if: ${{ inputs.rigs == 'all' || contains(inputs.rigs, 'github') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: alpine:3.22.6
+    steps:
+      - name: Setup tools
+        run: apk add --update npm bash curl jq git coreutils   # npm: actions/checkout is a JS action and needs node
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Up, smoke, down
+        env:
+          # Through env, never interpolated into the script body.
+          FLIGHT_GH_REPO: ${{ secrets.FLIGHT_GH_REPO }}
+          FLIGHT_GH_TOKEN: ${{ secrets.FLIGHT_GH_TOKEN }}
+          FLIGHT_GH_API: ${{ secrets.FLIGHT_GH_API }}
+          RIG_STRICT: '1'
+        run: |
+          set -uo pipefail
+          if [ -z "${FLIGHT_GH_TOKEN:-}" ] || [ -z "${FLIGHT_GH_REPO:-}" ]; then
+            case "${GITHUB_SERVER_URL:-}" in
+              https://github.com|https://github.com/)
+                echo "::notice::FLIGHT_GH_REPO / FLIGHT_GH_TOKEN are not set — skipping the GitHub rig on the public mirror"
+                exit 0 ;;
+              *)
+                echo "FLIGHT_GH_REPO / FLIGHT_GH_TOKEN are not set on this forge — the rig cannot run, and a rig that did not run must not report green" >&2
+                echo "add them under Settings -> Actions -> Secrets, or run the rig locally: ( cd test-rig/github && ./up.sh && ./smoke.sh && ./down.sh )" >&2
+                exit 1 ;;
+            esac
+          fi
+          echo "token-ish variables in this job: $(env | sed 's/=.*//' | grep -iE 'token' | sort | tr '\n' ' ')"
+          # The dispatcher prefers these env names over the rig's secrets.json (#177); an Actions
+          # job has a Forgejo token in its environment, which would 401 against this backend.
+          unset LS_TOKEN FLIGHT_TOKEN FORGEJO_TOKEN
+          cd test-rig/github
+          rc=0
+          ./up.sh && ./smoke.sh || rc=$?
+          # Always tear down: a red smoke run must not leave rig branches and open PRs behind.
+          ./down.sh || true
+          exit "$rc"
+
+  gitlab-rig:
+    name: gitlab rig (live project)
+    if: ${{ inputs.rigs == 'all' || contains(inputs.rigs, 'gitlab') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: alpine:3.22.6
+    steps:
+      - name: Setup tools
+        run: apk add --update npm bash curl jq git coreutils   # npm: actions/checkout is a JS action and needs node
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Up, smoke, down
+        env:
+          FLIGHT_GITLAB_TOKEN: ${{ secrets.FLIGHT_GITLAB_TOKEN }}
+          FLIGHT_GITLAB_API: ${{ secrets.FLIGHT_GITLAB_API }}
+          FLIGHT_GITLAB_PROJECT: ${{ secrets.FLIGHT_GITLAB_PROJECT }}
+          RIG_STRICT: '1'
+        run: |
+          set -uo pipefail
+          if [ -z "${FLIGHT_GITLAB_TOKEN:-}" ] || [ -z "${FLIGHT_GITLAB_PROJECT:-}" ]; then
+            case "${GITHUB_SERVER_URL:-}" in
+              https://github.com|https://github.com/)
+                echo "::notice::FLIGHT_GITLAB_* are not set — skipping the GitLab rig on the public mirror"
+                exit 0 ;;
+              *)
+                echo "FLIGHT_GITLAB_* are not set on this forge — the rig cannot run, and a rig that did not run must not report green" >&2
+                echo "add them under Settings -> Actions -> Secrets, or run the rig locally: ( cd test-rig/gitlab && ./up.sh && ./smoke.sh && ./down.sh )" >&2
+                exit 1 ;;
+            esac
+          fi
+          echo "token-ish variables in this job: $(env | sed 's/=.*//' | grep -iE 'token' | sort | tr '\n' ' ')"
+          # The dispatcher prefers these env names over the rig's secrets.json (#177); an Actions
+          # job has a Forgejo token in its environment, which would 401 against this backend.
+          unset LS_TOKEN FLIGHT_TOKEN FORGEJO_TOKEN
+          cd test-rig/gitlab
+          rc=0
+          ./up.sh && ./smoke.sh || rc=$?
+          ./down.sh || true
+          exit "$rc"
