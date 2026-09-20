@@ -11,4 +11,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # Check the branch out, as real workflows do and as the GitLab rig's job does: a run that
+      # never fetches its ref cannot notice the ref has gone (#185).
+      - uses: actions/checkout@v4
       - run: echo "rig ci ok for ${GITHUB_SHA}"

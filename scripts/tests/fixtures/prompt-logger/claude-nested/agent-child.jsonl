@@ -1,0 +1,4 @@
+{"type":"user","timestamp":"2026-09-19T22:22:00.000Z","isSidechain":true,"agentId":"child"}
+{"type":"assistant","timestamp":"2026-09-19T22:23:00.000Z","isSidechain":true,"agentId":"child","requestId":"creq_1","message":{"model":"claude-haiku-4-5-20251001","usage":{"input_tokens":2,"output_tokens":60,"cache_creation_input_tokens":10000,"cache_read_input_tokens":0}}}
+{"type":"user","timestamp":"2026-09-19T22:26:00.000Z","isSidechain":true,"agentId":"child"}
+{"type":"assistant","timestamp":"2026-09-19T22:27:00.000Z","isSidechain":true,"agentId":"child","requestId":"creq_2","message":{"model":"claude-haiku-4-5-20251001","usage":{"input_tokens":3,"output_tokens":40,"cache_creation_input_tokens":200,"cache_read_input_tokens":10000}}}

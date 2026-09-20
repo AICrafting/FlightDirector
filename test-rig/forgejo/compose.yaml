@@ -4,7 +4,8 @@
 services:
   forgejo:
     # Pinned to the current major for reproducibility; bump deliberately. Override per-run with FORGEJO_IMAGE.
-    image: ${FORGEJO_IMAGE:-code.forgejo.org/forgejo/forgejo:15}
+    # 16 is the floor: `ci log` reads per-job logs from /actions/jobs/{id}/logs, new in Forgejo 16.
+    image: ${FORGEJO_IMAGE:-code.forgejo.org/forgejo/forgejo:16}
     container_name: flight-rig-forgejo
     environment:
       FORGEJO__database__DB_TYPE: sqlite3
@@ -12,12 +13,33 @@ services:
       FORGEJO__server__DOMAIN: localhost
       FORGEJO__server__HTTP_PORT: "3000"
       FORGEJO__server__ROOT_URL: http://localhost:${RIG_PORT:-3000}/
-      FORGEJO__actions__ENABLED: "false"
+      FORGEJO__actions__ENABLED: "true"
       FORGEJO__log__LEVEL: warn
     ports:
       - "${RIG_PORT:-3000}:3000"
     volumes:
       - flight-rig-data:/data
 
+  # An Actions runner, so `ci watch` / `ci log` have real runs to read (#186). It executes
+  # jobs in HOST mode — as plain shell inside this throwaway container — so it needs neither
+  # the host's Docker socket nor docker-in-docker. That is enough for the rig's echo-level
+  # workflows and keeps the rig from handing a CI job control of the host's containers.
+  # The container idles until up.sh has registered it (which writes /data/.runner), then
+  # runs the daemon. It reaches Forgejo over the compose network as http://forgejo:3000.
+  runner:
+    image: ${FORGEJO_RUNNER_IMAGE:-code.forgejo.org/forgejo/runner:13}
+    container_name: flight-rig-runner
+    depends_on:
+      - forgejo
+    user: "0:0"
+    working_dir: /data
+    command:
+      - sh
+      - -c
+      - "while [ ! -f /data/.runner ]; do sleep 1; done; exec forgejo-runner daemon"
+    volumes:
+      - flight-rig-runner:/data
+
 volumes:
   flight-rig-data:
+  flight-rig-runner:

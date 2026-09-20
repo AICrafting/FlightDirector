@@ -144,13 +144,93 @@ def append_record(repo_root: Path, record: dict[str, Any], record_key: str) -> b
 		_lock_exclusive(lock)
 		if done_path.exists():
 			return False
-		with log_path.open("a", encoding="utf-8") as output:
-			json.dump(record, output, separators=(",", ":"), ensure_ascii=False)
-			output.write("\n")
-			output.flush()
-			os.fsync(output.fileno())
+		_write_row(log_path, record)
 		write_json_atomic(done_path, {"record_key": record_key})
 	return True
+
+
+USAGE_FIELDS = ("input_tokens", "output_tokens", "reasoning_output_tokens", "cache_creation_tokens", "cache_read_tokens")
+
+
+def append_increment(repo_root: Path, record: dict[str, Any]) -> bool:
+	"""Append what `record` adds to the rows already logged for its agent.
+
+	`record` carries a subagent's CUMULATIVE usage, and a subagent stops more than once:
+	when it parks on background work, again after each wake-up, and once more after
+	handing its report back. Every stop re-reads the whole transcript, so each row holds
+	only the usage beyond the agent's earlier rows — the rows of one agent always sum to
+	its transcript, however many stops there were, and a reader that simply adds rows
+	stays right. The earlier rows are read back from the ledger itself (under the lock),
+	so there is no side state to lose. A stop that adds nothing writes no row.
+	"""
+	missing = REQUIRED_RECORD_FIELDS.difference(record)
+	if missing:
+		raise ValueError(f"record is missing required fields: {', '.join(sorted(missing))}")
+
+	log_path = ledger_path(repo_root)
+	log_path.parent.mkdir(parents=True, exist_ok=True)
+	lock_path = state_directory() / f"ledger-{stable_key(log_path)}.lock"
+
+	with lock_path.open("a", encoding="utf-8") as lock:
+		_lock_exclusive(lock)
+		earlier = _agent_rows(log_path, record)
+		if record.get("input_tokens") is None and record.get("output_tokens") is None:
+			if earlier:
+				return False	# already on the ledger; one unmeasured row says all there is to say
+			_write_row(log_path, record)
+			return True
+		measured = [row for row in earlier if row.get("input_tokens") is not None or row.get("output_tokens") is not None]
+		grew = False
+		for field in USAGE_FIELDS:
+			value = record.get(field)
+			if not _is_number(value):
+				continue
+			record[field] = max(value - sum(row[field] for row in measured if _is_number(row.get(field))), 0)
+			grew = grew or record[field] > 0
+		if not grew:
+			return False
+		if _is_number(record.get("cost_usd")):
+			logged = sum(row["cost_usd"] for row in measured if _is_number(row.get("cost_usd")))
+			record["cost_usd"] = max(round(record["cost_usd"] - logged, 12), 0.0)
+		if measured:
+			record["part"] = len(measured) + 1
+		_write_row(log_path, record)
+	return True
+
+
+def _is_number(value: Any) -> bool:
+	return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _agent_rows(log_path: Path, record: dict[str, Any]) -> list[dict[str, Any]]:
+	"""The subagent rows already logged for this record's harness, session and agent."""
+	rows: list[dict[str, Any]] = []
+	turn_id = record["turn_id"]
+	try:
+		with log_path.open(encoding="utf-8") as ledger:
+			for line in ledger:
+				if turn_id not in line:
+					continue
+				try:
+					row = json.loads(line)
+				except json.JSONDecodeError:
+					continue
+				if (
+					isinstance(row, dict) and row.get("subagent") and row.get("turn_id") == turn_id
+					and row.get("session_id") == record["session_id"] and row.get("harness") == record["harness"]
+				):
+					rows.append(row)
+	except FileNotFoundError:
+		pass
+	return rows
+
+
+def _write_row(log_path: Path, record: dict[str, Any]) -> None:
+	with log_path.open("a", encoding="utf-8") as output:
+		json.dump(record, output, separators=(",", ":"), ensure_ascii=False)
+		output.write("\n")
+		output.flush()
+		os.fsync(output.fileno())
 
 
 def _lock_exclusive(handle, timeout: float = 60.0) -> None:

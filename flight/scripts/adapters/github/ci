@@ -150,35 +150,55 @@ case "$verb" in
     done
     ;;
 
-  # Dump the failed jobs' logs for a commit (or the latest failed run on a branch).
+  # Dump the failed jobs' logs for a PR, a commit, or the latest failed run on a branch.
   # Per-job logs are plain text via redirect — avoids the run-level .zip.
+  # A commit usually carries several runs (one per workflow), so --sha/--pr dump
+  # EVERY failed run on it rather than "the latest", which is as likely to be
+  # the green one (#138). `?branch=` matches a run's head_branch, which a
+  # pull_request run from a same-repo branch also carries, so --failed needs no
+  # fallback here.
   log)
-    sha=""; failed_branch=""
+    sha=""; failed_branch=""; pr=""
     while [ $# -gt 0 ]; do case "$1" in
       --sha)    sha="$2"; shift 2 ;;
+      --pr)     pr="$2"; shift 2 ;;
       --failed) failed_branch="$2"; shift 2 ;;
       *) die "ci log: unknown arg '$1'" ;;
     esac; done
-    [ -n "$sha" ] || [ -n "$failed_branch" ] || die "ci log: --sha or --failed required"
+    [ -n "$sha" ] || [ -n "$failed_branch" ] || [ -n "$pr" ] || die "ci log: --pr, --sha or --failed required"
+
+    if [ -n "$pr" ]; then
+      sha="$(_api GET "/pulls/${pr}" | jq -r '.head.sha // empty')"
+      [ -n "$sha" ] || die "ci log: could not resolve head sha for PR #${pr}"
+    fi
 
     if [ -n "$sha" ]; then
-      run_id="$(_api GET "/actions/runs?head_sha=${sha}&per_page=20" \
-        | jq -r '[.workflow_runs[]?] | sort_by(.run_started_at) | last | .id // empty')"
+      runs="$(_api GET "/actions/runs?head_sha=${sha}&per_page=20" \
+        | jq -c '[.workflow_runs[]?] | sort_by(.run_started_at, .id)')"
+      [ "$(printf '%s' "$runs" | jq 'length')" -gt 0 ] || die "ci log: no workflow run found"
+      run_ids="$(printf '%s' "$runs" | jq -r '.[] | select(.conclusion=="failure") | .id')"
+      if [ -z "$run_ids" ]; then
+        printf '%s' "$runs" | jq -r '"(no failed jobs for run \(map(.id|tostring)|join(", ")))"'
+        exit 0
+      fi
     else
-      run_id="$(_api GET "/actions/runs?branch=$(urlenc "$failed_branch")&status=failure&per_page=1" \
+      run_ids="$(_api GET "/actions/runs?branch=$(urlenc "$failed_branch")&status=failure&per_page=1" \
         | jq -r '.workflow_runs[0].id // empty')"
+      [ -n "$run_ids" ] || die "ci log: no workflow run found"
     fi
-    [ -n "$run_id" ] || die "ci log: no workflow run found"
 
-    job_ids="$(_api GET "/actions/runs/${run_id}/jobs?per_page=100" \
-      | jq -r '.jobs[]? | select(.conclusion=="failure") | .id')"
-    [ -n "$job_ids" ] || { echo "(no failed jobs for run ${run_id})"; exit 0; }
-
-    while IFS= read -r jid; do
-      [ -n "$jid" ] || continue
-      echo "── job ${jid} ──"
-      curl -sS -L "${GH_HEADERS[@]}" "${REPO_API}/actions/jobs/${jid}/logs" || true
-    done <<< "$job_ids"
+    while IFS= read -r run_id; do
+      [ -n "$run_id" ] || continue
+      echo "run ${run_id}"
+      job_ids="$(_api GET "/actions/runs/${run_id}/jobs?per_page=100" \
+        | jq -r '.jobs[]? | select(.conclusion=="failure") | .id')"
+      [ -n "$job_ids" ] || { echo "(no failed jobs for run ${run_id})"; continue; }
+      while IFS= read -r jid; do
+        [ -n "$jid" ] || continue
+        echo "── job ${jid} ──"
+        curl -sS -L "${GH_HEADERS[@]}" "${REPO_API}/actions/jobs/${jid}/logs" || true
+      done <<< "$job_ids"
+    done <<< "$run_ids"
     ;;
 
   *) die "unknown verb '${verb}' (ci: watch log)" ;;

@@ -2,11 +2,11 @@
 
 One rig per backend, each under its own folder, because the rigs are **not** uniform:
 
-- **Self-hostable** backends (`forgejo/`, and later `gitlab/`) run a disposable container —
+- **Self-hostable** backends (`forgejo/`) run a disposable container (plus an Actions runner) —
   `compose.yaml` + `up.sh`/`down.sh`.
-- **SaaS** backends (later `github/`, `jira/`, `asana/`) can't be containerized; their rigs
-  provision an ephemeral repo/token against a real test account via API, then tear it down —
-  no `compose.yaml`.
+- **SaaS** backends (`github/`, `gitlab/`, `jira/`) can't be containerized; their rigs run
+  against a real throwaway repo/project named in a gitignored `.env`, tag everything they create
+  (`[rig]`, `rig/*`), and tear only that down — no `compose.yaml`.
 
 What every rig has in common is the *output*: `up.sh` leaves a `.work/` directory — a throwaway
 git repo holding `.flightdirector/config.json` + `.flightdirector/secrets.json` pointed at the rig — which the
@@ -14,9 +14,10 @@ adapters then run against. `.work/` is gitignored for every backend.
 
 ```
 test-rig/
-  forgejo/    compose.yaml  up.sh  down.sh  smoke.sh  README.md   ← current
-  github/     up.sh  down.sh  smoke.sh  README.md                 (future, no compose)
-  …
+  forgejo/    compose.yaml  up.sh  down.sh  smoke.sh  workflows/  README.md   (container + runner)
+  github/     up.sh  down.sh  smoke.sh  workflows/  README.md                 (real repo, no compose)
+  gitlab/     up.sh  down.sh  smoke.sh  gitlab-ci*.yml  README.md             (real project)
+  jira/       up.sh  down.sh  smoke.sh  README.md                             (issues axis only)
 ```
 
 Scripts that sit at *this* level are backend-free — they need no `up.sh`, no container, and no
