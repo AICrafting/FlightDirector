@@ -15,6 +15,18 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
+- **`promoting-a-branch` Step 3 gates deferrals and guards the no-user-surface hatch** (#195). The
+  step gated on a test plan *existing*; nothing read the PR body for what it said it deliberately
+  did **not** do, so a PR could ship a "known gaps" list, merge, close its issue, and leave the
+  remainder tracked nowhere but a merged body. Step 3 now scans the assembled body for deferral
+  shapes and halts unless each one names an `#N` verified open — and states plainly that the issue
+  this PR closes does not count, since it is about to close and take the note with it. The
+  `- no user surface` escape hatch is likewise narrowed to an *inherently* absent surface
+  (infra, migration, refactor); a surface that exists but could not be reached from the default
+  seed is **obstructed**, and calls for the real plan, the precondition driven as a step in it, and
+  a successor issue for the durable fixture. `promoting-branches` carries the same two guards in
+  its batch `pr` path.
+
 - **The repo's three floating CI images are pinned** (#167). `alpine:latest` → `alpine:3.22.6`
   (so the two Linux legs differ only in the interpreter), `cytopia/yamllint:latest` →
   `cytopia/yamllint:1`, and `koalaman/shellcheck-alpine:latest` → the same image by digest. A run

@@ -26,7 +26,12 @@ See [flight-setup.md](../../references/flight-setup.md) and
   issue close/relabel is governed separately by the target stage's `closesIssues`/`issueStatus`
   (Step 5). A `pr` hop uses `Closes #N` only when the target stage closes issues, else `Ready #N`.
 - **Halt if you can't write a test plan** for a resolved issue on a `pr` hop — an unwritable
-  plan usually means the feature isn't reachable. Fix that before opening the PR.
+  plan usually means the feature isn't reachable. Fix that before opening the PR, and don't reach
+  for the `no user surface` hatch to get past it: that hatch is for an *inherently* absent
+  surface, never an obstructed one (Step 3).
+- **Never open a PR whose body defers work with no live tracker.** A "known gaps" or "out of
+  scope" note in a merged PR body is not a backlog. Every deferred item names an issue you have
+  verified open — and not the issue this PR is about to close (Step 3).
 - **Every git command is `git -C "$WT" …` / `git -C "$MAIN" …`. A bare `git` command is a bug,
   even if you think you're in the right directory.** A promotion juggles *two* checkouts — the
   feature worktree (`$WT`) and the one holding the target stage (`$MAIN`, or a throwaway) — and
@@ -92,7 +97,7 @@ git -C "$WT" log <target>..HEAD --oneline
 Record the `#N` that are actually *resolved* by this branch (judgment — a mention isn't a
 resolution). These drive the PR's `$KEYWORD #N` lines (see Step 4) and the test-plan block.
 
-## Step 3: Test plans (pr hops) — HALT if missing
+## Step 3: Test plans and deferrals (pr hops) — HALT if missing
 
 For each resolved `#N`, fetch the issue **and its comments** and draft a user-visible test plan.
 Scope corrections and acceptance changes live in the thread, and the work-ledger comments say
@@ -106,6 +111,43 @@ flight issues comments --number N
 Write one plan per issue (numbered steps + an `Expected:` line; or `- no user surface — verify
 via <cmd>` for pure infra). Present to the user: *use as-is / edit / blocker*. **If any resolved
 issue has no plan or escape hatch, STOP — do not open the PR.**
+
+### The `no user surface` hatch: absent vs obstructed
+
+The hatch is for an **inherently** absent surface — infra, migration, refactor, type tightening,
+log-only changes. There is nothing a user could drive, at any seed or state.
+
+It is **not** for a surface that exists but you could not reach from where you happened to be
+standing: "no seeded X", "needs an active session that isn't running", "the fixture only has Y".
+That is an **obstructed** surface, and taking the hatch there turns the halt that exists to catch
+an unverifiable change into a pass — the gate defeated through its own exemption. When obstructed:
+
+1. Write the real user-visible plan anyway.
+2. Drive the precondition as a numbered step inside it (seed the record, start the session).
+3. File a successor issue for the durable fixture, so the next agent isn't obstructed the same way.
+
+Both readings of "no user surface" are honest. Only the inherent one is what this hatch is for.
+
+### Deferral scan — before `pr open`
+
+The body drafted in Step 4 is the last place a deliberate omission is written down. Read it back
+before you post it and look for deferral shapes: `## Known gaps`, `## Out of scope`, "left for a
+separate pass", "follow-up", "not handled here", "deliberately not handled".
+
+Every deferred item needs a **live tracker** — an `#N` you have verified *open*, or an issue you
+file right then. `issues get` succeeds on a closed issue, so check state against the open list
+instead — fetched once into a variable, then matched with a here-string rather than piped into
+`grep -q` (a pipe into an early-exiting reader trips SC2337 under `set -o pipefail`):
+
+```
+OPEN="$(flight issues list --state open --limit 500 | cut -f1)"
+grep -qx "<N>" <<<"$OPEN"        # exit 0 → open, deferral is tracked; non-zero → HALT
+```
+
+A closed `#N` is a failure, not a pass. And **the issue this PR closes does not count as the
+tracker**: it is about to close and take the note with it, leaving the item recorded only in a
+merged PR body nobody has a reason to open again. **Halt if any deferred item has no live
+tracker** — file the successor issues, put their numbers in the body, then open the PR.
 
 ## Step 4: Promote
 
@@ -182,7 +224,10 @@ forking from the remote would silently drop those commits — STOP and report in
 > abort with "fatal: '<target>' is already checked out at …".
 
 **`pr` hop:** open a PR into the target stage and watch CI. Assemble the body in a scratchpad
-file (Summary + the `## Test plans` block + `$KEYWORD #N` lines — `Closes` when the target stage closes issues, else `Ready`), then:
+file (Summary + the `## Test plans` block + `$KEYWORD #N` lines — `Closes` when the target
+stage closes issues, else `Ready`). Run the Step 3 **deferral scan** over that file before it is
+posted: every "known gap" / "out of scope" item needs a verified-open `#N`, and the issue this PR
+closes doesn't count. Then:
 
 Resolve whether the **target stage** closes issues (drives the PR keyword *and* Step 5). `<i>` is
 the target stage's index:
