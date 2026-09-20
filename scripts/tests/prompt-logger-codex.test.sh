@@ -125,6 +125,7 @@ stop_event="$(jq -nc --arg cwd "$repo" --arg path "$FIXTURES/codex-main.jsonl" '
 invoke prompt "$prompt_event" "$repo" "$state"
 invoke stop "$stop_event" "$repo" "$state" 2>"$TEST_TMP/missing.err"
 assert_jq "wrong-turn transcript never supplies another turn's usage" '.turn_id == "turn-missing" and .input_tokens == null and .output_tokens == null and .reasoning_output_tokens == null and .cache_creation_tokens == null and .cache_read_tokens == null and .cost_usd == null' "$repo/.flightdirector/prompt-log.jsonl"
+assert_jq "null-usage row records why (#155)" '.usage_missing == "no-usage"' "$repo/.flightdirector/prompt-log.jsonl"
 if grep -q 'turn-missing' "$TEST_TMP/missing.err"; then ok "missing exact turn writes a visible warning"; else not_ok "missing exact turn writes a visible warning"; fi
 
 repo="$TEST_TMP/disabled"
