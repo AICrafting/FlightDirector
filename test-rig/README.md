@@ -62,8 +62,15 @@ Run workflow**, with the input `all`, or a space-separated subset (`github gitla
   authenticate to GitHub or GitLab with a *Forgejo* token and 401 on every call, while its own
   `up.sh` (which uses its own variable and curl directly) provisions happily. Each rig step
   therefore `unset`s the three names first. Remove that once #177 lands.
-- **The Forgejo rig needs docker + compose inside the job**, since it brings up its own instance
-  and runner with compose. Its job runs without a `container:` and probes first. On this forge's
-  runners the job itself runs in a container that has the docker **socket** but no docker **CLI**,
-  so the rig is skipped — and because a rig that did not run must not read as green, the job
-  fails rather than passing quietly. Run that one locally.
+- **The Forgejo rig drives the runner host's docker**, since it brings up its own instance and
+  Actions runner with compose. This forge runs jobs in a container that has the docker **socket**
+  but no docker **CLI**, so that job runs without a `container:` of its own and installs a
+  pinned, checksummed client (plus compose and `jq` — it cannot assume the image has them). The
+  daemon it talks to is the host's, which has two consequences worth knowing:
+  - the rig's containers are **siblings on the runner host**, not children of the job, so a run
+    that dies before teardown leaves `flight-rig-*` containers there; the job clears them before
+    it starts, and tears down in an `always()` step;
+  - the published port lands on the **host**, so `localhost` inside the job is the wrong address.
+    The job passes `RIG_HOST` (its default gateway, read from `/proc/net/route` — it is not the
+    same address every run) and `RIG_PORT=3737`. The compose network is unaffected: the runner
+    container still reaches Forgejo as `http://forgejo:3000`.
