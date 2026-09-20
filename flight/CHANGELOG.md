@@ -24,6 +24,18 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Fixed
 
+- **`ci log` can now show why a PR's CI is red** (#138). Two faults meant the documented failure
+  path of every `pr` hop — `ci log --failed "$BRANCH"` — found nothing on a repo whose workflows run
+  on pull requests. (1) The branch lookup asked for runs under `refs/heads/<branch>`, but a run
+  triggered by a pull-request event carries the PR ref, so it died with "no CI run found" straight
+  after `ci watch --pr` had reported `status=failure`. It now falls back to the branch's head commit
+  (Forgejo, and GitLab for merge-request pipelines; GitHub's branch filter already matched). (2)
+  `ci log --sha` took the *latest* run on the commit; with one run per workflow started in the same
+  second that was as often the green lint as the red tests, and it answered "(no failed jobs)" for
+  a commit whose CI was red. `--sha` now dumps every failed run on the commit. New: **`ci log --pr
+  N`**, resolving the head commit the way `ci watch --pr` does — the promotion skills now use it.
+  All three code backends.
+
 - **The prompt ledger no longer fills with unmeasurable subagent rows, and subagent output tokens
   are no longer undercounted** (#155, user-submitted). Two separate faults in the Claude Code
   producer. (1) Claude Code fires `SubagentStop` about every 30 seconds per running background

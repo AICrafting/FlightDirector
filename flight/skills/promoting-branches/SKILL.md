@@ -149,7 +149,8 @@ git -C "$SCRATCH/int-<zone>" push -u origin "$INT"
 # writable plan; then one $KEYWORD #N line per included issue (Closes if stages[0] closesIssues, else Ready).
 PR="$("$DISP" pr open --head "$INT" --base "$BASE" --title "Batch: <zone> (#<n>, #<n>, …)" --body-file "$SCRATCH/pr-<zone>.md" --model <your-model-id>)"
 # watch CI ("$DISP" ci watch --pr "<pr#>" …). Read the `status=` on the last line, NOT the exit code —
-# it exits 0 on any terminal verdict. status=failure → record the group FAILED and move on;
+# it exits 0 on any terminal verdict. status=failure → record the group FAILED ("$DISP" ci log --pr "<pr#>"
+# shows why) and move on;
 # status=skipped → nothing ran, so the group is NOT verified: report that to the user and leave the PR
 # open rather than treating not-failed as passed; status=success → merge on the gate, using stages[0]'s
 # configured strategy (default "merge" — never hard-code one):

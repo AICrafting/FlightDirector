@@ -161,50 +161,81 @@ case "$verb" in
     done
     ;;
 
-  # Dump the failed jobs' logs for a commit (or the latest failed run on a
-  # branch). Forgejo 16's Actions API serves per-job plaintext logs
-  # (/actions/jobs/{id}/logs) — jobs are listed per run, failed ones dumped.
+  # Dump the failed jobs' logs for a PR, a commit, or a branch. Forgejo 16's
+  # Actions API serves per-job plaintext logs (/actions/jobs/{id}/logs) — jobs
+  # are listed per run, failed ones dumped.
+  #
+  # Everything resolves to a SHA and then to EVERY failed run on it (#138). A
+  # commit usually carries several runs (one per workflow, often started in the
+  # same second), so "the latest run" is as likely to be the green lint as the
+  # red tests — `log` exists to show failures, so it looks for those.
   log)
-    sha=""; branch=""
+    sha=""; branch=""; pr=""
     while [ $# -gt 0 ]; do case "$1" in
       --sha)    sha="$2"; shift 2 ;;
+      --pr)     pr="$2"; shift 2 ;;
       --failed) branch="$2"; shift 2 ;;
       *) die "ci log: unknown arg '$1'" ;;
     esac; done
-    [ -n "$sha" ] || [ -n "$branch" ] || die "ci log: --sha SHA or --failed BRANCH required"
+    [ -n "$sha" ] || [ -n "$branch" ] || [ -n "$pr" ] || die "ci log: --pr N, --sha SHA or --failed BRANCH required"
 
+    # --pr is authoritative, exactly as in `watch`: the PR's head commit is the
+    # SHA its runs report.
+    if [ -n "$pr" ]; then
+      sha="$(_api GET "/pulls/${pr}" | jq -r '.head.sha // empty')"
+      [ -n "$sha" ] || die "ci log: could not resolve head sha for PR #${pr}"
+    fi
+
+    runs="[]"
+    if [ -z "$sha" ]; then
+      # The `refs/heads/` prefix is ours and stays literal; only the branch name
+      # the caller passed is encoded, so an ordinary branch sends the same URL
+      # it always did and `feat/a b` no longer breaks the request.
+      runs="$(_api GET "/actions/runs?ref=refs/heads/$(urlenc "$branch")&status=failure&limit=1" \
+        | jq -c '[.workflow_runs[0] // empty]')"
+      if [ "$(printf '%s' "$runs" | jq 'length')" -eq 0 ]; then
+        # A run triggered by a pull_request event carries the PR ref, never
+        # refs/heads/<branch>, so a repo whose workflows only run on PRs has
+        # nothing under the branch ref. Its runs are still on the branch's head
+        # commit — go and look there.
+        sha="$(_api GET "/branches/$(urlenc "$branch")" 2>/dev/null | jq -r '.commit.id // empty' 2>/dev/null || true)"
+        [ -n "$sha" ] || die "ci log: no CI run found for ${branch}"
+      fi
+    fi
     if [ -n "$sha" ]; then
       # ?head_sha= is an exact match — only usable for a full 40-char SHA; the
       # client-side startswith keeps short prefixes working (and harmlessly
       # re-checks the full-SHA case).
       filter=""; [ "${#sha}" -eq 40 ] && filter="head_sha=${sha}&"
-      run="$(_api GET "/actions/runs?${filter}limit=20" \
+      runs="$(_api GET "/actions/runs?${filter}limit=20" \
         | jq -c --arg sha "$sha" '[.workflow_runs[]? | select((.commit_sha // "")|startswith($sha))]
-          | sort_by(.started // .created) | last // empty')"
-    else
-      # The `refs/heads/` prefix is ours and stays literal; only the branch name
-      # the caller passed is encoded, so an ordinary branch sends the same URL
-      # it always did and `feat/a b` no longer breaks the request.
-      run="$(_api GET "/actions/runs?ref=refs/heads/$(urlenc "$branch")&status=failure&limit=1" \
-        | jq -c '.workflow_runs[0] // empty')"
+          | sort_by(.started // .created, .id)')"
+      [ "$(printf '%s' "$runs" | jq 'length')" -gt 0 ] || die "ci log: no CI run found for ${branch:-${pr:+PR #$pr }$sha}"
+      failed_runs="$(printf '%s' "$runs" | jq -c '[.[] | select(.status=="failure")]')"
+      if [ "$(printf '%s' "$failed_runs" | jq 'length')" -eq 0 ]; then
+        printf '%s' "$runs" | jq -r '"(no failed jobs for run \(map(.id|tostring)|join(", ")): \(map(.status)|unique|join("/")))"'
+        exit 0
+      fi
+      runs="$failed_runs"
     fi
-    [ -n "$run" ] || die "ci log: no CI run found for ${sha:-$branch}"
-    run_id="$(printf '%s' "$run" | jq -r '.id')"
-    printf '%s' "$run" | jq -r '"run \(.id): status=\(.status)  \(.html_url // "")"'
 
     # Job list is a bare array; a job's terminal failure state is status=failure
     # (Forgejo folds conclusion into status).
-    failed_jobs="$(_api GET "/actions/runs/${run_id}/jobs" \
-      | jq -c '[.[]? | select(.status=="failure")]')"
-    if [ "$(printf '%s' "$failed_jobs" | jq 'length')" -eq 0 ]; then
-      echo "(no failed jobs for run ${run_id})"; exit 0
-    fi
-    printf '%s' "$failed_jobs" | jq -r '.[] | "\(.id)\t\(.name // "?")"' \
-    | while IFS="$(printf '\t')" read -r jid jname; do
-      echo "── job ${jid}: ${jname} ──"
-      _api GET "/actions/jobs/${jid}/logs" || true
-      echo
-    done
+    while IFS= read -r run; do
+      [ -n "$run" ] || continue
+      run_id="$(printf '%s' "$run" | jq -r '.id')"
+      printf '%s' "$run" | jq -r '"run \(.id): status=\(.status)  \(.html_url // "")"'
+      failed_jobs="$(_api GET "/actions/runs/${run_id}/jobs" \
+        | jq -c '[.[]? | select(.status=="failure")]')"
+      if [ "$(printf '%s' "$failed_jobs" | jq 'length')" -eq 0 ]; then
+        echo "(no failed jobs for run ${run_id})"; continue
+      fi
+      while IFS="$(printf '\t')" read -r jid jname; do
+        echo "── job ${jid}: ${jname} ──"
+        _api GET "/actions/jobs/${jid}/logs" || true
+        echo
+      done < <(printf '%s' "$failed_jobs" | jq -r '.[] | "\(.id)\t\(.name // "?")"')
+    done < <(printf '%s' "$runs" | jq -c '.[]')
     ;;
 
   *) die "unknown verb '${verb}' (ci: watch log)" ;;

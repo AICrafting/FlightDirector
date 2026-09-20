@@ -1,0 +1,20 @@
+---
+# Written by test-rig/github/smoke.sh onto a rig/* HEAD branch (never the default branch).
+# Runs on the rig pull request and fails while a `rig-fail` file exists on the branch, so
+# `flight ci log` has a real red pull_request-event run to find (#138).
+name: rig-pr-red
+on:
+  pull_request:
+    branches:
+      - 'rig/**'
+jobs:
+  red:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          if [ -f rig-fail ]; then
+            echo "RIG-RED-OUTPUT rig-fail is present on ${GITHUB_SHA}"
+            exit 1
+          fi
+          echo "rig-fail is gone — passing"

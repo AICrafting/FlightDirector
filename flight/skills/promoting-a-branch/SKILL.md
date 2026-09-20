@@ -233,7 +233,8 @@ flight ci watch --pr "$PR_NUM" \
 Read the verdict off the `status=` field of the last line, **not** off the exit code — `ci watch`
 exits 0 on every terminal verdict and non-zero only on a timeout. There are three:
 
-- `status=failure` — `ci log --failed "$BRANCH"`, fix, push, re-watch.
+- `status=failure` — `ci log --pr "$PR_NUM"` (every failed run on the PR's head commit — the same
+  commit `ci watch --pr` just judged), fix, push, re-watch.
 - `status=success` — tell the user **"CI passed — ready to merge #$PR_NUM."** If `skipped=` is
   non-zero, say so as well (**"CI passed, N of M runs skipped"**): part of the suite did not run.
 - `status=skipped` — **every** run was skipped, so CI verified *nothing*. This is not a pass and
