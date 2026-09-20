@@ -13,6 +13,21 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+
+- **A repo can nominate a starting status for newly filed issues** (#193). `setting-up-a-repo`
+  now offers it: a freshly filed issue gets a `status/*` label so a board can tell "nobody has
+  looked at this yet" apart from "someone forgot the label", and "what is untriaged?" becomes a
+  label query. The suggested name is `status/new`, but like every other status role it is
+  **mappable** — point the role at whatever you already call that state (`status/triage`,
+  `status/open`, `status/backlog`), and an equivalent label you already have is adopted rather
+  than duplicated. **Opt-in and off unless asked for**: with no `labels.status.new` in the config
+  nothing changes, which is every repo configured before this. When it is on, `flight issues
+  create` applies the label; passing a `status/*` label of your own leaves it alone, and
+  `--no-status` skips it for one issue. It is an ordinary status, so the first `set-status` —
+  normally when `working-an-issue` starts — removes it, and `triaging-issues` deliberately does
+  **not** treat it as "already in the workflow". Issues filed outside flight do not get it.
+
 ### Changed
 
 - **`promoting-a-branch` Step 3 gates deferrals and guards the no-user-surface hatch** (#195). The

@@ -132,6 +132,11 @@ flight issues create \
   --model <your-model-id>
 ```
 
+If the repo configured the **`new` status role** (`labels.status.new` — opt-in, offered by
+`setting-up-a-repo`), the dispatcher adds that label here automatically, so a freshly filed issue
+is not indistinguishable from one whose status was forgotten. Pass a `status/*` label of your own
+and it is left alone; `--no-status` skips it for one issue. Nothing to do in this skill.
+
 `--model` (your own model id, e.g. `claude-fable-5-1`) lets the dispatcher sign the body
 `🤖 via FlightDirector:flight@<version> with <Model/ver>`; pass it on `update` and `comment` too.
 It prints the new issue `number`. Report: *"Created #N: [title]"*.
