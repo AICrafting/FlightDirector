@@ -31,7 +31,7 @@ See [flight-setup.md](../../references/flight-setup.md) and
   surface, never an obstructed one (Step 3).
 - **Never open a PR whose body defers work with no live tracker.** A "known gaps" or "out of
   scope" note in a merged PR body is not a backlog. Every deferred item names an issue you have
-  verified open — and not the issue this PR is about to close (Step 3).
+  verified open — never one this PR resolves, whether it closes now or at a later stage (Step 3).
 - **Every git command is `git -C "$WT" …` / `git -C "$MAIN" …`. A bare `git` command is a bug,
   even if you think you're in the right directory.** A promotion juggles *two* checkouts — the
   feature worktree (`$WT`) and the one holding the target stage (`$MAIN`, or a throwaway) — and
@@ -144,10 +144,12 @@ OPEN="$(flight issues list --state open --limit 500 | cut -f1)"
 grep -qx "<N>" <<<"$OPEN"        # exit 0 → open, deferral is tracked; non-zero → HALT
 ```
 
-A closed `#N` is a failure, not a pass. And **the issue this PR closes does not count as the
-tracker**: it is about to close and take the note with it, leaving the item recorded only in a
-merged PR body nobody has a reason to open again. **Halt if any deferred item has no live
-tracker** — file the successor issues, put their numbers in the body, then open the PR.
+A closed `#N` is a failure, not a pass. And **an issue this PR resolves does not count as the
+tracker** — not even on a `Ready #N` hop where it stays open for now. It closes when the work
+reaches a closing stage and takes the note with it, leaving the item recorded only in a merged PR
+body nobody has a reason to open again. Being open *today* is not the test; surviving the work is.
+**Halt if any deferred item has no live tracker** — file the successor issues, put their numbers
+in the body, then open the PR.
 
 ## Step 4: Promote
 
@@ -226,8 +228,8 @@ forking from the remote would silently drop those commits — STOP and report in
 **`pr` hop:** open a PR into the target stage and watch CI. Assemble the body in a scratchpad
 file (Summary + the `## Test plans` block + `$KEYWORD #N` lines — `Closes` when the target
 stage closes issues, else `Ready`). Run the Step 3 **deferral scan** over that file before it is
-posted: every "known gap" / "out of scope" item needs a verified-open `#N`, and the issue this PR
-closes doesn't count. Then:
+posted: every "known gap" / "out of scope" item needs a verified-open `#N`, and an issue this PR
+resolves doesn't count. Then:
 
 Resolve whether the **target stage** closes issues (drives the PR keyword *and* Step 5). `<i>` is
 the target stage's index:
