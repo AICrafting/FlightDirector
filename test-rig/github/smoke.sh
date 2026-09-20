@@ -64,7 +64,7 @@ grep -q "rig comment" <<<"$CMTS" && ok "comments returns the posted body" || no 
 grep -q $'\t' < <(head -1 <<<"$CMTS") && ok "comments header is author⇥timestamp TSV" || no "comments header is TSV" "$(head -1 <<<"$CMTS")"
 lsp issues close --number "$N" && ok "close exits 0" || no "close exits 0"
 
-echo "── pr open / merge (rig branches off main; main untouched) ──"
+echo "── pr open (rig branches off main; main untouched) ──"
 MAIN_SHA="$(curl -fsS "${H[@]}" "$REPO_API/git/ref/heads/main" | jq -r '.object.sha')"
 [[ "$MAIN_SHA" =~ ^[0-9a-f]{40}$ ]] && ok "read main sha for rig branch setup" || no "could not read main sha — pr/ci setup will fail" "$MAIN_SHA"
 BASE="rig/$TS-base"; HEAD="rig/$TS-head"
@@ -79,16 +79,22 @@ HEAD_SHA="$(curl -fsS "${H[@]}" "$REPO_API/git/ref/heads/$HEAD" | jq -r '.object
 PR="$(lsp pr open --head "$HEAD" --base "$BASE" --title "[rig] pr $TS" --body "rig pr")"
 prnum="$(awk -F'\t' '{print $1}' <<<"$PR")"
 [[ "$prnum" =~ ^[0-9]+$ ]] && ok "pr open returns number⇥url ($prnum)" || no "pr open returns number⇥url" "got '$PR'"
-lsp pr merge --number "$prnum" --strategy squash && ok "pr merge exits 0" || no "pr merge exits 0"
 
+# Watch BEFORE merging, the order a real promotion uses (#185): the seeded workflow checks
+# the branch out, and a repo that deletes head branches on merge would leave it nothing to
+# fetch — which is how the GitLab rig's push pipeline failed on every run.
 echo "── ci watch (the seeded workflow on the rig push) ──"
-LINES="$(timeout 180 bash -c "cd '$WORK' && '$DISP' ci watch --sha '$HEAD_SHA'" || true)"
+LINES="$(cd "$WORK" && "$DISP" ci watch --sha "$HEAD_SHA" --timeout 180 2>&1 || true)"
 grep -qE "^ci runs=[0-9]+ .*status=" <<<"$LINES" && ok "ci watch streams aggregate status lines" || no "ci watch streams aggregate status lines" "$LINES"
-if grep -q "status=success" <<<"$LINES"; then
-  ok "ci watch reaches success"
+if grep -qE "status=(success|failure|skipped)" < <(tail -1 <<<"$LINES"); then
+  # A run reached a verdict, so anything but success is a real failure, not a slow runner.
+  grep -q "status=success" < <(tail -1 <<<"$LINES") && ok "ci watch reaches success" || no "ci watch reaches success" "$(tail -1 <<<"$LINES")"
 else
-  printf '\033[33m  ⚠ ci watch did not reach success (soft — Actions may be slow)\033[0m\n'
+  printf '\033[33m  ⚠ ci watch reached no verdict (soft — Actions may be slow)\033[0m\n'
 fi
+
+echo "── pr merge ──"
+lsp pr merge --number "$prnum" --strategy squash && ok "pr merge exits 0" || no "pr merge exits 0"
 
 echo "── ci log on a red pull_request run (#138) ──"
 # A PR whose head carries two pull_request workflows — one red (while `rig-fail` exists),
