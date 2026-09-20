@@ -1,0 +1,15 @@
+---
+# Written by test-rig/forgejo/smoke.sh beside rig-pr-red.yml. Always passes, on the same
+# commit and at the same moment — the green run `ci log --sha` used to hand back instead of
+# the red one (#138).
+name: rig-pr-green
+on:
+  pull_request:
+    branches:
+      - 'rig/**'
+jobs:
+  green:
+    runs-on: rig
+    steps:
+      - shell: sh
+        run: echo "RIG-GREEN-OUTPUT ok for ${GITHUB_SHA}"

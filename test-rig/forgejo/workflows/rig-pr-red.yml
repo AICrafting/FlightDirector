@@ -1,0 +1,26 @@
+---
+# Written by test-rig/forgejo/smoke.sh onto a rig/* HEAD branch. Runs on the rig pull request
+# and fails while a `rig-fail` file exists on that commit, so `flight ci log` has a real red
+# pull_request-event run to find (#138, #186).
+#
+# The runner executes in host mode (`runs-on: rig`), so there is no node for
+# actions/checkout: the job asks Forgejo for the file over the compose network instead.
+name: rig-pr-red
+on:
+  pull_request:
+    branches:
+      - 'rig/**'
+jobs:
+  red:
+    runs-on: rig
+    steps:
+      - shell: sh
+        run: |
+          url="http://forgejo:3000/${GITHUB_REPOSITORY}/raw/commit/${RIG_SHA}/rig-fail"
+          if wget -q -O /dev/null "$url"; then
+            echo "RIG-RED-OUTPUT rig-fail is present on ${RIG_SHA}"
+            exit 1
+          fi
+          echo "rig-fail is gone — passing"
+        env:
+          RIG_SHA: ${{ github.event.pull_request.head.sha }}
