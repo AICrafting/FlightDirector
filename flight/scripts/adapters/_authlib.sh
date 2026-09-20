@@ -39,7 +39,8 @@ mask() { printf '%.8s…' "$1"; }
 
 # token_desc — the masked token plus WHERE it came from (#177). LS_TOKEN_SOURCE
 # is exported by the dispatcher and names either an env var ("$FORGEJO_TOKEN") or
-# the secrets file's repo-relative path. Every adapter prints it through this one
+# the secrets file's path, which resolves from wherever the caller ran — absolute
+# for the repo's own file (#196). Every adapter prints it through this one
 # helper so the four never disagree on the wording, and so the prefix stops being
 # a diagnostic you can only use by hand-comparing it against the secrets file.
 token_desc() { printf '%s (from %s)' "$(mask "$LS_TOKEN")" "${LS_TOKEN_SOURCE:-an unrecorded source}"; }

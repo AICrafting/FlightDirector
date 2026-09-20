@@ -336,10 +336,19 @@ LS_CI_QUEUE_TIMEOUT="${LS_CI_QUEUE_TIMEOUT:-$(jq -r '.code.ciQueueTimeout // emp
 #
 # The resolution ORDER is deliberately unchanged (#177) — env-over-file is the right
 # default. What the chain also records now is WHICH source won, in LS_TOKEN_SOURCE
-# (an env var name, or the secrets file's repo-relative path), exported for the
-# adapters so `auth check` can name it. Silence was the bug: a token exported for a
-# different forge surfaced only as a flat 401, with the secrets file as the obvious
-# — and wrong — suspect.
+# (an env var name, or the secrets file's path as resolved — absolute for the repo's
+# own file, or exactly what `--secrets` was given), exported for the adapters so
+# `auth check` can name it. Silence was the bug: a token exported for a different
+# forge surfaced only as a flat 401, with the secrets file as the obvious — and
+# wrong — suspect.
+#
+# The path is NOT abbreviated to $sec_rel (#196). `AGENTS.md` has every issue worked
+# in a linked worktree, so that is the dominant place `auth check` runs, and the
+# gitignored secrets file lives only in the main checkout: a repo-relative name there
+# is a path the reader cannot `cat`, which is one step worse than saying nothing. The
+# tracked-by-git warning above keeps $sec_rel on purpose — a TRACKED file is checked
+# out in every worktree at that path, and repo-relative is the form you would paste
+# into .gitignore, which is what that warning asks for.
 LS_TOKEN_SOURCE=""
 if   [ -n "${LS_TOKEN:-}" ];      then LS_TOKEN_SOURCE='$LS_TOKEN'
 elif [ -n "${FLIGHT_TOKEN:-}" ];  then LS_TOKEN="$FLIGHT_TOKEN";  LS_TOKEN_SOURCE='$FLIGHT_TOKEN'
@@ -348,7 +357,7 @@ else
   LS_TOKEN=""
   if [ -f "$sec" ]; then
     LS_TOKEN="$(jq -r --arg a "$axis" '(.[$a].token) // (.code.token) // empty' "$sec")"
-    if [ -n "$LS_TOKEN" ]; then LS_TOKEN_SOURCE="$sec_rel"; fi
+    if [ -n "$LS_TOKEN" ]; then LS_TOKEN_SOURCE="$sec"; fi
   fi
 fi
 
@@ -364,7 +373,7 @@ fi
 if [ "$LS_TOKEN_SOURCE" = '$FORGEJO_TOKEN' ] && [ -f "$sec" ]; then
   shadowed_token="$(jq -r --arg a "$axis" '(.[$a].token) // (.code.token) // empty' "$sec" 2>/dev/null || printf '')"
   if [ -n "$shadowed_token" ] && [ "$shadowed_token" != "$LS_TOKEN" ]; then
-    echo "flight: note — the legacy \$FORGEJO_TOKEN is set and overrides $sec_rel, which holds a different token; an auth failure here is about the environment variable, not the file. Unset it, or use \$FLIGHT_TOKEN if the override is deliberate." >&2
+    echo "flight: note — the legacy \$FORGEJO_TOKEN is set and overrides $sec, which holds a different token; an auth failure here is about the environment variable, not the file. Unset it, or use \$FLIGHT_TOKEN if the override is deliberate." >&2
   fi
   unset shadowed_token
 fi

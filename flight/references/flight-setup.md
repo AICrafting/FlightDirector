@@ -338,6 +338,18 @@ Token precedence: `LS_TOKEN` or `FLIGHT_TOKEN` in the environment override every
 (`FORGEJO_TOKEN` is still honoured as the legacy name); otherwise the secrets file (the axis's
 token, inheriting `code`'s).
 
+**Not sure which token is in play? Run `flight auth check`** — it names the source it used
+beside the masked token, either the env var (`(from $FLIGHT_TOKEN)`) or the secrets file's full
+path (`(from /path/to/repo/.flightdirector/secrets.json)`). The path is absolute on purpose: the
+secrets file is gitignored, so it exists only in the main checkout and a repo-relative name
+would not resolve from a linked worktree. Reach for this before assuming a 401 is about the
+file — an old export is the likelier culprit, and the check says so outright.
+
+One shadowing case is loud enough not to wait for `auth check`: when the legacy `FORGEJO_TOKEN`
+is set *and* the secrets file holds a different token, every verb prints a note on stderr saying
+the environment variable won. The backend-neutral `LS_TOKEN` / `FLIGHT_TOKEN` stay silent there
+— overriding with those is deliberate, and a two-forge setup should not be nagged on every call.
+
 ### `.flightdirector/config.local.json` — optional, gitignored
 
 A per-machine / per-person override of `config.json`, on the same footing as Claude Code's
