@@ -59,7 +59,7 @@ grep -q "rig comment" <<<"$CMTS" && ok "comments returns the posted body" || no 
 grep -q $'\t' < <(head -1 <<<"$CMTS") && ok "comments header is author⇥timestamp TSV" || no "comments header is TSV" "$(head -1 <<<"$CMTS")"
 lsp issues close --number "$N" && ok "close exits 0" || no "close exits 0"
 
-echo "── pr (MR) open / merge (rig branches off default; default untouched) ──"
+echo "── pr (MR) open (rig branches off default; default untouched) ──"
 BASE="rig/$TS-base"; HEAD="rig/$TS-head"
 for b in "$BASE" "$HEAD"; do
   curl -fsS "${H[@]}" -X POST "$PROJECT_API/repository/branches?branch=$(printf '%s' "$b" | jq -sRr @uri)&ref=$DEFAULT_BRANCH" >/dev/null
@@ -72,6 +72,24 @@ MR="$(lsp pr open --head "$HEAD" --base "$BASE" --title "[rig] pr $TS" --body "r
 mrnum="$(awk -F'\t' '{print $1}' <<<"$MR")"
 [[ "$mrnum" =~ ^[0-9]+$ ]] && ok "pr open returns number⇥url ($mrnum)" || no "pr open returns number⇥url" "got '$MR'"
 
+# Watch BEFORE merging, the order a real promotion uses (#185). This project removes the
+# source branch on merge (`remove_source_branch_after_merge`), and a runner picks the push
+# pipeline's job up a few seconds after the push — merge first and its fetch of
+# refs/heads/<branch> finds nothing, so the job dies with exit 128 before running a line of
+# its script and the success path is never exercised.
+echo "── ci watch (the seeded pipeline on the rig push) ──"
+LINES="$(cd "$WORK" && "$DISP" ci watch --sha "$HEAD_SHA" --timeout 150 2>&1 || true)"
+if grep -qE "ci runs=[0-9]+ .*status=(success|failure|skipped)" <<<"$LINES"; then
+  ok "ci watch streams aggregate status lines"
+  # A pipeline ran to a verdict, so anything but success is a real failure, not a slow runner.
+  grep -q "status=success" < <(tail -1 <<<"$LINES") && ok "ci watch reaches success" \
+    || no "ci watch reaches success" "$(tail -1 <<<"$LINES")"
+else
+  printf '\033[33m  ⚠ ci watch reached no verdict (soft — gitlab.com shared runners may be unavailable for this project)\033[0m\n'
+  printf '\033[33m    %s\033[0m\n' "$(tail -1 <<<"$LINES")"
+fi
+
+echo "── pr (MR) merge ──"
 # GitLab computes MR mergeability asynchronously; retry briefly.
 merged=0
 for _ in $(seq 1 10); do
@@ -79,17 +97,6 @@ for _ in $(seq 1 10); do
   sleep 2
 done
 [ "$merged" = 1 ] && ok "pr merge exits 0" || no "pr merge exits 0"
-
-echo "── ci watch (the seeded pipeline on the rig push) ──"
-LINES="$(cd "$WORK" && "$DISP" ci watch --sha "$HEAD_SHA" --timeout 150 2>&1 || true)"
-if grep -qE "ci runs=[0-9]+ " <<<"$LINES"; then
-  ok "ci watch streams aggregate status lines"
-  grep -q "status=success" <<<"$LINES" && ok "ci watch reaches success" \
-    || printf '\033[33m  ⚠ ci watch ran but no success verdict (soft — pipeline may fail/skip)\033[0m\n'
-else
-  printf '\033[33m  ⚠ ci watch produced no pipeline line (soft — gitlab.com shared runners may be unavailable for this project)\033[0m\n'
-  printf '\033[33m    %s\033[0m\n' "$(head -1 <<<"$LINES")"
-fi
 
 echo "── ci log on a red merge-request pipeline (#138) ──"
 # An MR whose head carries an MR-only .gitlab-ci.yml with a red job (while `rig-fail`
