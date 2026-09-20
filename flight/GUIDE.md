@@ -210,7 +210,7 @@ what came through the workflow and from which version:
 
 ```
 ---
-via FlightDirector:flight@0.15.0 with Fable/5.1
+🤖 via FlightDirector:flight@0.15.0 with Fable/5.1
 ```
 
 The `with …` part names the model the skill was running (it passes its own id as `--model`);

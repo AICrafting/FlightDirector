@@ -13,7 +13,53 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Changed
+
+- **The signature flight appends to issue, comment and PR bodies now starts with 🤖** (#183):
+  `🤖 via FlightDirector:flight@<version> with <Model/ver>`, so agent-written text is recognisable
+  at a glance. Re-signing still replaces rather than stacks: an `issues update` / `pr update` over
+  a body signed in any earlier shape (bare, `via …`, or `🤖 via …`) ends with exactly one
+  signature. `--no-signature` and `code.signature.enabled: false` are unchanged. Anything of yours
+  that matches the signature text should allow for the prefix.
+
 ### Fixed
+
+- **`ci log` can now show why a PR's CI is red** (#138). Two faults meant the documented failure
+  path of every `pr` hop — `ci log --failed "$BRANCH"` — found nothing on a repo whose workflows run
+  on pull requests. (1) The branch lookup asked for runs under `refs/heads/<branch>`, but a run
+  triggered by a pull-request event carries the PR ref, so it died with "no CI run found" straight
+  after `ci watch --pr` had reported `status=failure`. It now falls back to the branch's head commit
+  (Forgejo, and GitLab for merge-request pipelines; GitHub's branch filter already matched). (2)
+  `ci log --sha` took the *latest* run on the commit; with one run per workflow started in the same
+  second that was as often the green lint as the red tests, and it answered "(no failed jobs)" for
+  a commit whose CI was red. `--sha` now dumps every failed run on the commit. New: **`ci log --pr
+  N`**, resolving the head commit the way `ci watch --pr` does — the promotion skills now use it.
+  All three code backends.
+
+- **The prompt ledger no longer fills with unmeasurable subagent rows, and subagent output tokens
+  are no longer undercounted** (#155, user-submitted). Two separate faults in the Claude Code
+  producer. (1) Claude Code fires `SubagentStop` about every 30 seconds per running background
+  agent for an internal helper that has no `agent_type` and never gets a transcript on disk; the
+  hook wrote a null row for each, so a batch run showed "997 of 1,007 rows had no usage" while its
+  ten real workers were in fact measured. Such a stop now writes no row, and `prompt-log summary`
+  sets the rows older versions already logged aside as `helper_stop_rows` rather than counting
+  them as unmeasured. (2) The per-request de-duplication kept the *first* content block of each
+  request, but in a subagent transcript that block carries the streaming-start placeholder
+  (`output_tokens: 8`) and only the last carries the real count — one worker's 33,686 output
+  tokens were logged as 8,427. The producer now keeps the block with the most output tokens.
+  Costs logged for subagents before this fix are therefore low on the output side. Also: a
+  null-usage row now records why (`usage_missing`: `no-path` / `unreadable` / `no-usage`, both
+  harnesses) and the summary names the causes instead of always saying "hook could not read the
+  transcript"; and the parent-transcript fallback only counts the stopping agent's own entries.
+  (3) Claude Code fires `SubagentStop` for a real agent several times — each time it parks on a
+  background command or a child agent, and again after it hands its report back — and the ledger
+  kept only the first, so a subagent's cost stopped counting at its first pause: 13–28% low in a
+  measured capture, and far more for a worker that backgrounds a long CI watch early. Each stop
+  now logs the usage beyond that agent's earlier rows (`part: 2`, `3`, … from the second row), so
+  an agent's rows always sum to its transcript. Agents launched by other agents were already
+  logged on their own; their rows now carry `parent_agent_id` and `spawn_depth`, and the summary
+  note reads "N subagent row(s) from M agent(s)". Anything that sums ledger rows stays correct;
+  anything that assumed one row per agent should count distinct `turn_id`s instead.
 
 - **`ci watch` no longer reports a run where nothing executed as green** (#150). `skipped` used to
   be folded into the success side of the aggregate, so a workflow whose runs were all skipped (a

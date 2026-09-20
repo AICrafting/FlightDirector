@@ -1,0 +1,21 @@
+---
+# Written by test-rig/gitlab/smoke.sh as .gitlab-ci.yml on a rig/* HEAD branch (never the
+# default branch). Merge-request pipelines only: their ref is refs/merge-requests/<iid>/head,
+# never the branch — the shape `flight ci log --failed <branch>` could not see (#138).
+# `rig-red` fails while a `rig-fail` file exists; `rig-green` always passes.
+rig-red:
+  stage: test
+  image: alpine:latest
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - if [ -f rig-fail ]; then echo "RIG-RED-OUTPUT rig-fail is present on $CI_COMMIT_SHA"; exit 1; fi
+    - echo "rig-fail is gone - passing"
+
+rig-green:
+  stage: test
+  image: alpine:latest
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - echo "RIG-GREEN-OUTPUT ok for $CI_COMMIT_SHA"

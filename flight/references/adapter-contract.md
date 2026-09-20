@@ -196,7 +196,7 @@ skills exercise, and the token's expiry where the backend exposes it. Rules:
 | Verb    | Args                                              | stdout |
 |---------|---------------------------------------------------|--------|
 | `watch` | `--pr N` \| `--sha SHA` `[--status-file PATH] [--timeout SECS]` | one line per state change: `ci runs=<n> pending=<p> failed=<f> skipped=<s> status=<pending\|success\|failure\|skipped>`; **aggregates all runs** for the SHA — stays watching while any is pending, verdict is `failure` if any run failed. Exits 0 once none pending (the exit code says a terminal state was reached, not that it was green — read `status=`). **Skipped is its own verdict, never a pass**: `skipped` runs are counted on their own axis, and a SHA whose runs were *all* skipped reports `status=skipped` rather than `success`, because nothing executed. A partial skip still reports `success`, with `skipped=<s>` naming how much did not run. `--pr` resolves the PR's head SHA (the SHA the run reports — prefer it; a local `--sha` may be unpushed). **Two clocks**: `--timeout` (env `LS_CI_WATCH_TIMEOUT` / config `code.ciWatchTimeout`; default 900; 0 disables) bounds how long a run may **execute**, while `--queue-timeout` (env `LS_CI_QUEUE_TIMEOUT` / config `code.ciQueueTimeout`; default 3600; 0 disables) bounds time in which every job of every non-terminal run is waiting for a runner. Queued time does not count against `--timeout`, so a healthy run serialized behind a scarce runner is no longer reported as a hang; each message names which cap fired and the key that raises it. The run-level status cannot tell the two apart — every backend reports a run as running once ANY job starts — so a run that looks executing is confirmed against its own job list (`/actions/runs/{id}/jobs`, GitLab `/pipelines/{id}/jobs`), and anything unreadable counts as executing, i.e. keeps the shorter cap in charge. "No run found at all" is a trigger/push problem rather than a queue and stays bounded by `--timeout`. **Superseded runs don't count**: only the latest attempt per (workflow, trigger event) is scored — a retried-to-green flake watches green — and a newest manual re-dispatch (`workflow_dispatch`; GitLab: `web` pipeline) supersedes that workflow's earlier runs outright. Background-friendly for the `Monitor` tool. |
-| `log`   | `--sha SHA` (or `--failed BRANCH`)                | failed jobs' plaintext logs to stdout, one `── job <id>: <name> ──` header per job, fetched via the backend's per-job logs API (Forgejo 16+: `/actions/jobs/{id}/logs`) |
+| `log`   | `--pr N` \| `--sha SHA` \| `--failed BRANCH`      | failed jobs' plaintext logs to stdout, one `── job <id>: <name> ──` header per job, fetched via the backend's per-job logs API (Forgejo 16+: `/actions/jobs/{id}/logs`). `--pr` resolves the PR/MR head commit exactly as `watch --pr` does, and is the form to use after a red `watch --pr`. `--pr` and `--sha` dump **every failed run** on the commit, oldest first, each under a `run <id>` line — a commit usually carries one run per workflow, often started in the same second, so "the latest run" is as likely to be the green one. `--failed BRANCH` takes the latest failed run under the branch ref, and when there is none falls back to the branch's head commit: runs triggered by a pull-request event (Forgejo) or merge-request pipelines (GitLab) carry the PR/MR ref, never `refs/heads/<branch>` (GitHub's `?branch=` filter already matches both). A commit whose runs all passed prints `(no failed jobs for run …)` and exits 0; no run at all is a non-zero `no CI run found`. |
 
 ### `branches` (dispatcher-owned, not a backend adapter)
 
@@ -247,10 +247,10 @@ Safety is in the verb, not in the caller:
 
   ```
   ---
-  via FlightDirector:flight@0.14.0 with Fable/5.1
+  🤖 via FlightDirector:flight@0.14.0 with Fable/5.1
   ```
 
-  A blank line, a rule, then `via FlightDirector:flight@<installed version>`, plus ` with
+  A blank line, a rule, then `🤖 via FlightDirector:flight@<installed version>`, plus ` with
   <Model/ver>` when the model is known. The model comes from the dispatcher-owned `--model <id>`
   flag (stripped before the adapter sees the args) or `FLIGHT_MODEL` / `LS_MODEL` in the env,
   rendered as `Fable/5.1` from `claude-fable-5-1`, `Sol/5.6` from `gpt-5.6-sol`, `GPT/5` from
