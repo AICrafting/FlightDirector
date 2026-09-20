@@ -57,6 +57,13 @@ may be `status/testing`); otherwise the defaults:
 - `status/blocked` — can't be started
 - `status/deferred` — intentionally not now
 
+**The one exception is the `new` role** (opt-in, `labels.status.new`, default `status/new`):
+it means *filed and not yet triaged*, which is the most workable state there is, not a stage of
+the workflow. **Never exclude it** — excluding every status label blindly would hide exactly the
+issues this skill exists to surface, on any repo that turns the role on. It also makes "show me
+the untriaged ones" a real filter: list `--label status/new` (this repo's name for the role) when
+the user asks for what nobody has looked at yet.
+
 Do the exclusion while scanning the third (labels) column of the listing. This filter is
 **specific to "what can I work on" listings** — it does NOT apply to dedupe checks or general
 triage, which see everything.

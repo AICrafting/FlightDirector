@@ -417,6 +417,45 @@ case "$group/$verb" in
     ;;
 esac
 
+# Starting status (#193). A repo may nominate one status role — `new` — as the label a freshly
+# filed issue should carry, so a board can tell "nobody has looked at this yet" apart from "the
+# label was forgotten". Opt-in: `labels.status.new` absent means the feature is off, which is
+# every repo configured before this existed.
+#
+# Applied HERE so every backend behaves the same; the adapter just receives one more --label
+# and needs to know nothing (the same division as the signature above). The label must exist on
+# the repo — `setting-up-a-repo` creates it when the role is configured — and if it does not,
+# create fails naming it, exactly as it would for any other missing label.
+#
+# Skipped when the caller already chose a status label (filing something that is *already* in
+# progress should not also be marked new), and by `--no-status`.
+case "$group/$verb" in
+  issues/create)
+    # Default to {} in two steps, never "${VAR:-{}}": the first '}' there closes the
+    # expansion and appends a stray one, handing jq invalid JSON.
+    ns_json="${LS_LABELS_JSON:-}"; [ -n "$ns_json" ] || ns_json='{}'
+    new_status="$(printf '%s' "$ns_json" | jq -r '.status.new // empty')"
+    if [ -n "$new_status" ]; then
+      ns_args=(); ns_skip=0
+      # Only string values are label names: a role the repo was offered and declined is
+      # recorded as `false` so the setup gap check does not ask again (#193).
+      ns_all="$(printf '%s' "$ns_json" | jq -r '.status // {} | .[] | select(type == "string")')"
+      while [ $# -gt 0 ]; do case "$1" in
+        --no-status) ns_skip=1; shift ;;
+        --label)
+          [ $# -ge 2 ] || die "issues create: --label needs a value"
+          # A here-string, not a pipe: under pipefail `grep -q` can exit early and kill the
+          # pipeline with SIGPIPE (SC2337).
+          if grep -Fxq -- "$2" <<<"$ns_all"; then ns_skip=1; fi
+          ns_args+=("$1" "$2"); shift 2 ;;
+        *) ns_args+=("$1"); shift ;;
+      esac; done
+      [ "$ns_skip" = 1 ] || ns_args+=(--label "$new_status")
+      set -- ${ns_args[@]+"${ns_args[@]}"}
+    fi
+    ;;
+esac
+
 adapter="$ADAPTERS_DIR/$backend/$group"
 [ -x "$adapter" ] || die "no '$group' adapter for backend '$backend' (expected $adapter)"
 
