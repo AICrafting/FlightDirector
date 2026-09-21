@@ -27,14 +27,24 @@ wants to file or change something, that's `filing-issues`.
 ## Step 1: List open issues
 
 ```
-flight issues list --state open --limit 50
+flight issues list --all-trackers --state open --limit 50
 ```
 
-Output is one issue per line, tab-separated:
+Every configured issue tracker is listed, in config order, each through its own coordinates,
+credential and label map. Output is one issue per line, tab-separated — the tracker-qualified
+identity, then that tracker's ordinary row:
 
 ```
-<number>⇥<title>⇥<comma,separated,labels>
+<qualified>⇥<native id>⇥<title>⇥<comma,separated,labels>
+FJ-12⇥12⇥Fix the login redirect⇥bug,quick-win
+JIR-7⇥PROJ-7⇥Rotate the signing key⇥security
 ```
+
+The qualified id (`FJ-12`, `JIR-7`) is the one to show and hand on; two trackers can both have
+an issue 12, so a bare number is never enough. A tracker that cannot be reached is named on
+stderr (`flight: tracker GH unavailable: …`) and the exit status is non-zero while the other
+trackers' rows still print — say that tracker is **unavailable**; never present it as an empty
+backlog.
 
 It's already projected to just these fields, so it stays light in context — keep `--limit`
 reasonable. The adapter pages underneath it, and warns on **stderr** when the limit hid rows
@@ -44,11 +54,11 @@ dispatcher errors clearly; that's the cue to run `setting-up-a-repo` first.
 
 ## Step 2: Apply the workable filter
 
-**Exclude** any issue whose label column carries a status label — carrying *any* of the
-configured `labels.status` roles means the issue is already somewhere in the workflow (in
-flight, awaiting test, in review, in QA, blocked, or deferred), so it isn't a fresh pick. Use
-**this repo's** names from `.flightdirector/config.json` `labels.status` if present (e.g. awaiting-test
-may be `status/testing`); otherwise the defaults:
+**Exclude** any issue whose label column carries a workflow status label from its **originating
+tracker** — the ref before the `-` in its qualified id. Read that tracker's names with
+`flight issues tracker --tracker "$REF" | jq '.labels.status'` and use only those for its rows,
+never another tracker's labels (two trackers may spell `to-test` differently). `false` or absent roles have no label to match. A status label means the issue is
+already in flight, awaiting test, in review, in QA, blocked, or deferred. Common defaults are:
 
 - `status/in progress` — already in flight
 - `status/to test` — built, awaiting verification
@@ -57,22 +67,26 @@ may be `status/testing`); otherwise the defaults:
 - `status/blocked` — can't be started
 - `status/deferred` — intentionally not now
 
-**The one exception is the `new` role** (opt-in, `labels.status.new`, default `status/new`):
+**The one exception is the `new` role** (`issueTrackers[].labels.status.new`, when configured):
 it means *filed and not yet triaged*, which is the most workable state there is, not a stage of
 the workflow. **Never exclude it** — excluding every status label blindly would hide exactly the
 issues this skill exists to surface, on any repo that turns the role on. It also makes "show me
-the untriaged ones" a real filter: list `--label status/new` (this repo's name for the role) when
-the user asks for what nobody has looked at yet.
+the untriaged ones" a real filter: for each tracker whose `new` role is a string, list with
+`issues list --tracker "$TRACKER" --label "$NEW_LABEL"`, then qualify each result. A tracker
+with `new:false` or no `new` role has no starting-status label to filter on.
 
-Do the exclusion while scanning the third (labels) column of the listing. This filter is
+Do the exclusion while scanning the fourth (labels) column of the listing. This filter is
 **specific to "what can I work on" listings** — it does NOT apply to dedupe checks or general
 triage, which see everything.
 
 ## Step 3: Present the pick-list
 
-Show a concise, scannable list — number, title, and the labels that help the user choose
+Show a concise, scannable list — qualified identity, title, and the labels that help the user choose
 (`quick-win`, `high-value`, `bug`, `critical`). Don't dump full bodies; pull one with
-`issues get --number N` only if the user drills into a specific issue. Group by something
+`flight issues get --number "$QUALIFIED"` (the qualified id routes itself), only if the user
+drills into a specific issue. Hand the **qualified id** to `working-an-issue`, which resolves it
+once and retains it — never a bare number, which would mean whichever tracker is the default.
+Group by something
 meaningful (quick wins vs. larger work, or by feature-area label) if it helps, and offer a
 recommendation if one stands out.
 
