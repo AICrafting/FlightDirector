@@ -57,7 +57,12 @@ case "$*" in
 	*"rev-parse --show-toplevel"*) echo "$SANDBOX/wt" ;;
 	*"rev-parse --git-common-dir"*) echo "$SANDBOX/main/.git" ;;
 	*"branch --show-current"*) echo "feature/228-some-slug" ;;
-	*"rev-parse HEAD"*) cat "$SANDBOX/sha" ;;
+	# Path-dependent on purpose. $MAIN and $WT differ on the commonest hop (feature -> develop
+	# with the main checkout on develop), and a new commit on the feature branch leaves $MAIN's
+	# tip where it was. A stamp or guard that reads $MAIN would accept an old pass for code the
+	# gate never saw, so only the worktree being judged may answer with the branch's sha.
+	*"/wt rev-parse HEAD"*) cat "$SANDBOX/sha" ;;
+	*"rev-parse HEAD"*) echo "main-tip-never-moves" ;;
 	*"merge --no-ff"*) echo "DID-MERGE" >>"$SANDBOX/actions" ;;
 esac
 exit 0
@@ -67,9 +72,12 @@ chmod +x "$SANDBOX/bin/flight" "$SANDBOX/bin/git"
 # One tool call: a new shell, Step 1 restated, then the block. $SCRATCH is the session
 # scratchpad, which the agent knows rather than derives, so it is given, not carried.
 call() {
-	PATH="$SANDBOX/bin:$PATH" bash -c \
-		"SCRATCH='$SANDBOX/scratch'; $(cat "$SANDBOX/step1.sh") $(cat "$SANDBOX/$1.sh")" \
-		>>"$SANDBOX/out" 2>&1 || true
+	# Real newlines between the pieces: $(cat) strips the trailing one, and a space would glue
+	# Step 1's last assignment onto the block's first command as an env prefix, so the binding
+	# would silently never reach the rest of the block.
+	PATH="$SANDBOX/bin:$PATH" bash -c "SCRATCH='$SANDBOX/scratch'
+$(cat "$SANDBOX/step1.sh")
+$(cat "$SANDBOX/$1.sh")" >>"$SANDBOX/out" 2>&1 || true
 }
 fresh() {   # $1 = the configured gate command ('' = key absent)
 	rm -rf "$SANDBOX/scratch" "$SANDBOX/actions" "$SANDBOX/out" "$SANDBOX/config-unreadable"
@@ -103,7 +111,10 @@ for SITE in case1 case2 pr; do
 	fresh 'true';  call step4b; touch "$SANDBOX/config-unreadable"
 	               call "$SITE";                               refused "$SITE config unreadable" 'could not read'
 	# The latest run is the verdict: green, then red on the SAME commit (a flaky suite, a
-	# changed environment) must not leave the earlier pass standing.
+	# changed environment) must not leave the earlier pass standing. 4b closes this twice over,
+	# by clearing the old verdict and by writing `fail`, and this case pins the PAIR: either
+	# alone still passes it, only losing both trips it. Keep both; the `rm -f` also covers a
+	# run aborted before any verdict is written, which cannot be staged from inside the gate.
 	fresh 'true';  call step4b; printf 'false' >"$SANDBOX/gate"
 	               call step4b; call "$SITE";                  refused "$SITE green, then red re-run" 'not green'
 	# Same session, branch fixed: the earlier red must not block the retry.
