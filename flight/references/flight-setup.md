@@ -178,10 +178,18 @@ reader treats exactly like an absent key.
   checkout — a hard-coded absolute path defeats the point.
   **Exit code is the verdict:** zero passes, non-zero halts the operation and the failing output
   is shown. Nothing parses stdout.
+  **A pass belongs to the commit it judged.** `promoting-a-branch` records the verdict against
+  the commit the gate ran on and never reuses it: every promotion runs the gate again, and the
+  merge (or `pr open`) goes ahead only on a pass for the exact commit being promoted. So if the
+  branch moves between the gate and the merge, or a promotion tries to lean on an earlier run,
+  it stops with *"preflight gate is not green"* even though the last run you saw was green.
+  That is not a false red: the gate has not seen that commit. Promote again and it will.
   **Where it runs:** `promoting-a-branch` before the merge on a `direct` hop and before
   `pr open` on a `pr` hop (that hop never pushes the source branch — it expects it on origin
-  already); `promoting-branches` before each branch's merge (a
-  failure skips that branch and the group continues) or before the integration branch is pushed;
+  already); `promoting-branches` before each branch's merge on a `direct` hop (a failure skips
+  that branch and the group continues), and on a `pr` hop once on the group's assembled
+  integration branch before it is pushed (a failure skips the **whole group**: nothing pushed, no
+  PR, other groups continue);
   `queue-batches` from the **orchestrator** once a zone finishes, per issue worktree.
   The command is the repo's problem, so a repo on Windows writes one that works there. It is a
   local gate, not a CI replacement — a `pr` hop still watches CI afterwards.

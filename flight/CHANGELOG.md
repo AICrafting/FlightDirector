@@ -23,7 +23,9 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   were told to "run the repo's test command if one exists", leaving the command to each agent's
   judgment every time. `promoting-a-branch` runs it after the freshness check and before the
   merge (or before `pr open` on a `pr` hop); `promoting-branches` runs it per
-  branch before that branch's merge, so a red gate is a skip and the clean branches still ship;
+  branch before that branch's merge on a `direct` hop, so a red gate is a skip and the clean
+  branches still ship, and on a `pr` hop once on each group's integration branch before it is
+  pushed, where a red gate holds back that whole group;
   `queue-batches` runs it from the **orchestrator** once a zone finishes, once per issue
   worktree, because a returned agent's shell is gone and cannot report a backgrounded result.
   **Absent by default**: with no `code.preflight` in the config every one of those steps is

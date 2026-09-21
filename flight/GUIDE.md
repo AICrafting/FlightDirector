@@ -258,11 +258,13 @@ If you give flight your repo's check command, it runs it first:
 
 **promoting-a-branch** runs it from the branch's worktree just before the merge (or before
 opening the PR, on a `pr` hop). Only the exit code counts: zero carries on, anything else stops
-the promotion and shows you the failing output. **promoting-branches** runs it per branch, so
-one red branch is skipped while the clean ones still ship, and **queue-batches** runs it for
-each issue once a zone finishes. It's a local gate, not a CI replacement — a `pr` hop still
-watches CI afterwards. Leave it out and nothing changes. Write the command so it works from any
-worktree, not just your main checkout; details in
+the promotion and shows you the failing output. **promoting-branches** depends on the hop: on a
+`direct` hop it runs it per branch, so one red branch is skipped while the clean ones still
+ship; on a `pr` hop it runs it once on each group's assembled integration branch, and a red
+result holds back that whole group (nothing pushed, no PR) while the other groups carry on.
+**queue-batches** runs it for each issue once a zone finishes. It's a local gate, not a CI
+replacement — a `pr` hop still watches CI afterwards. Leave it out and nothing changes. Write
+the command so it works from any worktree, not just your main checkout; details in
 [flight-setup.md](references/flight-setup.md#repo-preflight-gate-optional).
 
 **Choosing how a PR merges.** On a `pr` hop you can pick the merge strategy — tell Claude
