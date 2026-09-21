@@ -27,7 +27,6 @@ says() {
 
 # (`! grep` is exempt from `set -e`, so the negative checks are spelled out.)
 if says "$QB/SKILL.md" 'When all agents return'; then exit 1; fi
-says "$QB/SKILL.md" 'regardless of what the agent said'
 says "$QB/SKILL.md" "own log watcher"
 
 # The terminal line is found by its ticket=all marker, never by position: with code.preflight
@@ -39,19 +38,26 @@ if says "$QB/SKILL.md" "last line"; then exit 1; fi
 if says "$QB/SKILL.md" "final line"; then exit 1; fi
 if says "$QB/SKILL.md" "ends in a terminal line"; then exit 1; fi
 says "$QB/SKILL.md" 'never on position'
-# INVARIANT: one positive per site that decides whether a zone is finished, because the negatives
-# above are class-level and a positional rewrite can always be phrased in words no blocklist
-# carries ("ends in a terminal line", "the entry the log closes with"). A site without a positive
-# is unguarded no matter how many negatives exist, so a seventh site added below with no line
-# here is a visible omission. Each pattern is the shortest distinctive fragment, not the
-# sentence: `says` flattens, but every positive is still a hostage to rewording.
-says "$QB/SKILL.md" 'classify from its .ticket=all. line'      # 0's resume classification
-says "$QB/SKILL.md" 'ticket=all. line reads .status=done'      # 4's render trigger
-says "$QB/SKILL.md" 'look for that zone.s .ticket=all. line'   # 4's terminal-line check
-says "$QB/SKILL.md" 'match on .ticket=all'                     # the status-log contract block
-says "$QB/SKILL.md" 'zone has a .ticket=all. line reading'     # 5's opening condition
-says "$QB/SKILL.md" 'Look for the zone.s .ticket=all. line'    # the Common-mistakes bullet
-says "$QB/references/dispatch-claude.md" 'ticket=all'          # the pointer back to Section 4
+# INVARIANT: one positive per CONDITION that decides whether a zone is finished, and each
+# pattern spans the WHOLE condition rather than a recognisable fragment of it. The site is not
+# the unit of failure: Section 5 alone carries three conditions (every zone, marker form, 4a
+# sweep finished), so pinning one leaves the other two rewritable — "every" became "any" and the
+# sweep conjunct vanished while the marker positive still matched. Antecedent without consequent
+# is the same trap one level down: "look for the ticket=all line" kept matching when the
+# "unfinished" it leads to was flipped to "finished". A condition added below with no line here
+# is a visible omission. Each pattern is still as short as it can be while covering the whole
+# condition, because every positive is a hostage to rewording; `.` stands in for a backtick and
+# `..` for a bold marker, so the patterns survive SC2016 and BRE quantifier quirks alike.
+# The connective is part of the condition too: Section 5's two halves are pinned by ONE pattern
+# spanning the `**and**` between them, because two separate patterns both kept matching when the
+# `and` was changed to an `or`.
+says "$QB/SKILL.md" 'classify from its .ticket=all. line, wherever it sits: no .ticket=all status=done. → ..agent still working..'
+says "$QB/SKILL.md" 'ticket=all. line reads .status=done., render that zone.s header'
+says "$QB/SKILL.md" 'look for that zone.s .ticket=all. line. No such line means the zone is ..unfinished, regardless of what the agent said..'
+says "$QB/SKILL.md" 'match on .ticket=all., not on position'
+says "$QB/SKILL.md" 'Once every zone has a .ticket=all. line reading .status=done. or .status=safety-valved. ..and.. its 4a sweep .when one is configured. has finished'
+says "$QB/SKILL.md" 'Look for the zone.s .ticket=all. line; no such line means unfinished, whatever the report said'
+says "$QB/references/dispatch-claude.md" 'ticket=all'
 
 if says "$QB/SKILL.md" run_in_background; then exit 1; fi
 says "$QB/references/dispatch-claude.md" 'dies with'
