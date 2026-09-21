@@ -163,17 +163,25 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   only ever leave the shorter cap in charge. "No run found at all" is a trigger or push problem,
   not a queue, and stays bounded by `--timeout` as it was.
 
-- **`auth check` now says which source the token came from** (#177). Token resolution is
+- **`auth check` now says which source the token came from** (#177, #196). Token resolution is
   env-first (`LS_TOKEN` → `FLIGHT_TOKEN` → the legacy `FORGEJO_TOKEN`, then the secrets file) and
   never said so, so a token exported for a *different* forge — the classic stale `FORGEJO_TOKEN`
   in a shell profile — produced a flat `HTTP 401` with `.flightdirector/secrets.json` as the
   obvious, and wrong, suspect. The resolution order is unchanged; the silence is what was fixed.
   The `authenticates` line now reads `token 024ffe8f… (from $FORGEJO_TOKEN)` or
-  `(from .flightdirector/secrets.json)` on every backend, and the *failing* branch carries the
-  same detail as a hint where it previously printed no token at all. Separately, the legacy
-  `FORGEJO_TOKEN` shadowing a present secrets file that holds a different token now gets a
+  `(from /path/to/repo/.flightdirector/secrets.json)` on every backend, and the *failing* branch
+  carries the same detail as a hint where it previously printed no token at all. Separately, the
+  legacy `FORGEJO_TOKEN` shadowing a present secrets file that holds a different token now gets a
   one-line note on stderr; `LS_TOKEN` and `FLIGHT_TOKEN` are deliberate backend-neutral
   overrides and stay quiet. Adapters get the source as `LS_TOKEN_SOURCE` in the environment.
+  The secrets file is named by its **full path**, not the repo-relative form (#196): it is
+  gitignored, so it lives only in the main checkout, and a repo-relative name printed in a linked
+  worktree — where most work happens — points at nothing you can open. The shadow note on stderr
+  uses the same full path. The tracked-by-git warning keeps the repo-relative form on purpose: a
+  tracked file *is* checked out in every worktree, and that is the form you would add to
+  `.gitignore`, which is what the warning asks you to do. `flight-setup.md`'s token-precedence
+  section now points at `auth check` as the way to see which source won, and documents the
+  legacy-shadow note.
 
 ## [0.15.1] - 2026-09-19
 

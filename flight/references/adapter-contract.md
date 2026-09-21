@@ -45,12 +45,16 @@ The dispatcher:
    `LS_LABELS_JSON` (the `labels` map, for role→name resolution), and `LS_BACKEND`. Token
    precedence: `LS_TOKEN` / `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a
    legacy name), else the secrets file (axis, `code → issues`). `LS_TOKEN_SOURCE` names which
-   of those won — the env var as `$FLIGHT_TOKEN` (leading `$`), or the secrets file's
-   repo-relative path — and is empty when no token resolved. It exists so `auth check` can say
-   where the token came from instead of leaving a 401 to be blamed on the file (#177). On top of
-   that, and only for the legacy `FORGEJO_TOKEN`, the dispatcher notes on stderr when it shadows
-   a present secrets file holding a different token — the backend-neutral names are a deliberate
-   override and stay quiet on the every-verb path.
+   of those won — the env var as `$FLIGHT_TOKEN` (leading `$`), or the secrets file's path in a
+   form that resolves from wherever the caller ran: absolute for the repo's own (gitignored,
+   main-checkout-only) file, or exactly the argument when `auth check --secrets` supplied a
+   candidate. It is empty when no token resolved. Print it verbatim; do not shorten it against
+   the repo root, because the common caller is a linked worktree where the repo-relative form
+   names nothing (#196). It exists so `auth check` can say where the token came from instead of
+   leaving a 401 to be blamed on the file (#177). On top of that, and only for the legacy
+   `FORGEJO_TOKEN`, the dispatcher notes on stderr when it shadows a present secrets file
+   holding a different token — the backend-neutral names are a deliberate override and stay
+   quiet on the every-verb path.
 4. **Signs the body** on `issues create|update|comment` and `pr open|update` (see **Body
    signature** below), and strips its own flags (`--model`, `--no-signature`) from the args.
 5. Execs `adapters/<backend>/<group> <verb> [args…]`.

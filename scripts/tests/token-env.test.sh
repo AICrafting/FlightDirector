@@ -81,8 +81,15 @@ auth_check_secrets() {	# auth_check_secrets FILE [VAR=value …] — the same, a
 }
 from() { sed -n 's/.*(from \(.*\))$/\1/p' | sed -n '1p'; }	# first match only; no `| head` (SIGPIPE, #110)
 
+# A function, not an inline `case` inside $(…): bash 3.2 (the macOS CI leg) ends
+# the substitution at the pattern's own `)`. Same reason as quiet()/noted() below.
+names_secrets() { case "$1" in */.flightdirector/secrets.json) echo 1 ;; *) echo 0 ;; esac; }
+
+named="$(auth_check | from)"
 check "auth check names the secrets file when it is the source" \
-	"$([ "$(auth_check | from)" = ".flightdirector/secrets.json" ] && echo 1 || echo 0)"
+	"$(names_secrets "$named")"
+check "the path it names resolves from the main checkout too" \
+	"$( (cd "$R" && [ -f "$named" ]) && echo 1 || echo 0)"
 # shellcheck disable=SC2016  # the literal env-var NAME is what the output must contain
 check "auth check names \$FORGEJO_TOKEN when the legacy env var is the source" \
 	"$([ "$(auth_check FORGEJO_TOKEN=from-forgejo | from)" = '$FORGEJO_TOKEN' ] && echo 1 || echo 0)"
@@ -106,7 +113,7 @@ check "auth check --secrets names the candidate file, not a shadowing env var" \
 # the pattern's own `)`. Quoting the pattern does not help; only the function does.
 quiet() { case "$(cat "$SANDBOX/err")" in *overrides*) echo 0 ;; *) echo 1 ;; esac; }
 # shellcheck disable=SC2016  # the literal env-var NAME is what the output must contain
-noted() { case "$(cat "$SANDBOX/err")" in *'$FORGEJO_TOKEN is set and overrides .flightdirector/secrets.json'*) echo 1 ;; *) echo 0 ;; esac; }
+noted() { case "$(cat "$SANDBOX/err")" in *'$FORGEJO_TOKEN is set and overrides '*'/.flightdirector/secrets.json'*) echo 1 ;; *) echo 0 ;; esac; }
 
 run FORGEJO_TOKEN=from-forgejo >/dev/null
 check "the legacy FORGEJO_TOKEN shadowing a differing secrets file notes it on stderr" "$(noted)"
@@ -120,6 +127,28 @@ run >/dev/null
 check "a secrets-only setup stays quiet" "$(quiet)"
 auth_check_secrets cand-secrets.json FORGEJO_TOKEN=from-forgejo >/dev/null
 check "--secrets stays quiet: the env is already out of the picture" "$(quiet)"
+
+# --- #196: the named path resolves from a LINKED WORKTREE ------------------
+# The dominant invocation context, per AGENTS.md: every issue is worked in its own
+# .worktrees/<N>-<slug>. The secrets file is gitignored, so it exists ONLY in the
+# main checkout — a repo-relative name is a path the reader cannot cat from there,
+# which is exactly the 401 wild-goose-chase #177 set out to end. The assertion is
+# resolvability, not string equality: `git rev-parse --git-common-dir` realpaths
+# its answer, and on macOS $TMPDIR is a /var → /private/var symlink, so comparing
+# the printed path against "$R/…" would fail on that CI leg for the wrong reason.
+git -C "$R" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+git -C "$R" worktree add -q "$R/.worktrees/x" -b x
+wt_named="$( (cd "$R/.worktrees/x" && env -u LS_TOKEN -u FLIGHT_TOKEN -u FORGEJO_TOKEN \
+	-u LS_SECRETS_FILE PATH="$FAKE_DIR:$PATH" "$DISP" auth check 2>/dev/null) | from)"
+
+check "auth check from a linked worktree still names the secrets file" \
+	"$(names_secrets "$wt_named")"
+# The guard that matters: the relative form does NOT resolve from the worktree, so
+# a $sec_rel regression fails here even though the case above would still pass.
+check "the path it names resolves from the worktree's own directory" \
+	"$( (cd "$R/.worktrees/x" && [ -f "$wt_named" ]) && echo 1 || echo 0)"
+check "…and the relative form genuinely would not have (the test can fail)" \
+	"$( (cd "$R/.worktrees/x" && [ ! -f ".flightdirector/secrets.json" ]) && echo 1 || echo 0)"
 
 # Summary: plain when nothing failed, red when something did (#123).
 [ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
