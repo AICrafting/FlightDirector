@@ -80,6 +80,30 @@ if [ "$group" = "labels" ] && [ "$verb" = "model-family" ]; then
 	exit 0
 fi
 
+# Tracker selectors are dispatcher-owned and must be removed before adapter
+# argc validation (notably `labels ensure --model`).
+tracker_selector=""; all_trackers=0
+case "$group" in
+	issues|labels|auth)
+		route_args=()
+		while [ $# -gt 0 ]; do
+			case "$1" in
+				--tracker)
+					[ $# -ge 2 ] || die "$group $verb: --tracker needs a ref"
+					[ -z "$tracker_selector" ] || die "$group $verb: --tracker supplied more than once"
+					tracker_selector="$2"; shift 2
+					;;
+				--all-trackers) all_trackers=1; shift ;;
+				*) route_args+=("$1"); shift ;;
+			esac
+		done
+		set -- ${route_args[@]+"${route_args[@]}"}
+		;;
+esac
+[ "$all_trackers" = 0 ] || { [ "$group" = issues ] && [ "$verb" = list ] && [ -z "$tracker_selector" ]; } \
+	|| die "--all-trackers is supported only by 'issues list' and cannot be combined with --tracker"
+[ -z "$tracker_selector" ] || { [ "$group" != auth ] || axis=issues; }
+
 # Sugar for the standard provenance label. Adapters continue to receive only
 # the backend-neutral `ensure --name/--color/--description` contract.
 if [ "$group" = "labels" ] && [ "$verb" = "ensure" ] && [ "${1:-}" = "--model" ]; then
@@ -173,6 +197,121 @@ model_display() {
   printf '%s%s' "$(printf '%s' "$fam" | awk '{ print toupper(substr($0, 1, 1)) substr($0, 2) }')" "${ver:+/$ver}"
 }
 
+TRACKER_SCHEMA=3
+
+# Validate the complete named-tracker contract before any routed operation or
+# migration write. References deliberately exclude separators: GH1, GH-1 and
+# GH#1 can then be parsed without guessing where the reference ends.
+validate_trackers() {
+	local file="$1"
+	jq -e '
+		def valid_ref: type == "string" and test("^[A-Za-z][A-Za-z0-9]*$");
+		def target: {backend:(.backend // null), api:(.api // null), owner:(.owner // null), repo:(.repo // null), project:(.project // null)};
+		. as $root | .issueTrackers as $ts
+		| ($ts | type == "array" and length > 0)
+		and ([ $ts[] | select(.default == true) ] | length == 1)
+		and (all($ts[];
+			(.ref | valid_ref)
+			and (.name | type == "string" and length > 0)
+			and (.backend | type == "string" and length > 0)
+			and ((.aliases // []) | type == "array" and all(.[]; valid_ref))
+			and ((has("credentialRef") | not) or (.credentialRef | type == "string" and length > 0))
+			and (.ref != "code")
+			and ((.credentialRef // .ref) == .ref or .credentialRef == "code")
+			and ((.credentialRef // "") != "code" or
+				((. | target) == ($root.code | target) and (.api | type == "string" and length > 0)))
+			and ((.labels // {}) | type == "object")
+		))
+		and ([ $ts[] | .ref, ((.aliases // [])[]) | ascii_downcase ] as $ids
+			| ($ids | length) == ($ids | unique | length))
+	' "$file" >/dev/null 2>&1 || die "invalid issueTrackers: require a non-empty array, exactly one default, unique refs/aliases, and credentialRef code only for a matching code target"
+}
+
+legacy_tracker_ref() {
+	local file="$1" backend project
+	backend="$(jq -r '((.issues.backend // .code.backend) // "") | ascii_downcase' "$file")"
+	project="$(jq -r '(.issues.project // .code.project) // empty' "$file")"
+	if [ "$backend" = jira ] && printf '%s' "$project" | grep -Eq '^[A-Za-z][A-Za-z0-9]*$'; then
+		printf '%s\n' "$(printf '%s' "$project" | tr '[:lower:]' '[:upper:]')"
+		return
+	fi
+	case "$backend" in
+		forgejo) printf 'FJ\n' ;;
+		github)  printf 'GH\n' ;;
+		gitlab)  printf 'GL\n' ;;
+		jira)    printf 'JIRA\n' ;;
+		'') die "cannot migrate issue tracker: neither issues.backend nor code.backend is configured" ;;
+		*)
+			project="$(printf '%s' "$backend" | tr -cd '[:alnum:]' | tr '[:lower:]' '[:upper:]')"
+			[ -n "$project" ] || die "cannot derive a tracker ref from backend '$backend'"
+			printf '%s\n' "$project"
+			;;
+	esac
+}
+
+migrate_config_json() {
+	local input="$1" output="$2" ref="$3"
+	jq --arg ref "$ref" '
+		def inherited:
+			(.code // {})
+			| with_entries(select(.key == "backend" or .key == "api" or .key == "owner"
+				or .key == "repo" or .key == "project" or .key == "email"));
+		if has("issueTrackers") then .
+		else
+			((inherited) * (.issues // {})) as $old
+			| ($old
+				+ {ref:$ref, name:($old.name // "Issues"), default:true,
+					credentialRef:$ref, labels:(.labels // $old.labels // {})}) as $tracker
+			| .issueTrackers = [$tracker]
+			| del(.issues, .labels)
+		end
+	' "$input" >"$output"
+}
+
+migrate_secrets_json() {
+	local input="$1" output="$2" ref="$3"
+	jq --arg ref "$ref" '
+		if has("issueTrackers") then .
+		else
+			.issueTrackers = {($ref): ((.code // {}) * (.issues // {}))}
+			| del(.issues)
+		end
+	' "$input" >"$output"
+}
+
+has_legacy_work() {
+	git -C "$repo_root" for-each-ref --format='%(refname:short)' refs/heads \
+		| grep -Eq '^(feature|bug|bugfix)/[0-9]+-' && return 0
+	[ -d "$cfg_dir/batches" ] && find "$cfg_dir/batches" -type f -maxdepth 2 2>/dev/null \
+		| grep -q . && return 0
+	return 1
+}
+
+bind_legacy_default() {
+	local ref="$1" identity="$SELF_DIR/issue-identity.sh"
+	if [ -x "$identity" ]; then
+		FLIGHT_REPO_ROOT="$repo_root" "$identity" bind-legacy-default --tracker "$ref"
+	elif has_legacy_work; then
+		die "cannot migrate while legacy issue branches/manifests exist: issue-identity binder is not installed"
+	fi
+}
+
+# Every config-reading path rejects schemas this runtime cannot understand.
+# Schema 3 is also validated on every read so an invalid default/ref cannot
+# reach an adapter write.
+if [ -f "$cfg" ]; then
+	jq -e . "$cfg" >/dev/null 2>&1 || die "$cfg_rel is not valid JSON"
+	runtime_schema="$(jq -r '.schemaVersion // 0' "$cfg")"
+	case "$runtime_schema" in ''|*[!0-9]*) die "config schemaVersion must be a non-negative integer" ;; esac
+	[ "$runtime_schema" -le "$TRACKER_SCHEMA" ] || die "config uses newer schema $runtime_schema; this Flight supports through schema $TRACKER_SCHEMA"
+	[ "$runtime_schema" -ne "$TRACKER_SCHEMA" ] || validate_trackers "$cfg"
+	if [ "$runtime_schema" -lt "$TRACKER_SCHEMA" ] && {
+		[ -n "$tracker_selector" ] || [ "$all_trackers" = 1 ] || { [ "$group" = issues ] && [ "$verb" = resolve ]; }
+	}; then
+		die "named tracker routing requires schema $TRACKER_SCHEMA; run flight reconcile --harness claude|codex first"
+	fi
+fi
+
 # `flight auth check [--secrets <file>] [--axis code|issues]` — verify a token
 # BEFORE relying on it (identity, repo/project reach, per-capability read
 # probes, expiry where the backend exposes it). Both flags are dispatcher-owned,
@@ -190,7 +329,7 @@ model_display() {
 # candidate file deliberately beats an ambient env token — otherwise the check
 # would silently verify a different token than the one being rotated in.
 if [ "$group" = "auth" ]; then
-  [ "$verb" = "check" ] || die "usage: flight auth check [--secrets <file>] [--axis code|issues]"
+	[ "$verb" = "check" ] || die "usage: flight auth check [--secrets <file>] [--axis code|issues] [--tracker REF]"
   secrets_override="${LS_SECRETS_FILE:-}"
   while [ $# -gt 0 ]; do case "$1" in
     --secrets) [ $# -ge 2 ] || die "auth check: --secrets needs a file path"; secrets_override="$2"; shift 2 ;;
@@ -198,6 +337,7 @@ if [ "$group" = "auth" ]; then
     *) die "auth check: unknown arg '$1'" ;;
   esac; done
   case "$axis" in code|issues) ;; *) die "auth check: --axis must be code or issues (got '$axis')" ;; esac
+	[ -z "$tracker_selector" ] || [ "$axis" = issues ] || die "auth check: --tracker conflicts with --axis code"
   if [ -n "$secrets_override" ]; then
     [ -f "$secrets_override" ] || die "auth check: --secrets file '$secrets_override' not found"
     sec="$secrets_override"
@@ -238,42 +378,123 @@ fi
 # `harnesses.<h>.plugins.<name>.reconciledWith`; a legacy bare key is flight's by
 # definition and is migrated into `plugins.flight` on the first run.
 if [ "$group" = "reconcile" ]; then
-  [ "$verb" = "--harness" ] || die "usage: flight reconcile --harness <claude|codex>"
-  harness="${1:-}"
-  case "$harness" in claude|codex) ;; *) die "unsupported harness '$harness' (expected claude or codex)" ;; esac
-  [ -f "$cfg_tracked" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
-  manifest="$(plugin_manifest)"
-  version="$(jq -r '.version // empty' "$manifest")"
-  [ -n "$version" ] || die "cannot determine installed Flight version"
-  plugin="$(jq -r '.name // empty' "$manifest")"
-  [ -n "$plugin" ] || plugin="flight"
-  # Legacy (schema 1) bare stamp — always flight's, whatever plugin is running.
-  legacy="$(jq -r --arg h "$harness" '.harnesses[$h].reconciledWith // empty' "$cfg_tracked")"
-  recorded="$(jq -r --arg h "$harness" --arg p "$plugin" '.harnesses[$h].plugins[$p].reconciledWith // empty' "$cfg_tracked")"
-  if [ -z "$recorded" ] && [ "$plugin" = "flight" ]; then recorded="$legacy"; fi
-  [ "$recorded" = "$version" ] && [ -z "$legacy" ] && exit 0
-  if [ -n "$recorded" ] && [ "$(printf '%s\n%s\n' "$version" "$recorded" | sort -V | tail -n1)" = "$recorded" ] && [ "$recorded" != "$version" ]; then
-    die "config was reconciled by newer $plugin $recorded; refusing downgrade to $version"
-  fi
-  tmp="$(mktemp "$cfg.tmp.XXXXXX")"
-  trap 'rm -f "$tmp"; cleanup' EXIT
-  jq --arg h "$harness" --arg p "$plugin" --arg v "$version" '
-      .schemaVersion = ([(.schemaVersion // 0), 2] | max)
-    | .harnesses = (.harnesses // {})
-    | .harnesses[$h] = (.harnesses[$h] // {})
-    | .harnesses[$h] |= (
-          (if has("reconciledWith")
-           then (.plugins.flight.reconciledWith = .reconciledWith) | del(.reconciledWith)
-           else . end)
-        | .plugins[$p].reconciledWith = $v
-      )' \
-    "$cfg_tracked" >"$tmp"
-  jq -e . "$tmp" >/dev/null
-  chmod --reference="$cfg_tracked" "$tmp" 2>/dev/null || true
-  mv "$tmp" "$cfg_tracked"
-  trap cleanup EXIT
-  printf 'flight: reconciled %s config with plugin %s %s\n' "$harness" "$plugin" "$version" >&2
-  exit 0
+	[ "$verb" = "--harness" ] || die "usage: flight reconcile --harness <claude|codex>"
+	harness="${1:-}"
+	case "$harness" in claude|codex) ;; *) die "unsupported harness '$harness' (expected claude or codex)" ;; esac
+	[ -f "$cfg_tracked" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
+	jq -e . "$cfg_tracked" >/dev/null 2>&1 || die "$cfg_rel is not valid JSON"
+	schema="$(jq -r '.schemaVersion // 0' "$cfg_tracked")"
+	case "$schema" in ''|*[!0-9]*) die "config schemaVersion must be a non-negative integer" ;; esac
+	[ "$schema" -le "$TRACKER_SCHEMA" ] || die "config uses newer schema $schema; this Flight supports through schema $TRACKER_SCHEMA"
+
+	manifest="$(plugin_manifest)"
+	version="$(jq -r '.version // empty' "$manifest")"
+	[ -n "$version" ] || die "cannot determine installed Flight version"
+	plugin="$(jq -r '.name // empty' "$manifest")"
+	[ -n "$plugin" ] || plugin="flight"
+	legacy="$(jq -r --arg h "$harness" '.harnesses[$h].reconciledWith // empty' "$cfg_tracked")"
+	recorded="$(jq -r --arg h "$harness" --arg p "$plugin" '.harnesses[$h].plugins[$p].reconciledWith // empty' "$cfg_tracked")"
+	if [ -z "$recorded" ] && [ "$plugin" = flight ]; then recorded="$legacy"; fi
+	if [ -n "$recorded" ] && [ "$(printf '%s\n%s\n' "$version" "$recorded" | sort -V | tail -n1)" = "$recorded" ] && [ "$recorded" != "$version" ]; then
+		die "config was reconciled by newer $plugin $recorded; refusing downgrade to $version"
+	fi
+
+	# A file containing both singular and named forms cannot be interpreted
+	# without guessing. Cross-file partial states from our ordered writes are
+	# allowed so an interrupted run can resume safely.
+	if jq -e 'has("issueTrackers") and (has("issues") or has("labels"))' "$cfg_tracked" >/dev/null; then
+		die "mixed tracker config: $cfg_rel contains both legacy issues/labels and issueTrackers; remove one form and retry"
+	fi
+	if [ -f "$cfg_local" ] && jq -e 'has("issueTrackers") and (has("issues") or has("labels"))' "$cfg_local" >/dev/null; then
+		die "mixed tracker config: $cfg_local_rel contains both legacy issues/labels and issueTrackers; remove one form and retry"
+	fi
+	if [ -f "$sec" ]; then
+		jq -e . "$sec" >/dev/null 2>&1 || die "$sec_rel is not valid JSON"
+		if jq -e 'has("issueTrackers") and has("issues")' "$sec" >/dev/null; then
+			die "mixed tracker secrets: $sec_rel contains both issues and issueTrackers; remove one form and retry"
+		fi
+	fi
+
+	needs_migration=0
+	[ "$schema" -lt "$TRACKER_SCHEMA" ] && needs_migration=1
+	jq -e 'has("issues") or has("labels") or (has("issueTrackers") | not)' "$cfg_tracked" >/dev/null && needs_migration=1
+	if [ "$needs_migration" = 0 ]; then
+		validate_trackers "$cfg"
+		[ "$recorded" = "$version" ] && [ -z "$legacy" ] && exit 0
+	fi
+
+	tmp_cfg="$(mktemp "$cfg_tracked.tmp.XXXXXX")"
+	tmp_local=""; tmp_sec=""; tmp_effective=""; tmp_effective_migrated=""
+	trap 'rm -f "$tmp_cfg" ${tmp_local:+"$tmp_local"} ${tmp_sec:+"$tmp_sec"} ${tmp_effective:+"$tmp_effective"} ${tmp_effective_migrated:+"$tmp_effective_migrated"}; cleanup' EXIT
+
+	if jq -e 'has("issueTrackers")' "$cfg_tracked" >/dev/null; then
+		tracked_ref="$(jq -r '.issueTrackers[] | select(.default == true) | .ref' "$cfg_tracked")"
+		[ -n "$tracked_ref" ] || die "cannot resume migration: issueTrackers has no default"
+	else
+		tracked_ref="$(legacy_tracker_ref "$cfg_tracked")"
+	fi
+	effective_ref="$tracked_ref"
+	migrate_config_json "$cfg_tracked" "$tmp_cfg" "$tracked_ref"
+	validate_trackers "$tmp_cfg"
+
+	# Arrays replace under config.local's recursive merge, so a legacy local
+	# override becomes a complete effective tracker array in the local file.
+	if [ -f "$cfg_local" ]; then
+		tmp_local="$(mktemp "$cfg_local.tmp.XXXXXX")"
+		if jq -e 'has("issueTrackers")' "$cfg_local" >/dev/null; then
+			jq '.' "$cfg_local" >"$tmp_local"
+			effective_ref="$(jq -r '.issueTrackers[] | select(.default == true) | .ref' "$tmp_local")"
+			[ -n "$effective_ref" ] || die "cannot resume migration: local issueTrackers has no default"
+		else
+			tmp_effective="$(mktemp "${TMPDIR:-/tmp}/flight-effective.XXXXXX")"
+			jq -s '.[0] * .[1]' "$cfg_tracked" "$cfg_local" >"$tmp_effective"
+			effective_ref="$(legacy_tracker_ref "$tmp_effective")"
+			tmp_effective_migrated="$(mktemp "${TMPDIR:-/tmp}/flight-effective-migrated.XXXXXX")"
+			migrate_config_json "$tmp_effective" "$tmp_effective_migrated" "$effective_ref"
+			jq -s '.[0] as $local | .[1] as $effective | $local | del(.issues, .labels) | .issueTrackers = $effective.issueTrackers' "$cfg_local" "$tmp_effective_migrated" >"$tmp_local"
+			rm -f "$tmp_effective_migrated"; tmp_effective_migrated=""
+		fi
+		[ -z "$tmp_effective" ] || rm -f "$tmp_effective"
+		tmp_effective="$(mktemp "${TMPDIR:-/tmp}/flight-effective.XXXXXX")"
+		jq -s '.[0] * .[1]' "$tmp_cfg" "$tmp_local" >"$tmp_effective"
+		validate_trackers "$tmp_effective"
+		rm -f "$tmp_effective"; tmp_effective=""
+	fi
+
+	if [ -f "$sec" ]; then
+		tmp_sec="$(mktemp "$sec.tmp.XXXXXX")"
+		migrate_secrets_json "$sec" "$tmp_sec" "$effective_ref"
+		jq -e --arg ref "$effective_ref" '(.issueTrackers // {}) | has($ref)' "$tmp_sec" >/dev/null \
+			|| die "migrated secrets do not contain credential for tracker $effective_ref"
+		chmod --reference="$sec" "$tmp_sec" 2>/dev/null || chmod 600 "$tmp_sec"
+		mv "$tmp_sec" "$sec"; tmp_sec=""
+	fi
+	if [ -n "$tmp_local" ]; then
+		chmod --reference="$cfg_local" "$tmp_local" 2>/dev/null || true
+		mv "$tmp_local" "$cfg_local"; tmp_local=""
+	fi
+
+	# Bind pre-schema work before a default can ever change. If this fails, the
+	# tracked config remains schema 2 and the next reconcile safely resumes.
+	[ "$needs_migration" = 0 ] || bind_legacy_default "$effective_ref"
+
+	jq --arg h "$harness" --arg p "$plugin" --arg v "$version" --argjson schema "$TRACKER_SCHEMA" '
+		.schemaVersion = $schema
+		| .harnesses = (.harnesses // {})
+		| .harnesses[$h] = (.harnesses[$h] // {})
+		| .harnesses[$h] |= (
+			(if has("reconciledWith")
+			 then (.plugins.flight.reconciledWith = .reconciledWith) | del(.reconciledWith)
+			 else . end)
+			| .plugins[$p].reconciledWith = $v
+		)' "$tmp_cfg" >"$tmp_cfg.final"
+	mv "$tmp_cfg.final" "$tmp_cfg"
+	jq -e . "$tmp_cfg" >/dev/null
+	chmod --reference="$cfg_tracked" "$tmp_cfg" 2>/dev/null || true
+	mv "$tmp_cfg" "$cfg_tracked"; tmp_cfg=""
+	trap cleanup EXIT
+	printf 'flight: reconciled %s config with plugin %s %s\n' "$harness" "$plugin" "$version" >&2
+	exit 0
 fi
 
 # `flight branches <list|prune>` — dispatcher-owned, because the work is git-local
@@ -300,13 +521,86 @@ fi
 
 [ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
 
+tracker_json=""
+if [ "${runtime_schema:-0}" -eq "$TRACKER_SCHEMA" ] && { [ "$axis" = issues ] || [ "$group" = issues ] || [ "$group" = labels ]; }; then
+	tracker_tool="$SELF_DIR/tracker-config.sh"
+	[ -x "$tracker_tool" ] || die "named tracker resolver is not installed ($tracker_tool)"
+
+	if [ "$all_trackers" = 1 ]; then
+		list_failed=0
+		while IFS= read -r list_ref; do
+			[ -n "$list_ref" ] || continue
+			list_out="$(mktemp "${TMPDIR:-/tmp}/flight-list.XXXXXX")"
+			list_err="$(mktemp "${TMPDIR:-/tmp}/flight-list-err.XXXXXX")"
+			if env -u LS_TOKEN -u FLIGHT_TOKEN -u FORGEJO_TOKEN \
+				"$SELF_DIR/flight" issues list --tracker "$list_ref" "$@" >"$list_out" 2>"$list_err"; then
+				list_backend="$(jq -r --arg r "$(printf '%s' "$list_ref" | tr '[:upper:]' '[:lower:]')" '.issueTrackers[] | select((.ref | ascii_downcase) == $r) | (.backend | ascii_downcase)' "$cfg")"
+				if [ "$list_backend" = jira ]; then
+					awk -v ref="$list_ref" 'BEGIN { FS=OFS="\t" } NF { sub(/^.*-/, "", $1); $1=ref "-" $1; print }' "$list_out"
+				else
+					awk -v ref="$list_ref" 'BEGIN { FS=OFS="\t" } NF { $1=ref "-" $1; print }' "$list_out"
+				fi
+			else
+				list_failed=1
+				list_why="$(tr '\n' ' ' <"$list_err" | sed 's/[[:space:]]*$//')"
+				printf 'flight: tracker %s unavailable: %s\n' "$list_ref" "${list_why:-adapter failed}" >&2
+			fi
+			rm -f "$list_out" "$list_err"
+		done < <(jq -r '.issueTrackers[].ref' "$cfg")
+		exit "$list_failed"
+	fi
+
+	if [ "$group" = issues ] && [ "$verb" = resolve ]; then
+		[ "${1:-}" = --number ] && [ $# -eq 2 ] || die "usage: flight issues resolve --number INPUT [--tracker REF]"
+		resolve_args=(resolve --config "$cfg" --number "$2")
+		[ -z "$tracker_selector" ] || resolve_args+=(--tracker "$tracker_selector")
+		"$tracker_tool" "${resolve_args[@]}"
+		exit 0
+	fi
+
+	if [ "$group" = issues ]; then
+		issue_input=""; want_number=0
+		for route_arg in "$@"; do
+			if [ "$want_number" = 1 ]; then issue_input="$route_arg"; want_number=0
+			elif [ "$route_arg" = --number ]; then want_number=1
+			fi
+		done
+		[ "$want_number" = 0 ] || die "issues $verb: --number needs a value"
+		if [ -n "$issue_input" ]; then
+			resolve_args=(resolve --config "$cfg" --number "$issue_input")
+			[ -z "$tracker_selector" ] || resolve_args+=(--tracker "$tracker_selector")
+			identity_json="$("$tracker_tool" "${resolve_args[@]}")"
+			tracker_selector="$(printf '%s' "$identity_json" | jq -r '.tracker')"
+			native_number="$(printf '%s' "$identity_json" | jq -r '.number')"
+			routed=()
+			while [ $# -gt 0 ]; do
+				if [ "$1" = --number ]; then routed+=(--number "$native_number"); shift 2
+				else routed+=("$1"); shift
+				fi
+			done
+			set -- ${routed[@]+"${routed[@]}"}
+		fi
+	fi
+
+	select_args=(select --config "$cfg")
+	[ -z "$tracker_selector" ] || select_args+=(--tracker "$tracker_selector")
+	tracker_json="$("$tracker_tool" "${select_args[@]}")"
+fi
+
 # Loud, every-run warning if the secrets file is tracked by git (it holds a token).
 if [ -f "$sec" ] && git -C "$repo_root" ls-files --error-unmatch "$sec_rel" >/dev/null 2>&1; then
   echo "flight: WARNING — $sec_rel is tracked by git; it must be gitignored (it contains a token)." >&2
 fi
 
-# Resolve a config field for the axis, inheriting code → issues when absent.
-cfg_get() { jq -r --arg a "$axis" --arg f "$1" '(.[$a][$f]) // (.code[$f]) // empty' "$cfg"; }
+# Resolve a selected tracker field in schema 3. Legacy schemas keep the old
+# issues → code inheritance until reconcile converts them.
+cfg_get() {
+	if [ -n "$tracker_json" ]; then
+		printf '%s' "$tracker_json" | jq -r --arg f "$1" '.[$f] // empty'
+	else
+		jq -r --arg a "$axis" --arg f "$1" '(.[$a][$f]) // (.code[$f]) // empty' "$cfg"
+	fi
+}
 
 backend="$(cfg_get backend)"
 [ -n "$backend" ] || die "no backend configured for axis '$axis' (set code.backend or ${axis}.backend in $cfg_rel)"
@@ -319,7 +613,11 @@ LS_REPO="$(cfg_get repo)"
 # `email` is needed by backends that use email:token HTTP Basic auth (Jira).
 LS_PROJECT="$(cfg_get project)"
 LS_TRUNK="$(jq -r '(.code.trunkBranch) // (.code.stages[0].name) // empty' "$cfg")"
-LS_LABELS_JSON="$(jq -c '.labels // {}' "$cfg")"
+if [ -n "$tracker_json" ]; then
+	LS_LABELS_JSON="$(printf '%s' "$tracker_json" | jq -c '.labels // {}')"
+else
+	LS_LABELS_JSON="$(jq -c '.labels // {}' "$cfg")"
+fi
 # CI-watch hang-guard timeout (seconds). Precedence: env override → config
 # code.ciWatchTimeout → adapter default (900). Empty stays empty so the adapter
 # falls back to its own default.
@@ -350,15 +648,28 @@ LS_CI_QUEUE_TIMEOUT="${LS_CI_QUEUE_TIMEOUT:-$(jq -r '.code.ciQueueTimeout // emp
 # out in every worktree at that path, and repo-relative is the form you would paste
 # into .gitignore, which is what that warning asks for.
 LS_TOKEN_SOURCE=""
-if   [ -n "${LS_TOKEN:-}" ];      then LS_TOKEN_SOURCE='$LS_TOKEN'
-elif [ -n "${FLIGHT_TOKEN:-}" ];  then LS_TOKEN="$FLIGHT_TOKEN";  LS_TOKEN_SOURCE='$FLIGHT_TOKEN'
+if [ -n "$tracker_json" ]; then
+	# Tracker credentials are scoped by stable reference. Ambient code-axis
+	# variables must never shadow them; code reuse is explicit credentialRef=code.
+	credential_ref="$(printf '%s' "$tracker_json" | jq -r '.credentialRef // .ref')"
+	LS_TOKEN=""
+	if [ -f "$sec" ]; then
+		if [ "$credential_ref" = code ]; then
+			LS_TOKEN="$(jq -r '.code.token // empty' "$sec")"
+		else
+			LS_TOKEN="$(jq -r --arg c "$credential_ref" '.issueTrackers[$c].token // empty' "$sec")"
+		fi
+		[ -z "$LS_TOKEN" ] || LS_TOKEN_SOURCE="$sec"
+	fi
+elif [ -n "${LS_TOKEN:-}" ]; then LS_TOKEN_SOURCE='$LS_TOKEN'
+elif [ -n "${FLIGHT_TOKEN:-}" ]; then LS_TOKEN="$FLIGHT_TOKEN"; LS_TOKEN_SOURCE='$FLIGHT_TOKEN'
 elif [ -n "${FORGEJO_TOKEN:-}" ]; then LS_TOKEN="$FORGEJO_TOKEN"; LS_TOKEN_SOURCE='$FORGEJO_TOKEN'
 else
-  LS_TOKEN=""
-  if [ -f "$sec" ]; then
-    LS_TOKEN="$(jq -r --arg a "$axis" '(.[$a].token) // (.code.token) // empty' "$sec")"
-    if [ -n "$LS_TOKEN" ]; then LS_TOKEN_SOURCE="$sec"; fi
-  fi
+	LS_TOKEN=""
+	if [ -f "$sec" ]; then
+		LS_TOKEN="$(jq -r --arg a "$axis" '(.[$a].token) // (.code.token) // empty' "$sec")"
+		if [ -n "$LS_TOKEN" ]; then LS_TOKEN_SOURCE="$sec"; fi
+	fi
 fi
 
 # Note on stderr for the one combination that actually misleads (#177): the LEGACY
@@ -370,7 +681,7 @@ fi
 # `auth check` names the source it used, for every source.
 # Advisory only, so an unreadable secrets file is swallowed here — the resolution
 # path above still dies loudly on one.
-if [ "$LS_TOKEN_SOURCE" = '$FORGEJO_TOKEN' ] && [ -f "$sec" ]; then
+if [ -z "$tracker_json" ] && [ "$LS_TOKEN_SOURCE" = '$FORGEJO_TOKEN' ] && [ -f "$sec" ]; then
   shadowed_token="$(jq -r --arg a "$axis" '(.[$a].token) // (.code.token) // empty' "$sec" 2>/dev/null || printf '')"
   if [ -n "$shadowed_token" ] && [ "$shadowed_token" != "$LS_TOKEN" ]; then
     echo "flight: note — the legacy \$FORGEJO_TOKEN is set and overrides $sec, which holds a different token; an auth failure here is about the environment variable, not the file. Unset it, or use \$FLIGHT_TOKEN if the override is deliberate." >&2
@@ -378,9 +689,20 @@ if [ "$LS_TOKEN_SOURCE" = '$FORGEJO_TOKEN' ] && [ -f "$sec" ]; then
   unset shadowed_token
 fi
 # Email (for email:token Basic auth): env override, then config, then secrets.
-LS_EMAIL="${LS_EMAIL:-$(cfg_get email)}"
-if [ -z "$LS_EMAIL" ] && [ -f "$sec" ]; then
-  LS_EMAIL="$(jq -r --arg a "$axis" '(.[$a].email) // (.code.email) // empty' "$sec")"
+if [ -n "$tracker_json" ]; then
+	LS_EMAIL="$(cfg_get email)"
+	if [ -z "$LS_EMAIL" ] && [ -f "$sec" ]; then
+		if [ "$credential_ref" = code ]; then
+			LS_EMAIL="$(jq -r '.code.email // empty' "$sec")"
+		else
+			LS_EMAIL="$(jq -r --arg c "$credential_ref" '.issueTrackers[$c].email // empty' "$sec")"
+		fi
+	fi
+else
+	LS_EMAIL="${LS_EMAIL:-$(cfg_get email)}"
+	if [ -z "$LS_EMAIL" ] && [ -f "$sec" ]; then
+		LS_EMAIL="$(jq -r --arg a "$axis" '(.[$a].email) // (.code.email) // empty' "$sec")"
+	fi
 fi
 
 # Signature (#132). Every body flight writes ends with

@@ -51,8 +51,8 @@ check "reconcile stamps the tracked config.json" \
 	"$([ -n "$(jq -r '.harnesses.claude.plugins.flight.reconciledWith // empty' "$R/.flightdirector/config.json")" ] && echo 1 || echo 0)"
 check "reconcile does not copy local overrides into the tracked file" \
 	"$([ "$(jq -r '.code.owner' "$R/.flightdirector/config.json")" = acme ] && echo 1 || echo 0)"
-check "reconcile leaves config.local.json untouched" \
-	"$([ "$(cat "$R/.flightdirector/config.local.json")" = '{"code":{"owner":"me"}}' ] && echo 1 || echo 0)"
+check "schema migration keeps local overrides in config.local.json" \
+	"$(jq -e '.code.owner == "me" and .issueTrackers[0].owner == "me" and (.issues | not)' "$R/.flightdirector/config.local.json" >/dev/null && echo 1 || echo 0)"
 out="$(cd "$R" && "$DISP" config '.code.owner' 2>/dev/null)"
 check "after reconcile the merged view still applies" "$([ "$out" = me ] && echo 1 || echo 0)" "$out"
 
