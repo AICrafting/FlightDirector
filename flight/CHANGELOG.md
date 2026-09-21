@@ -34,7 +34,8 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   step gated on a test plan *existing*; nothing read the PR body for what it said it deliberately
   did **not** do, so a PR could ship a "known gaps" list, merge, close its issue, and leave the
   remainder tracked nowhere but a merged body. Step 3 now scans the assembled body for deferral
-  shapes and halts unless each one names an `#N` verified open — and states plainly that an issue
+  shapes - semantically, so a bare `TODO:` counts as much as an `## Out of scope` heading - and
+  halts unless each one names an `#N` verified open — and states plainly that an issue
   this PR resolves does not count, since it closes when the work reaches a closing stage and takes
   the note with it. The `- no user surface` escape hatch is likewise narrowed to an *inherently* absent surface
   (infra, migration, refactor); a surface that exists but could not be reached from the default

@@ -131,8 +131,12 @@ Both readings of "no user surface" are honest. Only the inherent one is what thi
 ### Deferral scan — before `pr open`
 
 The body drafted in Step 4 is the last place a deliberate omission is written down. Read it back
-before you post it and look for deferral shapes: `## Known gaps`, `## Out of scope`, "left for a
-separate pass", "follow-up", "not handled here", "deliberately not handled".
+before you post it and look for deferrals. **The test is semantic, not textual**: anything the body
+records as deliberately not done is a deferral, however it happens to be phrased. `## Known gaps`,
+`## Out of scope`, "TODO", "future work", "not in scope", "punted", "deferred to", "left as-is",
+"left for a separate pass", "follow-up", "not handled here", "deliberately not handled" are
+*examples of the shape*, not a list to grep for — `TODO: handle the multi-tenant case` is exactly
+what this rule exists to catch, and it matches none of them.
 
 Every deferred item needs a **live tracker** — an `#N` you have verified *open*, or an issue you
 file right then. `issues get` succeeds on a closed issue, so check state against the open list
@@ -143,6 +147,10 @@ instead — fetched once into a variable, then matched with a here-string rather
 OPEN="$(flight issues list --state open --limit 500 | cut -f1)"
 grep -qx "<N>" <<<"$OPEN"        # exit 0 → open, deferral is tracked; non-zero → HALT
 ```
+
+The `--limit` must stay comfortably above the repo's open-issue count, and `issues list` pages
+underneath it (#149) rather than clamping to the server's per-page cap. Don't "simplify" it back
+down: an open issue past the cap would read as closed and halt a PR that was correctly tracked.
 
 A closed `#N` is a failure, not a pass. And **an issue this PR resolves does not count as the
 tracker** — not even on a `Ready #N` hop where it stays open for now. It closes when the work

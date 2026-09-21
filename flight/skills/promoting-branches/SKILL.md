@@ -151,10 +151,13 @@ git -C "$SCRATCH/int-<zone>" push -u origin "$INT"
 #   - the `- no user surface` hatch is for an INHERENTLY absent surface (infra/migration/refactor),
 #     never a surface you merely couldn't reach — obstructed means write the real plan, drive the
 #     precondition as a step, and file a successor issue for the fixture.
-#   - scan the assembled body for deferrals ("known gaps", "out of scope", "follow-up"). Each needs an
-#     #N verified open (OPEN="$("$DISP" issues list --state open --limit 500 | cut -f1)" once, then
-#     grep -qx <N> <<<"$OPEN"), filed right then if absent. An issue this PR resolves does NOT count
-#     as the tracker, even on a Ready #N hop where it stays open for now. Halt the group otherwise.
+#   - scan the assembled body for deferrals. The test is SEMANTIC, not textual: anything the body
+#     records as deliberately not done ("known gaps", "out of scope", "TODO", "future work", "punted",
+#     "follow-up", ...) counts, however phrased — those are examples, not a list to grep for. Each
+#     needs an #N verified open (OPEN="$("$DISP" issues list --state open --limit 500 | cut -f1)"
+#     once, then grep -qx <N> <<<"$OPEN"; the limit must exceed the open-issue count — list pages
+#     under it, #149), filed right then if absent. An issue this PR resolves does NOT count as the
+#     tracker, even on a Ready #N hop where it stays open for now. Halt the group otherwise.
 PR="$("$DISP" pr open --head "$INT" --base "$BASE" --title "Batch: <zone> (#<n>, #<n>, …)" --body-file "$SCRATCH/pr-<zone>.md" --model <your-model-id>)"
 # watch CI ("$DISP" ci watch --pr "<pr#>" …). Read the `status=` on the last line, NOT the exit code —
 # it exits 0 on any terminal verdict. status=failure → record the group FAILED ("$DISP" ci log --pr "<pr#>"
