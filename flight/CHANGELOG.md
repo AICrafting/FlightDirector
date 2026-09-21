@@ -15,6 +15,20 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- **A repo can name its own check command, and promotion runs it** (#209). New optional
+  `code.preflight`: a shell command string that flight runs, from the checkout holding the code
+  being gated, before work is merged or pushed. A non-zero exit halts the operation and the
+  failing output is shown. It closes a specific hole — a `direct` hop has no CI behind it, so
+  until now the only gate on `feature → develop` was a human saying "promote", and batch agents
+  were told to "run the repo's test command if one exists", leaving the command to each agent's
+  judgment every time. `promoting-a-branch` runs it after the freshness check and before the
+  merge (or before the source branch is pushed on a `pr` hop); `promoting-branches` runs it per
+  branch before that branch's merge, so a red gate is a skip and the clean branches still ship;
+  `queue-batches` runs it from the **orchestrator** once a zone finishes, once per issue
+  worktree, because a returned agent's shell is gone and cannot report a backgrounded result.
+  **Absent by default**: with no `code.preflight` in the config every one of those steps is
+  skipped and behaviour is exactly what it was, which is every repo configured before this.
+
 - **A repo can nominate a starting status for newly filed issues** (#193). `setting-up-a-repo`
   now offers it: a freshly filed issue gets a `status/*` label so a board can tell "nobody has
   looked at this yet" apart from "someone forgot the label", and "what is untriaged?" becomes a

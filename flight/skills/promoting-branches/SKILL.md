@@ -31,6 +31,11 @@ reinvent. Manifest state is managed by the `batch-manifest` command.
   acts on whichever directory you last landed in. Bind `$MAIN` once in Step 1 and anchor
   everything after it; paths passed to an anchored command resolve relative to that `-C`
   directory, not to your current one.
+- **A configured `code.preflight` runs per branch, before that branch's merge — never once on
+  `BASE` after the group.** A gate run after M merges have stacked on the stage can only report a
+  failure it is too late to act on: backing it out means resetting a stage, which this skill
+  never does. Per branch, a red gate is a skip (`SKIPPED(<N>, preflight)`) and the clean branches
+  still ship.
 - **Never build an integration worktree on an unfetched `BASE`.** Fetch and compare before every
   `worktree add` off `stages[0]` (Step 4). Local ahead of / diverged from `origin/$BASE` → STOP
   and report; never `git pull` to reconcile it.
@@ -51,9 +56,13 @@ MAIN="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 
 BASE="$("$DISP" config '.code.stages[0].name')"
 MERGE="$("$DISP" config '.code.stages[0].merge // "direct"')"   # direct | pr
+PREFLIGHT="$("$DISP" config '.code.preflight // empty')"        # repo gate; empty = not configured
 ```
 
-`BASE` is the first-hop target; `MERGE` decides direct-merge vs one-PR-per-group.
+`BASE` is the first-hop target; `MERGE` decides direct-merge vs one-PR-per-group. `PREFLIGHT` is
+the repo's own check command ([flight-setup.md](../../references/flight-setup.md) → *Repo
+preflight gate*); when it is empty every preflight step below is skipped and the run behaves
+exactly as it did before the key existed.
 
 ## Step 2: Find candidate branches
 
@@ -113,6 +122,13 @@ MB="$(git -C "$MAIN" merge-base "$BASE" "origin/$BASE")"
 # No origin / fetch fails (offline): warn, continue, and mark BASE unverified in the report.
 
 for each branch feature/<N>-<slug> in the group:
+    # Repo gate, per branch, in that branch's own worktree — before its merge, so a failure
+    # costs a skip rather than a merge commit nobody can take back off the stage.
+    if [ -n "$PREFLIGHT" ]; then
+        ( cd "$MAIN/.worktrees/<N>-<slug>" && sh -c "$PREFLIGHT" ) \
+          >"$SCRATCH/preflight-<N>.log" 2>&1 \
+          || { tail -40 "$SCRATCH/preflight-<N>.log"; record SKIPPED(<N>, preflight); continue; }
+    fi
     git -C "$MAIN" merge --no-ff "feature/<N>-<slug>" -m "Merge feature/<N>-<slug> into $BASE (#<N>)"
     # if the merge commit signs badly (%G? = B), re-sign: git -C "$MAIN" commit --amend --no-edit -S
     # on conflict: git -C "$MAIN" merge --abort; record SKIPPED(<N>, conflict); continue
@@ -142,6 +158,13 @@ git -C "$MAIN" worktree add -b "$INT" "$SCRATCH/int-<zone>" "<the ref the check 
 for each branch in the group:
     git -C "$SCRATCH/int-<zone>" merge --no-ff "feature/<N>-<slug>" \
       || { git -C "$SCRATCH/int-<zone>" merge --abort; record SKIPPED(<N>, conflict); }
+# Repo gate on the assembled group, in the integration worktree, before the push: the branches
+# are merged here but nothing is on origin yet, so a red gate costs a re-run, not a revert.
+if [ -n "$PREFLIGHT" ]; then
+    ( cd "$SCRATCH/int-<zone>" && sh -c "$PREFLIGHT" ) >"$SCRATCH/preflight-<zone>.log" 2>&1 \
+      || { tail -40 "$SCRATCH/preflight-<zone>.log"; record FAILED(<zone>, preflight); }
+      # STOP this group — do not push, do not open the PR. Other groups continue.
+fi
 git -C "$SCRATCH/int-<zone>" push -u origin "$INT"
 # Assemble the PR body: Summary + a per-issue test plan — read each issue's body AND comments first
 # ("$DISP" issues get / issues comments --number <N>; the thread carries scope changes and the work
@@ -211,8 +234,9 @@ the self-heal case in Step 3 (entries whose branches/worktrees vanished outside 
 ## Step 6: Report
 
 Print a summary: promoted (per group, with SHAs / PR numbers), and skipped/failed with reason
-(conflict, CI, no test plan). Skipped issues stay at `to-test`, unmerged, and remain in their
-manifest for a re-run.
+(conflict, preflight, CI, no test plan). Skipped issues stay at `to-test`, unmerged, and remain
+in their manifest for a re-run. A preflight skip names the log path so the user can read the
+failure without re-running the gate.
 
 ## Common mistakes
 
@@ -220,6 +244,9 @@ manifest for a re-run.
 - Skipping manifest `heal` after promotion — promoted issues would linger. Heal after every group.
 - Using `Closes #N` when `stages[0]` does not close issues — use `Ready #N`.
 - Aborting the whole run on one conflict. Skip + report; never block the clean branches.
+- Running `code.preflight` once on `BASE` after a direct group's merges instead of per branch
+  before each one. It gives you a verdict you cannot act on: the only fix is unwinding a stage,
+  and it tells you nothing about *which* branch broke the gate.
 - Reinventing merge/sign/CI logic instead of reusing `promoting-a-branch`.
 - Running a bare `git merge` / `git push` / `git worktree remove` inside the per-branch loop.
   You move between worktrees constantly here; anchor every command with `-C "$MAIN"` (or the
