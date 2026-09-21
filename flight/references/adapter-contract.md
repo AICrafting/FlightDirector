@@ -163,10 +163,10 @@ GitLab comment endpoints do cap, and are paged.
 | Verb    | Args                                                   | stdout |
 |---------|--------------------------------------------------------|--------|
 | `open`  | `--head BRANCH` `--base BRANCH` `--title T` `--body-file PATH` | `number⇥url` |
-| `get`   | `--number N`                                           | `number⇥title⇥state⇥url` |
+| `get`   | `--number N`                                           | `number⇥title⇥state⇥url`. `state` is **normalized to the vocabulary `pr list` already uses — `open` \| `closed` \| `merged`** — whatever the backend calls it on the wire, so `[ "$(flight pr get --number N \| cut -f3)" = open ]` is a correct open check on every backend. GitLab spells an open MR `opened` (mapped) and has a first-class `merged` (kept); Forgejo and GitHub have no merged state at all — a merged PR is a closed one with `merged_at` set — so the adapter derives it, the same expression its `list` projection uses. GitLab's transient `locked` is the one value that passes through unchanged: it has no equivalent anywhere else, and folding it into `open` or `closed` would invent a fact |
 | `update`| `--number N` `--title T` and/or `--body B` (or `--body-file PATH`) | (nothing) — patches only the fields passed, so a title fix leaves the body alone (mirrors `issues update`) |
 | `merge` | `--number N` `--strategy merge\|squash\|rebase`        | (nothing) |
-| `list`  | `--state open\|closed\|merged\|all` (default `open`) `[--head BRANCH] [--base BRANCH] [--limit N]` (default 30) | one row per PR: `number⇥state⇥head⇥base⇥title`; `state` is `merged` for a merged PR whatever the backend calls it. `--state merged --head <branch>` is how `branches` detects a **squash/rebase** merge, whose commits are rewritten so the branch tip never becomes an ancestor of the target. `--limit` bounds the **fetch**, not the matches — on Forgejo, where `--head`/`--base` filter client-side, a small limit can hide an old PR. The fetch itself is paged (see **Paging**), so the limit is honoured in full rather than clamped to one page. |
+| `list`  | `--state open\|closed\|merged\|all` (default `open`) `[--head BRANCH] [--base BRANCH] [--limit N]` (default 30) | one row per PR: `number⇥state⇥head⇥base⇥title`; `state` is the same normalized `open` \| `closed` \| `merged` as `pr get` — `merged` for a merged PR whatever the backend calls it, and `open` for a GitLab MR the wire calls `opened`. `--state merged --head <branch>` is how `branches` detects a **squash/rebase** merge, whose commits are rewritten so the branch tip never becomes an ancestor of the target. `--limit` bounds the **fetch**, not the matches — on Forgejo, where `--head`/`--base` filter client-side, a small limit can hide an old PR. The fetch itself is paged (see **Paging**), so the limit is honoured in full rather than clamped to one page. |
 
 ### `auth`
 
@@ -269,9 +269,10 @@ Safety is in the verb, not in the caller:
   github adapter resolves and applies labels by name internally (skills are unchanged). `issues
   attach` is **not supported** on GitHub (no REST API for issue attachments) and exits non-zero
   with that reason. `issues list` filters out pull requests (GitHub returns PRs from the issues
-  endpoint). `pr merge` maps `--strategy` to GitHub's `merge_method`. `pr list` has no `merged` state
-  either — merged is closed-with-`merged_at` — but GitHub *does* filter by branch server-side, so
-  the adapter sends `head=<owner>:<branch>` and `base=` and re-checks client-side. `ci log` streams per-job
+  endpoint). `pr merge` maps `--strategy` to GitHub's `merge_method`. `pr` has no `merged` state
+  either — merged is closed-with-`merged_at`, which both `pr list` and `pr get` read to report
+  `merged` — but GitHub *does* filter by branch server-side, so the adapter sends
+  `head=<owner>:<branch>` and `base=` and re-checks client-side. `ci log` streams per-job
   logs (`/actions/jobs/{id}/logs`) rather than the run-level zip. Note GitHub's `issues list`
   endpoint is **eventually consistent** — a just-created issue can take a few seconds to appear in
   the list, though `issues get` reflects it immediately; don't rely on a list snapshot taken
@@ -280,9 +281,9 @@ Safety is in the verb, not in the caller:
   adapter builds `projects/<owner%2Frepo>` from `owner`/`repo` (subgroups' slashes encode too).
   Issues are addressed by their per-project **`iid`** (what the contract calls `--number`), and
   the body lives in `description`, not `body`. GitLab reports an open issue's state as
-  **`opened`**, not `open`, so `issues get` normalizes it — a caller comparing the raw wire value
-  against `open` would read every open GitLab issue as not-open. Labels are applied **by name**
-  (like GitHub) via
+  **`opened`**, not `open`, and spells an open MR's state the same way, so `issues get`, `pr get` and
+  `pr list` all normalize it — a caller comparing the raw wire value against `open` would read every
+  open GitLab issue and MR as not-open. Labels are applied **by name** (like GitHub) via
   `add_labels`/`remove_labels`; `set-status` does the single-status swap in one `PUT`. Auth is a
   `PRIVATE-TOKEN` header (personal/project access token). `issues comments` drops GitLab **system
   notes** (label/state-change activity) so only real comments come back. `issues attach` uploads
@@ -296,7 +297,9 @@ Safety is in the verb, not in the caller:
   counts as failure; `skipped` is additionally counted on its own axis, so an all-skipped SHA verdicts
   as `skipped`. `ci log` pulls the failed pipeline's failed-job traces (`/jobs/:id/trace`).
   `pr list` is the one backend with a first-class `merged` state and server-side
-  `source_branch`/`target_branch` filters; `--state open` is spelled `opened`.
+  `source_branch`/`target_branch` filters; `--state open` is spelled `opened`. It is also the only
+  backend with a `locked` state (transient, while a merge is in flight), which `pr get`/`pr list`
+  pass through rather than mapping.
   MR **mergeability is computed asynchronously**, so an immediate `pr merge` right after `pr open`
   can transiently 405 until GitLab finishes its merge check — retry briefly (the rig smoke does).
 - **Jira backend specifics:** Jira is an **issues-axis-only** backend (an issue tracker, not a git

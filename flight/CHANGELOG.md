@@ -30,6 +30,23 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
+- **`pr get` and `pr list` report one state vocabulary on every backend** (#206). Both verbs now
+  emit `open` | `closed` | `merged` whatever the backend calls it, so
+  `[ "$(flight pr get --number N | cut -f3)" = open ]` is a correct open check anywhere.
+  Previously `pr get` passed `.state` through raw: GitLab spells an open MR `opened`, so that
+  comparison was false for every open GitLab MR, and `pr list` leaked the same raw value even
+  though its documented shape already promised the normalized one. Nothing in the skills compared
+  the field, so this was a latent trap rather than an active break - but #205 had just normalized
+  `issues get` to `open` | `closed`, which made the asymmetry a reasonable thing to trip over.
+
+  **Compatibility:** on Forgejo and GitHub, `pr get` on a **merged** PR now reports `merged`
+  where it used to report `closed`. Those backends have no merged state on the wire (a merged PR
+  is a closed one with `merged_at` set), and `pr list` has always derived `merged` from it; `pr
+  get` simply was not. GitLab's transient `locked` still passes through unchanged - it has no
+  equivalent on the other backends, and folding it into `open` or `closed` would invent a fact.
+  The contract row now names the possible values, and the rig smokes assert the live post-merge
+  value, which is the case a fake curl can only approximate.
+
 - **The repo's own test suite runs in parallel** (#212). `scripts/run-tests.sh` ran its
   `scripts/tests/*.test.sh` one at a time, which made the Windows CI leg ~78% of the test
   workflow's wall clock: a median 488s against 112s for macOS and ~72s for the two Linux legs,

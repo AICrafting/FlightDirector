@@ -23,10 +23,12 @@ while [ $# -gt 0 ]; do
 		*) url="$1"; shift ;;
 	esac
 done
-# One PR, in both the Forgejo/GitHub and the GitLab field spellings.
-printf '%s' '{"number":42,"iid":42,"title":"Promote develop → qa","state":"open",
+# One open PR, in both the Forgejo/GitHub and the GitLab field spellings. The
+# state comes from $PR_STATE so each backend gets its OWN wire value (GitLab
+# says `opened`) rather than a shared one the adapter never has to normalize.
+printf '{"number":42,"iid":42,"title":"Promote develop → qa","state":"%s","merged_at":null,
 	"html_url":"https://example.invalid/acme/widget/pulls/42",
-	"web_url":"https://example.invalid/acme/widget/-/merge_requests/42"}' >"$out"
+	"web_url":"https://example.invalid/acme/widget/-/merge_requests/42"}' "${PR_STATE:?}" >"$out"
 if [ "$method" != GET ]; then
 	# One line per write: METHOD⇥url⇥compacted-payload (adapters send pretty JSON).
 	printf '%s\t%s\t%s\n' "$method" "$url" "$(printf '%s' "$payload" | jq -c . 2>/dev/null)" >>"${CURL_LOG:?}"
@@ -61,9 +63,10 @@ run() {
 payload() { cut -f3 "$CURL_LOG"; }
 
 # --- pr update: only the fields passed are patched -------------------------
-# backend | expected METHOD | expected API URL | body field name | expected web url
-while IFS='|' read -r backend method url bodykey web_url; do
+# backend | expected METHOD | expected API URL | body field name | expected web url | open-PR wire state
+while IFS='|' read -r backend method url bodykey web_url wire_state; do
 	[ -n "$backend" ] || continue
+	export PR_STATE="$wire_state"
 
 	if run "$backend" update --number 42 --title 'Fixed title'; then
 		check "$(cut -f1,2 "$CURL_LOG")" "$(printf '%s\t%s' "$method" "$url")" \
@@ -121,10 +124,12 @@ while IFS='|' read -r backend method url bodykey web_url; do
 	fi
 
 	# --- pr get ---
+	# `state` is normalized, so every backend reports `open` however it spells it
+	# on the wire (#206). The full matrix lives in pr-state.test.sh.
 	if run "$backend" get --number 42; then
 		check "$(cat "$SANDBOX/out")" \
 			"$(printf '42\tPromote develop → qa\topen\t%s' "$web_url")" \
-			"$backend pr get emits number⇥title⇥state⇥url"
+			"$backend pr get normalizes '$wire_state' to open in number⇥title⇥state⇥url"
 		check "$(grep -c . "$CURL_LOG")" "0" "$backend pr get writes nothing"
 	else
 		bad "$backend pr get exited non-zero"
@@ -136,9 +141,9 @@ while IFS='|' read -r backend method url bodykey web_url; do
 		ok "$backend pr get requires --number"
 	fi
 done <<ROWS
-forgejo|PATCH|https://example.invalid/api/repos/acme/widget/pulls/42|body|https://example.invalid/acme/widget/pulls/42
-github|PATCH|https://example.invalid/api/repos/acme/widget/pulls/42|body|https://example.invalid/acme/widget/pulls/42
-gitlab|PUT|https://example.invalid/api/projects/acme%2Fwidget/merge_requests/42|description|https://example.invalid/acme/widget/-/merge_requests/42
+forgejo|PATCH|https://example.invalid/api/repos/acme/widget/pulls/42|body|https://example.invalid/acme/widget/pulls/42|open
+github|PATCH|https://example.invalid/api/repos/acme/widget/pulls/42|body|https://example.invalid/acme/widget/pulls/42|open
+gitlab|PUT|https://example.invalid/api/projects/acme%2Fwidget/merge_requests/42|description|https://example.invalid/acme/widget/-/merge_requests/42|opened
 ROWS
 
 # --- jira has no `pr` adapter at all: the dispatcher must refuse the axis ---

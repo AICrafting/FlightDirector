@@ -103,8 +103,12 @@ case "$verb" in
       *) die "pr get: unknown arg '$1'" ;;
     esac; done
     [ -n "$number" ] || die "pr get: --number required"
+    # Forgejo/GitHub have no `merged` state — a merged PR is a closed one with
+    # `merged_at` set — so the projection derives it, exactly as `pr list` does.
     _api GET "/pulls/${number}" \
-      | jq -r '[(.number|tostring), .title, .state, .html_url] | @tsv'
+      | jq -r '[(.number|tostring), .title,
+                (if .merged_at != null then "merged" else .state end),
+                .html_url] | @tsv'
     ;;
 
   merge)

@@ -82,6 +82,12 @@ HEAD_SHA="$(curl -fsS "${H[@]}" "$PROJECT_API/repository/branches/$(printf '%s' 
 MR="$(lsp pr open --head "$HEAD" --base "$BASE" --title "[rig] pr $TS" --body "rig mr")"
 mrnum="$(awk -F'\t' '{print $1}' <<<"$MR")"
 [[ "$mrnum" =~ ^[0-9]+$ ]] && ok "pr open returns number⇥url ($mrnum)" || no "pr open returns number⇥url" "got '$MR'"
+# GitLab's wire value for an open MR is `opened`; `pr get` and `pr list` normalize it
+# to `open` (#206). This is the case a fake curl cannot stand in for.
+PST="$(lsp pr get --number "$mrnum" | cut -f3)"
+[ "$PST" = open ] && ok "pr get normalizes GitLab's 'opened' to open" || no "pr get normalizes 'opened'" "got '$PST'"
+LST="$(lsp pr list --state open --head "$HEAD" | awk -F'\t' -v n="$mrnum" '$1 == n {print $2}')"
+[ "$LST" = open ] && ok "pr list normalizes GitLab's 'opened' to open" || no "pr list normalizes 'opened'" "got '$LST'"
 
 # Watch BEFORE merging, the order a real promotion uses (#185). This project removes the
 # source branch on merge (`remove_source_branch_after_merge`), and a runner picks the push
@@ -107,6 +113,16 @@ for _ in $(seq 1 10); do
   sleep 2
 done
 [ "$merged" = 1 ] && ok "pr merge exits 0" || no "pr merge exits 0"
+# GitLab parks an MR in the transient `locked` state while the merge is in flight,
+# and `pr get` passes that through deliberately — so give it the same brief retry
+# the merge itself needs before calling the post-merge value wrong.
+PST=""
+for _ in $(seq 1 10); do
+  PST="$(lsp pr get --number "$mrnum" | cut -f3)"
+  [ "$PST" = locked ] || break
+  sleep 2
+done
+[ "$PST" = merged ] && ok "pr get reports state=merged after the merge" || no "pr get reports state=merged" "got '$PST'"
 
 echo "── ci log on a red merge-request pipeline (#138) ──"
 # An MR whose head carries an MR-only .gitlab-ci.yml with a red job (while `rig-fail`

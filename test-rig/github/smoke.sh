@@ -89,6 +89,11 @@ HEAD_SHA="$(curl -fsS "${H[@]}" "$REPO_API/git/ref/heads/$HEAD" | jq -r '.object
 PR="$(lsp pr open --head "$HEAD" --base "$BASE" --title "[rig] pr $TS" --body "rig pr")"
 prnum="$(awk -F'\t' '{print $1}' <<<"$PR")"
 [[ "$prnum" =~ ^[0-9]+$ ]] && ok "pr open returns number⇥url ($prnum)" || no "pr open returns number⇥url" "got '$PR'"
+# `pr get`'s state is normalized to open|closed|merged (#206). GitHub says `open` on
+# the wire, but reports a MERGED PR as `closed` with merged_at set — the post-merge
+# value below is the one a fake curl can only approximate.
+PST="$(lsp pr get --number "$prnum" | cut -f3)"
+[ "$PST" = open ] && ok "pr get reports state=open before the merge" || no "pr get reports state=open" "got '$PST'"
 
 # Watch BEFORE merging, the order a real promotion uses (#185): the seeded workflow checks
 # the branch out, and a repo that deletes head branches on merge would leave it nothing to
@@ -105,6 +110,9 @@ fi
 
 echo "── pr merge ──"
 lsp pr merge --number "$prnum" --strategy squash && ok "pr merge exits 0" || no "pr merge exits 0"
+PST="$(lsp pr get --number "$prnum" | cut -f3)"
+[ "$PST" = merged ] && ok "pr get reports state=merged after the merge" \
+  || no "pr get reports state=merged (closed + merged_at on the wire)" "got '$PST'"
 
 echo "── ci log on a red pull_request run (#138) ──"
 # A PR whose head carries two pull_request workflows — one red (while `rig-fail` exists),
