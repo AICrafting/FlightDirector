@@ -54,8 +54,9 @@ git -C "$ROOT" worktree list | grep -E '\.worktrees/[0-9]+-' || true
 ls "$SCRATCH"/queue-status/*.log 2>/dev/null || true
 ```
 
-For each leftover, classify from the log's last line: no `ticket=all status=done` → **agent still
-working**; `status=done` but worktrees still present → **done, awaiting serial ship/cleanup**.
+For each leftover, classify from its `ticket=all` line, wherever it sits: no
+`ticket=all status=done` → **agent still working**; `status=done` but worktrees still present →
+**done, awaiting serial ship/cleanup**.
 
 A lingering **run manifest** (`batch-manifest groups` prints zones) is *not* by itself a block:
 a manifest whose issues have **no** `.worktrees/<N>-*` worktree left is **stale** — its run was
@@ -158,18 +159,32 @@ batch-manifest write --run-id "$RUN_ID" \
 ## 4. Monitor + render
 
 On every worker or log update, parse the line and re-render the board. If the active harness has a
-task-board primitive, update the matching issue task (`queued` → pending; `starting`/`working` →
-in progress; `complete` → completed; `blocked` → in progress with the note; `preflight-fail` →
-back to **in progress** with the failing log path, since that issue is not shippable and was
-already marked completed; `preflight-skip` → **also** back to in progress with the note, because a
-gate that never ran has verified nothing and leaving the task `completed` recreates exactly the
-two-boards-disagree problem; `preflight-pass` → leave the task as it is). When a zone's
-final line is `status=done`, render that zone's header with `⇥` (done, awaiting promotion); a final
-`status=safety-valved` means the zone did not finish its queue — render its header with `✗` and
+task-board primitive, update the matching issue task (`queued` → pending; `starting`/`working` → in
+progress; `complete` → completed; `blocked` → in progress with the note; `preflight-fail` → back to
+**in progress** with the failing log path, since that issue is not shippable and was already marked
+completed; `preflight-skip` → **also** back to in progress with the note, because a gate that never
+ran has verified nothing and leaving the task `completed` recreates exactly the two-boards-disagree
+problem; `preflight-pass` → leave the task as it is). When a zone's `ticket=all`
+line reads `status=done`, render that zone's header with `⇥` (done, awaiting promotion); `ticket=all
+status=safety-valved` means the zone did not finish its queue — render its header with `✗` and
 surface its unfinished issues as deferred. When a zone emits its terminal line, start that zone's
-repo gate sweep (4a) before rendering it as `⇥`. Once every zone has emitted a terminal line
+repo gate sweep (4a) before rendering it as `⇥`. Once every zone has emitted its terminal line
 **and** its sweep has finished, proceed to Section 5. Match tasks by the `[<zone>] #<N>` subject
 prefix.
+
+**An agent returning is not that signal — its `ticket=all` line is.** When a zone's agent returns,
+look for that zone's `ticket=all` line. No such line means the zone is **unfinished, regardless of
+what the agent said**: a returned agent's account of its own state is the one piece of evidence that
+cannot be trusted here (4a's "From the orchestrator, not from the agent" carries the argument; the
+harness-specific mechanism is in [Claude Code](references/dispatch-claude.md)). Key on `ticket=all`
+wherever it sits, never on position — with `code.preflight` configured, 4a's own lines land after
+it. If the agent's latest line is `status=blocked`, that is a question still to route (below).
+Otherwise it has most likely parked, so establish what is actually still running before doing
+anything. Footgun: the orchestrator's own log watcher appears in a `ps` listing matched on the log
+path or worktree, so a match is not proof the worker's job is alive — look for the worker's own
+command. If nothing is, resume the agent through the harness's agent-messaging primitive (nothing is
+running; redo the step in the foreground and carry on); if it cannot be resumed, surface its
+unfinished issues as deferred, as for `safety-valved`.
 
 ### 4a. Repo gate sweep — the orchestrator runs it, not the agents
 
@@ -281,7 +296,8 @@ the failing log's path in `note=`, and `preflight-skip` means the gate could not
 rather than that it failed — never conflate the two, since one is a problem with the code and the
 other is a problem with the workspace. Its `note=` says which: no worktree, several worktrees
 matching the issue number, or a lock timeout. All three mean *unverified*, so all three are
-reported. Final per-zone line: `<ts> <zone> ticket=all status=<done|safety-valved> note="…"`.
+reported. Terminal line, the agent's last (4a's three statuses may follow it, so match on
+`ticket=all`, not on position): `<ts> <zone> ticket=all status=<done|safety-valved> note="…"`.
 
 ## Display format (stacked, phone-legible)
 
@@ -314,16 +330,18 @@ Wait for the user's answer, then use the active harness's agent-messaging primit
 
 ## 5. Completion & ship
 
-When all agents return: summarize each zone (commits with SHA + title, test deltas, judgment
-calls, deferrals). Surface any skipped/deferred issue with a follow-up suggestion. Report each
-`preflight-fail` issue by number with its log path and a tail of the failure, and say plainly
-that it should not be promoted until the gate is green — `promoting-branches` will skip it
-anyway, but the user deserves to know before they say "ship the batch". Report every
-`preflight-skip` too, with its `note=` reason: the gate never ran on that issue, so it is
-**unverified**, not clean. Silence here would let an ungated issue read as a passing one, which is
-the failure the sweep exists to prevent. Continuing that zone's
-agent with the failing output (via the question-routing primitive) is a reasonable option to
-offer; it is not automatic. Then hand back for shipping — the orchestrator never auto-promotes:
+Once every zone has a `ticket=all` line reading `status=done` or `status=safety-valved` **and**
+its 4a sweep (when one is configured) has finished — the Section 4 condition, not merely every
+agent having returned: summarize each zone (commits with
+SHA + title, test deltas, judgment calls, deferrals). Surface any skipped/deferred issue with a
+follow-up suggestion. Report each `preflight-fail` issue by number with its log path and a tail
+of the failure, and say plainly that it should not be promoted until the gate is green —
+`promoting-branches` will skip it anyway, but the user deserves to know before they say "ship the
+batch". Report every `preflight-skip` too, with its `note=` reason: the gate never ran on that
+issue, so it is **unverified**, not clean. Silence here would let an ungated issue read as a
+passing one, which is the failure the sweep exists to prevent. Continuing that zone's agent with
+the failing output (via the question-routing primitive) is a reasonable option to offer; it is not
+automatic. Then hand back for shipping — the orchestrator never auto-promotes:
 
 > Ship the batch with `promoting-branches`: say "promote each zone" (one PR per zone on a pr hop, or
 > all branches merged on a direct hop), "promote the first zone", or "promote issues <…>". It honors
@@ -336,6 +354,8 @@ offer; it is not automatic. Then hand back for shipping — the orchestrator nev
   context ceiling.
 - **Zoning by label alone.** Labels lie — read the issue body before placing.
 - **Skipping plan approval.** The user must OK the triage before dispatch.
+- **Taking a returned agent's word for its zone's state.** Look for the zone's `ticket=all`
+  line; no such line means unfinished, whatever the report said.
 - **Forgetting `tail -f` + `Monitor`.** Without them you're blind between completions.
 - **Letting an agent push or promote.** Both are banned in the prompt — keep it that way.
 - **Delegating the preflight sweep to the agents.** Their shells die when they return, so a

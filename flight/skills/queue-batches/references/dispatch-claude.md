@@ -12,3 +12,10 @@
   picks up each `preflight-pass` / `preflight-fail` / `preflight-skip` line; reflect `fail` and
   `skip` with `TaskUpdate` (neither is shippable). Never hand the sweep to the zone `Agent` — it
   has already returned.
+- **Why a worker returns without a terminal line.** A command a worker backgrounds inside its
+  `Agent` (`run_in_background`, or a trailing `&`) dies with the worker's shell the moment the
+  worker returns. The worker comes back believing the job is still running and reports "still
+  waiting on X, I'll report when it finishes" — nothing is running and it will wait forever. Its
+  report is wrong by construction, which is why SKILL.md Section 4 checks the zone's `ticket=all`
+  line instead. It is also why the sweep above runs from the orchestrator: the same mechanism that
+  makes a worker's backgrounded job vanish would make a worker-run gate report nothing.
