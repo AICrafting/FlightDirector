@@ -342,23 +342,32 @@ if [ "$group" = "reconcile" ]; then
 	fi
 
 	rc_dir="$(mktemp -d "${TMPDIR:-/tmp}/flight-reconcile.XXXXXX")"
-	trap 'rm -rf "$rc_dir"; cleanup' EXIT
+	bind_lock=""
+	rc_cleanup() { rm -rf "$rc_dir"; [ -z "$bind_lock" ] || rmdir "$bind_lock" 2>/dev/null || true; cleanup; }
+	trap rc_cleanup EXIT
 	new_cfg="$rc_dir/config.json"; new_local="$rc_dir/config.local.json"
 	new_sec="$rc_dir/secrets.json"; effective="$rc_dir/effective.json"
+	new_bind="$rc_dir/identities.json"; stamped="$rc_dir/stamped.json"
+	# Notices are collected and printed only once every file is written.
+	notices=()
+	jq_trk='def normapi: (. // "") | tostring | sub("/+$"; "");
+		def host: {b: ((.backend // "") | tostring | ascii_downcase), a: (.api | normapi)};
+		def target: host + {o: (.owner // null), r: (.repo // null), p: (.project // null)};
+		def tombstone: type == "object" and .backend == "requires-newer-flight";
+		def coords: with_entries(select(.key as $k | ["backend","api","owner","repo","project","email"] | index($k)));'
 
 	# 1. Tracked config: legacy effective issue axis → one default tracker. It reuses
 	#    the code credential (credentialRef "code", so env tokens keep working exactly
-	#    as they do for code) only when it IS the code repository and there is no
-	#    separate issue token; otherwise it gets its own credential slot.
+	#    as they did — the old issues axis simply used the code token) when there is no
+	#    separate issue token and the tracker is on the code host (same backend and api;
+	#    owner/repo may differ). A separate issue token, or another host, gets the
+	#    tracker its own credential slot.
 	tracked_migrates=0
 	if jq -e 'has("issueTrackers") | not' "$cfg_tracked" >/dev/null; then
 		tracked_migrates=1
 		tracker_ref="$(tracker_tool legacy-ref --config "$cfg_tracked")"
-		same_target="$(jq -r '
-			def normapi: (. // "") | tostring | sub("/+$"; "");
-			def target: {b: ((.backend // "") | tostring | ascii_downcase), a: (.api | normapi), o: (.owner // null), r: (.repo // null), p: (.project // null)};
-			((.code // {}) | with_entries(select(.key as $k | ["backend","api","owner","repo","project"] | index($k)))) as $inh
-			| (($inh * ((.issues // {}) | if type == "object" then . else {} end)) | target) == ((.code // {}) | target)
+		same_host="$(jq -r "$jq_trk"'
+			(((.code // {}) | coords) * ((.issues // {}) | if type == "object" then . else {} end) | host) == ((.code // {}) | host)
 			' "$cfg_tracked")"
 		separate_token=false
 		if [ -f "$sec" ]; then
@@ -367,29 +376,70 @@ if [ "$group" = "reconcile" ]; then
 				| ($i != "" and $i != (.code.token // ""))' "$sec")"
 		fi
 		credential=own
-		if [ "$same_target" = true ] && [ "$separate_token" = false ]; then credential=code; fi
+		if [ "$same_host" = true ] && [ "$separate_token" = false ]; then credential=code; fi
 		tracker_tool migrate-config --in "$cfg_tracked" --out "$new_cfg" --ref "$tracker_ref" --credential "$credential"
 	else
 		cp "$cfg_tracked" "$new_cfg"
 	fi
 	tracker_tool validate --config "$new_cfg" || die "(in $cfg_rel) — nothing was changed"
 
-	# 2. Machine-local override → a complete local tracker array when (and only when)
-	#    it changes the effective trackers; always validated in the merged view.
+	# 2. Which tracker per-machine legacy state (a legacy local override, a legacy
+	#    issue credential) belongs to: `legacyIssueTracker`, the tracker this repo
+	#    migrated FROM — never simply today's default. In a migrating run the two are
+	#    the same tracker. Refuse, before any write, when that cannot be determined.
+	local_legacy=0; sec_legacy=0; target_ref=""
+	if [ -f "$cfg_local" ] && jq -e 'has("labels") or (has("issues") and ((.issues | type == "object" and .backend == "requires-newer-flight") | not))' "$cfg_local" >/dev/null; then
+		local_legacy=1
+	fi
+	if [ -f "$sec" ] && jq -e 'has("issues")' "$sec" >/dev/null; then sec_legacy=1; fi
+	legacy_target="$(jq -r '.legacyIssueTracker // empty' "$new_cfg")"
+	if [ "$local_legacy$sec_legacy" != 00 ]; then
+		legacy_what="the legacy issues credential in $sec_rel"
+		[ "$local_legacy" = 0 ] || legacy_what="the legacy issues/labels override in $cfg_local_rel"
+		[ -n "$legacy_target" ] || die "$legacy_what cannot be migrated: $cfg_rel has no legacyIssueTracker saying which tracker it belonged to. Move it by hand (a credential under issueTrackers.<REF> in $sec_rel; an override as a complete issueTrackers array in the local file) and retry — nothing was changed"
+		target_ref="$(jq -r --arg r "$legacy_target" '[.issueTrackers[] | select((.ref | ascii_downcase) == ($r | ascii_downcase)) | .ref][0] // empty' "$new_cfg")"
+		[ -n "$target_ref" ] || die "$legacy_what cannot be migrated: legacyIssueTracker '$legacy_target' in $cfg_rel names no configured tracker. Set it to the ref of the tracker this repo migrated from (or move the legacy settings by hand) and retry — nothing was changed"
+	fi
+
+	# 3. Machine-local override → a complete local tracker array when (and only when)
+	#    it has legacy issues/labels keys to carry over; always validated in the merged
+	#    view. A local file that only overrides code coordinates is left alone.
 	cp "$new_cfg" "$effective"
 	if [ -f "$cfg_local" ]; then
-		tracker_tool overlay-local --tracked "$new_cfg" --local "$cfg_local" --out "$new_local"
+		if [ "$local_legacy" = 1 ]; then
+			tracker_tool overlay-local --tracked "$new_cfg" --local "$cfg_local" --out "$new_local" --ref "$target_ref"
+		else
+			cp "$cfg_local" "$new_local"
+		fi
 		jq -s '.[0] * .[1]' "$new_cfg" "$new_local" >"$effective"
-		tracker_tool validate --config "$effective" || die "(in the merged view of $cfg_rel and $cfg_local_rel) — nothing was changed"
+		tracker_tool validate --config "$effective" --tracked "$new_cfg" || die "(in the merged view of $cfg_rel and $cfg_local_rel) — nothing was changed"
 	fi
 
-	# 3. Secrets: legacy `issues` credential (or the implicit code fallback, same host
-	#    only) → `issueTrackers.<REF>`. Contents are never printed.
+	# 4. Secrets: the legacy `issues` credential MOVES to the target tracker — only if
+	#    that tracker is on the host the credential was used with. The code token is
+	#    never copied. Contents are never printed.
 	if [ -f "$sec" ] && jq -e 'has("issues") or (has("issueTrackers") | not)' "$sec" >/dev/null; then
-		tracker_tool migrate-secrets --config "$effective" --secrets "$sec" --out "$new_sec"
+		if [ "$sec_legacy" = 1 ] && jq -e '(.issues.token // "") as $i | $i != "" and $i != (.code.token // "")' "$sec" >/dev/null; then
+			# The host this clone used the issue token with: the tracker as committed,
+			# plus this clone's local code override (when the tracker inherited the code
+			# coordinates) and its legacy local issues override.
+			host_problem="$(jq -n -r --arg r "$target_ref" --slurpfile t "$new_cfg" --slurpfile e "$effective" \
+				--argjson l "$(if [ -f "$cfg_local" ]; then cat "$cfg_local"; else echo '{}'; fi)" "$jq_trk"'
+				def pick($c): [$c.issueTrackers[] | select((.ref | ascii_downcase) == ($r | ascii_downcase))][0];
+				def where: "\(.backend // "?") at \(.api // "(no api)")";
+				$t[0] as $tr | pick($tr) as $entry | pick($e[0]) as $now
+				| ((if ($entry | target) == (($tr.code // {}) | target) then $entry * (($l.code // {}) | coords) else $entry end)
+				   * (($l.issues // {}) | if type == "object" and (tombstone | not) then coords else {} end)) as $old
+				| if $now == null then "tracker \($r) is not in the merged config"
+				elif ($old | host) == ($now | host) then empty
+				else "it was used with \($old | where), but tracker \($now.ref) is \($now | where)" end')"
+			[ -z "$host_problem" ] || die "the legacy issues credential in $sec_rel cannot move to tracker $target_ref: $host_problem. Move it under issueTrackers.<REF> of the tracker it belongs to by hand and retry — nothing was changed"
+		fi
+		tracker_tool migrate-secrets --config "$effective" --secrets "$sec" --out "$new_sec" ${target_ref:+--ref "$target_ref"}
+		jq -e 'type == "object"' "$new_sec" >/dev/null || die "could not migrate $sec_rel — nothing was changed"
 	fi
 
-	# 4. Legacy-work bindings: pre-schema-3 unqualified branches and batch manifests
+	# 5. Legacy-work bindings: pre-schema-3 unqualified branches and batch manifests
 	#    stay attached to the tracker that was the default when the repo migrated
 	#    (`legacyIssueTracker`), however the default changes later.
 	bind_ref="$(jq -r '.legacyIssueTracker // empty' "$effective")"
@@ -401,7 +451,7 @@ if [ "$group" = "reconcile" ]; then
 		if jq -e --arg r "$bind_ref" 'any(.issueTrackers[]; (.ref | ascii_downcase) == ($r | ascii_downcase))' "$effective" >/dev/null; then
 			need_bind=1
 		else
-			echo "flight: notice — legacyIssueTracker '$bind_ref' is not a configured tracker, so legacy unqualified branches were not bound; work them with an explicit --tracker." >&2
+			notices+=("notice — legacyIssueTracker '$bind_ref' is not a configured tracker, so legacy unqualified branches were not bound; work them with an explicit --tracker.")
 		fi
 	fi
 
@@ -413,28 +463,24 @@ if [ "$group" = "reconcile" ]; then
 	if [ "$tracked_migrates" = 0 ] && [ "$schema" -eq "$TRACKER_SCHEMA" ] && [ "$recorded" = "$version" ] && [ -z "$legacy" ]; then
 		stamp_needed=0
 	fi
-	[ "$stamp_needed$sec_changes$local_changes$need_bind" = 0000 ] && exit 0
+	[ "$stamp_needed$sec_changes$local_changes$need_bind" = 0000 ] && { [ ${#notices[@]} -eq 0 ] || printf 'flight: %s\n' "${notices[@]}" >&2; exit 0; }
 
-	# Writes, in resume-safe order: secrets, local override, bindings, tracked config.
-	if [ "$sec_changes" = 1 ]; then
-		chmod --reference="$sec" "$new_sec" 2>/dev/null || chmod 600 "$new_sec"
-		tmp="$(mktemp "$sec.tmp.XXXXXX")"; cat "$new_sec" >"$tmp"
-		chmod --reference="$sec" "$tmp" 2>/dev/null || chmod 600 "$tmp"
-		mv "$tmp" "$sec"
-		printf 'flight: moved the issue credential in %s under issueTrackers\n' "$sec_rel" >&2
-	fi
-	if [ "$local_changes" = 1 ]; then
-		tmp="$(mktemp "$cfg_local.tmp.XXXXXX")"; cat "$new_local" >"$tmp"
-		chmod --reference="$cfg_local" "$tmp" 2>/dev/null || true
-		mv "$tmp" "$cfg_local"
-		printf 'flight: migrated %s to named issue trackers\n' "$cfg_local_rel" >&2
-	fi
+	# Everything that can fail runs BEFORE the first write: take the bindings lock and
+	# compute the bindings (a file bound to another tracker stops here), and build the
+	# stamped tracked config. A failure leaves every file untouched.
 	if [ "$need_bind" = 1 ]; then
+		mkdir -p "$(dirname "$work_items")"
+		bind_tries=0
+		while ! mkdir "$work_items.lock" 2>/dev/null; do
+			bind_tries=$((bind_tries + 1))
+			[ "$bind_tries" -lt 200 ] || die "timed out waiting for the work-items lock ($work_items.lock); remove it if no other flight process is running — nothing was changed"
+			sleep 0.05
+		done
+		bind_lock="$work_items.lock"
 		tracker_tool bind-legacy --config "$effective" --metadata "$work_items" --repo-root "$repo_root" \
-			--batches "$cfg_dir/batches" --tracker "$bind_ref"
+			--batches "$cfg_dir/batches" --tracker "$bind_ref" --out "$new_bind" || die "(nothing was changed)"
 	fi
 	if [ "$stamp_needed" = 1 ]; then
-		tmp="$(mktemp "$cfg_tracked.tmp.XXXXXX")"
 		jq --arg h "$harness" --arg p "$plugin" --arg v "$version" --argjson schema "$TRACKER_SCHEMA" '
 			.schemaVersion = $schema
 			| .harnesses = (.harnesses // {})
@@ -444,14 +490,64 @@ if [ "$group" = "reconcile" ]; then
 				 then (.plugins.flight.reconciledWith = .reconciledWith) | del(.reconciledWith)
 				 else . end)
 				| .plugins[$p].reconciledWith = $v
-			)' "$new_cfg" >"$tmp"
-		if ! jq -e . "$tmp" >/dev/null; then rm -f "$tmp"; die "could not write $cfg_rel"; fi
+			)' "$new_cfg" >"$stamped" && jq -e . "$stamped" >/dev/null || die "could not build $cfg_rel — nothing was changed"
+	fi
+
+	# Notices about this run's result (never a token). A tracker the legacy state
+	# belongs to that uses its own credential but has no token yet is said out loud —
+	# also when there is no secrets file at all.
+	if [ "$tracked_migrates" = 1 ] || [ "$sec_changes" = 1 ]; then
+		notice_ref="${target_ref:-$legacy_target}"
+		final_sec="$sec"; [ "$sec_changes" = 0 ] || final_sec="$new_sec"
+		if [ -n "$notice_ref" ] && jq -e --arg r "$notice_ref" '[.issueTrackers[] | select((.ref | ascii_downcase) == ($r | ascii_downcase))][0] | . != null and .credentialRef != "code"' "$effective" >/dev/null; then
+			notice_ref="$(jq -r --arg r "$notice_ref" '[.issueTrackers[] | select((.ref | ascii_downcase) == ($r | ascii_downcase)) | .ref][0]' "$effective")"
+			if [ ! -f "$final_sec" ] || ! jq -e --arg r "$notice_ref" '(.issueTrackers[$r].token // "") != ""' "$final_sec" >/dev/null; then
+				notices+=("notice — tracker $notice_ref uses its own credential but ${sec_rel} has no .issueTrackers[\"$notice_ref\"].token yet (the code token is never copied to it); add one (then flight auth check --tracker $notice_ref).")
+			fi
+		fi
+		# A local override of code coordinates no longer reaches trackers that used to
+		# inherit them (the local file keeps no frozen tracker array).
+		if [ -f "$cfg_local" ] && [ "$local_legacy" = 0 ] && jq -e -s "$jq_trk"'
+			.[0] as $t | .[1] as $l
+			| ($l | has("issueTrackers") | not)
+			  and ((($t.code // {}) * (($l.code // {}) | coords)) | target) != (($t.code // {}) | target)
+			  and any($t.issueTrackers[]; target == (($t.code // {}) | target))' "$new_cfg" "$cfg_local" >/dev/null; then
+			notices+=("notice — $cfg_local_rel overrides code coordinates; issue trackers no longer follow local code overrides. If a tracker should use them on this machine, add a complete local issueTrackers array (see config.local.json in flight/references/flight-setup.md).")
+		fi
+	fi
+
+	# Writes, in resume-safe order: secrets, local override, bindings, tracked config.
+	if [ "$sec_changes" = 1 ]; then
+		chmod --reference="$sec" "$new_sec" 2>/dev/null || chmod 600 "$new_sec"
+		tmp="$(mktemp "$sec.tmp.XXXXXX")"; cat "$new_sec" >"$tmp"
+		chmod --reference="$sec" "$tmp" 2>/dev/null || chmod 600 "$tmp"
+		mv "$tmp" "$sec"
+		if [ "$sec_legacy" = 1 ]; then
+			printf 'flight: moved the issue credential in %s under issueTrackers\n' "$sec_rel" >&2
+		else
+			printf 'flight: added an empty issueTrackers credential map to %s\n' "$sec_rel" >&2
+		fi
+	fi
+	if [ "$local_changes" = 1 ]; then
+		tmp="$(mktemp "$cfg_local.tmp.XXXXXX")"; cat "$new_local" >"$tmp"
+		chmod --reference="$cfg_local" "$tmp" 2>/dev/null || true
+		mv "$tmp" "$cfg_local"
+		printf 'flight: migrated %s to named issue trackers\n' "$cfg_local_rel" >&2
+	fi
+	if [ "$need_bind" = 1 ]; then
+		tmp="$(mktemp "$work_items.tmp.XXXXXX")"; cat "$new_bind" >"$tmp"
+		mv "$tmp" "$work_items"
+		rmdir "$bind_lock" 2>/dev/null || true; bind_lock=""
+	fi
+	if [ "$stamp_needed" = 1 ]; then
+		tmp="$(mktemp "$cfg_tracked.tmp.XXXXXX")"; cat "$stamped" >"$tmp"
 		chmod --reference="$cfg_tracked" "$tmp" 2>/dev/null || true
 		mv "$tmp" "$cfg_tracked"
 		if [ "$tracked_migrates" = 1 ]; then
 			printf 'flight: migrated %s to schema %s — default issue tracker %s; commit it together with a Flight update for every clone and harness\n' "$cfg_rel" "$TRACKER_SCHEMA" "$tracker_ref" >&2
 		fi
 	fi
+	[ ${#notices[@]} -eq 0 ] || printf 'flight: %s\n' "${notices[@]}" >&2
 	printf 'flight: reconciled %s config with plugin %s %s\n' "$harness" "$plugin" "$version" >&2
 	exit 0
 fi
@@ -487,7 +583,22 @@ fi
 # adapters never choose a tracker. PR and CI verbs keep using `code`.
 tracker_json=""
 if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
-	tracker_tool validate --config "$cfg" || die "(in $cfg_rel${cfg_tmp:+ merged with its config.local.json}) — fix the config before any issue operation"
+	tracker_tool validate --config "$cfg" ${cfg_tmp:+--tracked "$cfg_tracked"} || die "(in $cfg_rel${cfg_tmp:+ merged with its config.local.json}) — fix the config before any issue operation"
+
+	# config.local.json arrays replace wholesale: a local issueTrackers array that lacks
+	# a tracker the tracked config has hides that tracker on this machine. Warn once per
+	# command (the per-tracker dispatches of --all-trackers stay quiet).
+	if [ -n "$cfg_tmp" ] && [ -z "${FLIGHT_LOCAL_TRACKERS_WARNED:-}" ]; then
+		missing_refs="$(jq -r -s '
+			(.[1].issueTrackers | if type == "array" then [.[] | objects | .ref | strings | ascii_downcase] else null end) as $have
+			| if $have == null then empty
+			  else [(.[0].issueTrackers // [])[] | objects | .ref | strings | select((ascii_downcase) as $r | $have | index($r) | not)] | join(", ")
+			  end' "$cfg_tracked" "$cfg_local" 2>/dev/null || true)"
+		if [ -n "$missing_refs" ]; then
+			echo "flight: warning — $cfg_local_rel has its own issueTrackers array, which replaces the tracked one wholesale, and it lacks $missing_refs from $cfg_rel; add the missing tracker(s) to the local array or remove the array." >&2
+		fi
+	fi
+	export FLIGHT_LOCAL_TRACKERS_WARNED=1
 
 	# `issues list --all-trackers`: every tracker in config order, each through its
 	# own dispatch (own coordinates, credential and status map). Each row is the

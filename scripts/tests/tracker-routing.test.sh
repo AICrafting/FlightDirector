@@ -117,6 +117,14 @@ cp "$SANDBOX/config.good" "$CFG"
 jq '.issueTrackers[3].repo = "different-repo"' "$SANDBOX/config.good" >"$CFG"
 check "credentialRef code on the same host but another repo is accepted" "$(resolve --number SAME-1 | jq -e '.tracker == "SAME"' >/dev/null && echo 1 || echo 0)"
 cp "$SANDBOX/config.good" "$CFG"
+# A local override may move code to another route (a tunnel) on this machine; a tracker
+# sharing the code credential on the committed code host stays valid, one elsewhere does not.
+printf '%s\n' '{"code":{"api":"https://tunnel.example.com/api/v1"}}' >"$R/.flightdirector/config.local.json"
+check "credentialRef code on the tracked code host survives a local code host override" "$(resolve --number SAME-1 | jq -e '.tracker == "SAME"' >/dev/null && echo 1 || echo 0)"
+jq '.issueTrackers[3].api = "https://other.example.com/api/v1"' "$SANDBOX/config.good" >"$CFG"
+check "…but credentialRef code on a third host is still rejected" "$(fails 'credentialRef "code" reuses the code token only' "$DISP" issues resolve --number 1 && echo 1 || echo 0)" "$(cat "$SANDBOX/err")"
+rm -f "$R/.flightdirector/config.local.json"
+cp "$SANDBOX/config.good" "$CFG"
 
 # Fake Forgejo/Jira endpoints: log the call, answer plausibly.
 cat >"$SANDBOX/bin/curl" <<'SH'
