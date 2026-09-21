@@ -56,7 +56,9 @@ case "$verb" in
     esac; done
     [ -n "$number" ] || die "issues get: --number required"
     _api GET "/issues/${number}" \
-      | jq -r '([(.iid|tostring), .title] | @tsv), "", (.description // "")'
+      | jq -r '([(.iid|tostring), .title,
+                  (.state | if . == "opened" then "open" else . end)] | @tsv),
+               "", (.description // "")'
     ;;
 
   comments)

@@ -41,7 +41,7 @@ case "$verb" in
     esac; done
     [ -n "$number" ] || die "issues get: --number required"
     _api GET "/issues/${number}" \
-      | jq -r '([(.number|tostring), .title] | @tsv), "", (.body // "")'
+      | jq -r '([(.number|tostring), .title, .state] | @tsv), "", (.body // "")'
     ;;
 
   comments)

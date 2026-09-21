@@ -30,6 +30,23 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
+- **`issues get` now reports the issue's state** (#205). The first line becomes
+  `number⇥title⇥state`, with `state` normalized to exactly `open` or `closed` on every backend.
+  Previously it emitted `number⇥title` and exited 0 whether the issue was open or closed, so
+  "is #N open?" had no single-issue answer and callers had to scan a paged `issues list --state
+  open`. That scan was also silently coupled to the limit: trim it below the repo's open-issue
+  count and an open issue past the cap reads as closed. `pr get` already returned
+  `number⇥title⇥state⇥url`, so the omission looks to have been accidental rather than designed.
+  The deferral guard in `promoting-a-branch` (#195) and its `promoting-branches` mirror now use
+  the one-call form and the paging caveat is gone.
+
+  Normalization is the substance, not the field: GitLab reports an open issue as `opened`, and
+  Jira has no open/closed field at all, so its status **category** decides (`done` → `closed`,
+  otherwise `open`) - the same rule `issues list`, `close` and `reopen` already use, which means
+  a project with custom workflow status names needs no extra config. **Compatibility:** `state`
+  is appended as field 3, so existing `cut -f1` / `cut -f2` readers are unaffected, but it is a
+  documented-shape change and anything splitting the whole first line should be checked.
+
 - **`promoting-a-branch` Step 3 gates deferrals and guards the no-user-surface hatch** (#195). The
   step gated on a test plan *existing*; nothing read the PR body for what it said it deliberately
   did **not** do, so a PR could ship a "known gaps" list, merge, close its issue, and leave the

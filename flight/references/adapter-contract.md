@@ -130,7 +130,7 @@ GitLab comment endpoints do cap, and are paged.
 | Verb        | Args                                   | stdout |
 |-------------|----------------------------------------|--------|
 | `list`      | `--state open\|closed\|all` `--limit N` `--label NAME` (repeatable) | one row per issue: `number⇥title⇥comma,labels`. `--limit` is a true ceiling: the adapter pages underneath it (see **Paging**), so `--limit 200` returns up to 200 rows rather than one server-clamped page |
-| `get`       | `--number N`                           | `number⇥title` then a blank line then the raw body (the one verb that emits a body) |
+| `get`       | `--number N`                           | `number⇥title⇥state` then a blank line then the raw body (the one verb that emits a body). `state` is **normalized to exactly `open` or `closed`** on every backend, so a caller can ask "is #N open?" in one call; it is field 3 because appending leaves `cut -f1`/`cut -f2` readers untouched |
 | `comments`  | `--number N`                           | one block per comment, oldest-first: `author⇥created_at` header line, the raw comment body, then a blank separator line. Empty output (exit 0) = no comments. Unbounded: the thread is always returned whole, because oldest-first rendering means a truncated fetch drops the **newest** comments, and "the later comment wins" depends on those |
 | `create`    | `--title T` `--body B` (or `--body-file PATH`) `--label NAME` (repeatable) | the new issue `number`; labels resolved name→id, applied at creation |
 | `update`    | `--number N` `--title T` and/or `--body B` (or `--body-file PATH`) | (nothing) — patches only the fields passed |
@@ -279,7 +279,10 @@ Safety is in the verb, not in the caller:
 - **GitLab backend specifics:** GitLab addresses a project by its URL-encoded path — the
   adapter builds `projects/<owner%2Frepo>` from `owner`/`repo` (subgroups' slashes encode too).
   Issues are addressed by their per-project **`iid`** (what the contract calls `--number`), and
-  the body lives in `description`, not `body`. Labels are applied **by name** (like GitHub) via
+  the body lives in `description`, not `body`. GitLab reports an open issue's state as
+  **`opened`**, not `open`, so `issues get` normalizes it — a caller comparing the raw wire value
+  against `open` would read every open GitLab issue as not-open. Labels are applied **by name**
+  (like GitHub) via
   `add_labels`/`remove_labels`; `set-status` does the single-status swap in one `PUT`. Auth is a
   `PRIVATE-TOKEN` header (personal/project access token). `issues comments` drops GitLab **system
   notes** (label/state-change activity) so only real comments come back. `issues attach` uploads
@@ -311,6 +314,11 @@ Safety is in the verb, not in the caller:
     remove-other-status-labels), matching the single-status model — it does **not** drive workflow
     transitions. Jira labels are **single tokens**: status label names in config must be
     **space-free** (e.g. `status/in-progress`, not `status/in progress`).
+  - **State is the status *category*, not a flag.** Jira has no open/closed field: `issues get`
+    reports `closed` when `.fields.status.statusCategory.key` is **`done`** and `open`
+    otherwise. That is the same rule `list` (`statusCategory != Done`) and `close`/`reopen`
+    already use, so a project with custom workflow status names maps correctly with no extra
+    config — only the category matters.
   - **`close`/`reopen` → workflow transitions.** Labels can't close a Jira issue, so `close` finds
     the transition into a status whose category is **`done`** and posts it; `reopen` transitions
     back to a **`new`** (To-Do) or, failing that, **`indeterminate`** (In-Progress) category. This

@@ -41,6 +41,8 @@ cols="$(head -1 <<<"$OUT" | awk -F'\t' '{print NF}')"
 GET="$(lsp issues get --number "$N")"
 grep -q "First issue" < <(head -1 <<<"$GET") && ok "get returns title line" || no "get returns title line" "$GET"
 grep -q "hello body" <<<"$GET" && ok "get returns body" || no "get returns body"
+ST="$(cut -f3 < <(head -1 <<<"$GET"))"
+[ "$ST" = open ] && ok "get reports state=open for a fresh issue" || no "get reports state=open" "got '$ST'"
 
 echo "── labels resolve ──"
 RES="$(lsp labels resolve --name "status/to test")"
