@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.16.0] - 2026-09-21
+
 ### Added
 
 - **A repo can name its own check command, and promotion runs it** (#209). New optional
