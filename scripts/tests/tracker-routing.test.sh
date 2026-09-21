@@ -134,7 +134,7 @@ out=""; url=""; method=GET; data=""; headers=""; user=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		-o) out="$2"; shift 2 ;;
-		-D) printf 'x-total-count: 1\r\n' >"$2"; shift 2 ;;
+		-D) printf 'x-total-count: %s\r\n' "${FAKE_TOTAL:-1}" >"$2"; shift 2 ;;
 		-w) shift 2 ;;
 		-X) method="$2"; shift 2 ;;
 		-H) headers="${headers}${headers:+|}$2"; shift 2 ;;
@@ -249,6 +249,13 @@ check "a credentialRef-code tracker still gets the env code token" "$(grep -q 'r
 check "each tracker is listed with its own token" "$(grep -q 'repos/two/other/issues.*token token-two' "$CURL_LOG" && grep -q 'repos/one/backlog/issues.*token token-one' "$CURL_LOG" && echo 1 || echo 0)" "$(log)"
 check "an unavailable tracker is reported and fails the view — never an empty backlog" "$([ "$rc" != 0 ] && grep -q 'tracker BAD unavailable' "$SANDBOX/err" && echo 1 || echo 0)" "rc=$rc $(cat "$SANDBOX/err")"
 cp "$SANDBOX/config.good" "$CFG"
+# A tracker that succeeds can still have something to say on stderr: the truncation
+# warning, or the #177 note that a legacy FORGEJO_TOKEN shadows the secrets file.
+if (cd "$R" && FAKE_TOTAL=5 FORGEJO_TOKEN=legacy-env "$DISP" issues list --all-trackers --limit 1 >"$SANDBOX/out" 2>"$SANDBOX/err"); then rc=0; else rc=$?; fi
+check "a successful tracker's truncation warning is forwarded, naming the tracker" "$([ "$rc" = 0 ] && grep -q '^flight: tracker FJ: .*showing 1 of 5 rows' "$SANDBOX/err" && grep -q '^flight: tracker ALT: .*showing 1 of 5 rows' "$SANDBOX/err" && echo 1 || echo 0)" "rc=$rc $(cat "$SANDBOX/err")"
+# shellcheck disable=SC2016  # the \$ is literal message text
+check "the #177 token note of a code-credential tracker is forwarded" "$(grep -q '^flight: tracker SAME: note — the legacy \$FORGEJO_TOKEN' "$SANDBOX/err" && echo 1 || echo 0)" "$(cat "$SANDBOX/err")"
+check "…and the rows are still printed" "$(grep -q $'^FJ-1\t' "$SANDBOX/out" && echo 1 || echo 0)" "$(cat "$SANDBOX/out")"
 : >"$CURL_LOG"
 (cd "$R" && "$DISP" issues list --limit 1 >"$SANDBOX/out")
 check "ordinary issues list keeps its unqualified TSV" "$([ "$(cat "$SANDBOX/out")" = "$(printf '1\tListed\t')" ] && echo 1 || echo 0)" "$(cat -A "$SANDBOX/out")"

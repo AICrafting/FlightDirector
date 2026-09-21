@@ -613,6 +613,9 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 			[ -n "$list_ref" ] || continue
 			if "$SELF_DIR/flight" issues list --tracker "$list_ref" "$@" >"$list_out" 2>"$list_err"; then
 				awk -v ref="$list_ref" 'BEGIN { FS = OFS = "\t" } NF { n = $1; sub(/^.*-/, "", n); print ref "-" n, $0 }' "$list_out"
+				# A successful tracker's stderr (the "showing N of M" truncation warning,
+				# the #177 token note) still matters: forward it, naming the tracker.
+				sed -e 's/^flight: //' -e "s/^/flight: tracker $list_ref: /" "$list_err" >&2
 			else
 				list_failed=1
 				printf 'flight: tracker %s unavailable: %s\n' "$list_ref" "$(tr '\n' ' ' <"$list_err" | sed -e 's/^flight: //' -e 's/[[:space:]]*$//')" >&2
