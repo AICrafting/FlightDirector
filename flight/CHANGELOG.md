@@ -59,6 +59,33 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
     instead, e.g. `flight issues tracker | jq -r '.labels.status["to-test"]'`; the bundled
     skills are updated by #198/#199.
 
+- **Issue work stays attached to the tracker it started on** (#198; ships with #197 and #199).
+  Every workflow skill resolves the issue you name **once** — `12` means the default tracker,
+  `GH-12` / `PROJ-7` name theirs — and then passes that tracker and native id on every later
+  write: comments, the work ledger, model labels, status changes, assignment and close. Changing
+  the default tracker mid-work therefore redirects nothing, and two trackers' issue 12 never
+  collide:
+  - **New branches and worktrees always carry the tracker**, the default's included:
+    `feature/fj-12-<slug>` in `.worktrees/fj-12-<slug>`, and `feature/proj-7-<slug>` for Jira.
+    Commits are written `feat(FJ-12): …`. Existing `feature/12-…` branches keep working: they
+    belong to the tracker the repo migrated from (the bindings #197's migration records), and a
+    legacy branch whose tracker cannot be recovered makes the skill **ask** instead of assuming
+    the current default.
+  - **Promotion only writes `Closes #N` / `Ready #N` for an issue in the code repository
+    itself** (same backend, host and owner/repo) — a PR can no longer close the code repo's
+    unrelated issue 12 because a different tracker's issue 12 was worked. Other trackers' issues
+    get a non-linking `Tracks GH-12` line and are updated on their own tracker by the promotion.
+    Issue bodies, comments, ledgers and tracker URLs are not copied into PRs.
+  - Triage, filing's duplicate scan and queue planning list **every** tracker (`FJ-12`, `JIR-7`)
+    and filter each by its own status labels; a tracker that cannot be reached is reported as
+    unavailable, not shown as an empty backlog.
+  - `flight branches list` reports the qualified issue (`FJ-12`, or `unbound`) in its issue
+    column, and batch manifests record full identities (`batch-manifest groups` prints
+    `zone⇥FJ-7,GH-12`); manifests written before the upgrade keep working through the same
+    bindings. Both behave exactly as before on a config that has not migrated yet.
+  - New helper `scripts/issue-identity.sh` (the one place branch names, manifest entries and
+    history references become an identity), used by the scripts and skills alike.
+
 - **New `add-an-issue-tracker` skill, and setup writes named trackers** (#199; ships with #197
   and #198). Say "add an issue tracker", "connect Jira" or "track issues on GitHub too" to add a
   second (or tenth) tracker beside the first: it collects the coordinates, proposes a stable

@@ -8,7 +8,8 @@ Placeholders the orchestrator fills before dispatch:
 - `{repo_root}` — absolute path to the MAIN repo checkout
 - `{log_path}` — absolute path to this zone's status log
 - `{scratch}` — a writable scratch dir for `--body-file` temp files
-- `{issues_ordered}` — newline-separated `#N <slug>` list, execution order (smallest-first)
+- `{issues_ordered}` — newline-separated `<QUALIFIED> <slug>` list (e.g. `FJ-12 fix-login`), execution
+  order (smallest-first)
 - `{repo_rules}` — verbatim contents of the repo's agent-rules file, or `None configured.`
 - `{preflight}` — the repo's check command (`code.preflight`), or `None configured.`
 - `{pre_made_decisions}` — bullet list of orchestrator decisions so the agent doesn't stall
@@ -64,10 +65,14 @@ issues on top of a break.
 {issues_ordered}
 ```
 
-Fetch each issue's full body as you reach it:
+As you reach each issue, resolve its qualified id **once** and keep the result — the tracker it
+names is where every later read and write goes, even if the configured default tracker changes
+while you work (two trackers can both have an issue 12, so never fall back to a bare number):
 
 ```bash
-{dispatcher} issues get --number <N>
+IDENTITY="$({dispatcher} issues resolve --number <QUALIFIED>)"
+TRACKER="$(jq -r '.tracker' <<<"$IDENTITY")"; NUMBER="$(jq -r '.number' <<<"$IDENTITY")"   # NUMBER is native: 12, or PROJ-12 on Jira
+QUALIFIED="$(jq -r '.qualified' <<<"$IDENTITY")"; PREFIX="$(jq -r '.branchPrefix' <<<"$IDENTITY")"
 ```
 
 ## Pre-made decisions (from orchestrator)
@@ -78,14 +83,15 @@ If you hit a decision not covered here, use the **safety valve** — don't guess
 
 ## Per-issue lifecycle (native working-an-issue, ×M)
 
-For each issue `#N` with slug `<slug>`:
+For each issue, resolved as shown above, pass `--tracker "$TRACKER" --number "$NUMBER"` on every
+issue and label call:
 
 1. **Read the issue AND its comments — before anything else.** The plan you were handed was
    built from the issue *body*; the comment thread may have since changed the scope, the
    acceptance, or the decision. When a comment contradicts the body, **the later comment wins**.
    ```bash
-   {dispatcher} issues get      --number <N>
-   {dispatcher} issues comments --number <N>
+   {dispatcher} issues get      --tracker "$TRACKER" --number "$NUMBER"
+   {dispatcher} issues comments --tracker "$TRACKER" --number "$NUMBER"
    ```
    If the thread materially changes the issue from what the batch plan assumed, use the safety
    valve (below) rather than silently building to the new reading.
@@ -113,11 +119,13 @@ For each issue `#N` with slug `<slug>`:
    - **Offline / no origin** → warn, continue from local `{base_branch}`, and record the base as
      **UNVERIFIED** in the log line and in your finishing record.
    ```bash
-   git -C "{repo_root}" worktree add -b "feature/<N>-<slug>" \
-     "{repo_root}/.worktrees/<N>-<slug>" "<the ref the check selected>"
-   WT="{repo_root}/.worktrees/<N>-<slug>"
-   {dispatcher} issues set-status --number <N> --status in-progress
-   echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=starting comments=<count> base=<level|ff-N|unverified>" >> {log_path}
+   BRANCH="feature/$PREFIX-<slug>"
+   git -C "{repo_root}" worktree add -b "$BRANCH" \
+     "{repo_root}/.worktrees/$PREFIX-<slug>" "<the ref the check selected>"
+   WT="{repo_root}/.worktrees/$PREFIX-<slug>"
+   "$(dirname "{dispatcher}")/issue-identity.sh" remember --branch "$BRANCH" --identity "$IDENTITY"
+   {dispatcher} issues set-status --tracker "$TRACKER" --number "$NUMBER" --status in-progress
+   echo "$(date -u +%FT%TZ) {zone} ticket=$QUALIFIED status=starting comments=<count> base=<level|ff-N|unverified>" >> {log_path}
    ```
 3. **Work inside `$WT`, driving git there by path rather than by `cd`.** Re-read the issue's
    Acceptance section *as amended by the comments*;
@@ -126,12 +134,12 @@ For each issue `#N` with slug `<slug>`:
    ```bash
    git -C "$WT" status
    git -C "$WT" add <repo-relative path>      # paths resolve relative to $WT, not to your cwd
-   git -C "$WT" commit -m "feat(#<N>): …"
+   git -C "$WT" commit -m "feat($QUALIFIED): …"
    git -C "$WT" log --oneline -3
    ```
    Midway, optionally:
    ```bash
-   echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=working note=\"<short>\"" >> {log_path}
+   echo "$(date -u +%FT%TZ) {zone} ticket=$QUALIFIED status=working note=\"<short>\"" >> {log_path}
    ```
 4. **Before declaring done — walk the user-visible surface.** Don't satisfy only the literal
    acceptance phrase; trace every related field/element a reporter would see. If the real scope
@@ -146,22 +154,22 @@ For each issue `#N` with slug `<slug>`:
    will find it anyway once you've returned and can no longer fix it.
 6. **Hand to the merge gate (do NOT promote):**
    ```bash
-   {dispatcher} issues set-status --number <N> --status to-test
+   {dispatcher} issues set-status --tracker "$TRACKER" --number "$NUMBER" --status to-test
    # Write your finishing record (work summary + model/token note; see working-an-issue
    # for the format). If the repo has the prompt ledger on, append the measured block —
    # your subagent turns are rows under the parent session, so pass the parent's id:
-   #   {dispatcher} prompt-log summary --session <parent session id> >> "{scratch}/done-<N>.md"
+   #   {dispatcher} prompt-log summary --session <parent session id> >> "{scratch}/done-$PREFIX.md"
    # It says "estimate only" when there are no rows; then note your own estimate.
    # The dispatcher owns stable-family derivation; tool/service ids
    # return non-zero and are skipped:
    PRIMARY_MODEL=<model-id-from-ledger>
    if FAMILY="$({dispatcher} labels model-family --id "$PRIMARY_MODEL")"; then
-     {dispatcher} labels ensure --model "$PRIMARY_MODEL"
-     {dispatcher} issues label-add --number <N> --label "model/$FAMILY"
+     {dispatcher} labels ensure --tracker "$TRACKER" --model "$PRIMARY_MODEL"
+     {dispatcher} issues label-add --tracker "$TRACKER" --number "$NUMBER" --label "model/$FAMILY"
    fi
-   {dispatcher} issues comment --number <N> --body-file "{scratch}/done-<N>.md"
+   {dispatcher} issues comment --tracker "$TRACKER" --number "$NUMBER" --body-file "{scratch}/done-$PREFIX.md" --model "$PRIMARY_MODEL"
    SHA=$(git -C "$WT" rev-parse --short HEAD)
-   echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=complete commit=$SHA" >> {log_path}
+   echo "$(date -u +%FT%TZ) {zone} ticket=$QUALIFIED status=complete commit=$SHA" >> {log_path}
    ```
    Leave the worktree in place (unmerged) and move to the next issue. The user promotes serially
    later via `promoting-a-branch`.
@@ -173,7 +181,7 @@ judgment call, can't quickly fix breaking tests, or find the scope materially la
 described:
 
 ```bash
-echo "$(date -u +%FT%TZ) {zone} ticket=#<N> status=blocked note=\"<short question>\"" >> {log_path}
+echo "$(date -u +%FT%TZ) {zone} ticket=$QUALIFIED status=blocked note=\"<short question>\"" >> {log_path}
 ```
 
 Then stop and return. The orchestrator routes your question to the user and continues you with the
@@ -186,7 +194,7 @@ answer. Shipping 3 solid issues beats forcing 5 shaky ones.
   bare `git` command is a bug, even if you think you're in the right directory.** Your shell's
   working directory persists across tool calls and you will `cd` around during a task; an
   unanchored `git commit` can land on the **wrong repository or the wrong branch** — e.g. onto
-  the trunk in the main checkout instead of `feature/<N>-<slug>`. Note that `git -C "$WT" add
+  the trunk in the main checkout instead of `feature/$PREFIX-<slug>`. Note that `git -C "$WT" add
   <path>` resolves `<path>` relative to `$WT`, not to your current directory: that is what you
   want, but it differs from a bare `git add` from a subdirectory, so pass repo-relative paths.
   `-C` does not help non-git tools — `cd`-dependent scripts and test runners still need an
@@ -205,7 +213,7 @@ answer. Shipping 3 solid issues beats forcing 5 shaky ones.
 
 ## Final report (when the queue is complete OR you safety-valve)
 
-Return a concise report: commits (`<SHA> #<N> <title>`), test deltas, judgment calls made without
+Return a concise report: commits (`<SHA> <QUALIFIED> <title>`), test deltas, judgment calls made without
 asking, anything deferred/safety-valved (with a suggested follow-up). Then the final log line:
 
 ```bash
