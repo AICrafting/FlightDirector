@@ -15,8 +15,14 @@ grep -q 'dispatch-claude.md' "$REPO_ROOT/flight/skills/queue-batches/SKILL.md"
 # harness-agnostic (SKILL.md); why a parked agent happens is Claude Code specific (the reference).
 QB="$REPO_ROOT/flight/skills/queue-batches"
 
-# Phrase checks flatten newlines first: markdown rewraps at will, the property does not move.
-says() { tr '\n' ' ' < "$1" | tr -s ' ' | grep -q "$2"; }
+# Phrase checks flatten the file first: markdown rewraps at will, the property does not move.
+# `.gitattributes` gives *.md NATIVE line endings, so the MSYS leg reads CRLF and the \r has to
+# go before a phrase spanning a line break can match. The herestring keeps `grep -q` out of a
+# pipeline, which under `pipefail` can SIGPIPE and fail the script (SC2337).
+says() {
+    flat="$(tr -d '\r' < "$1" | tr '\n' ' ' | tr -s ' ')"
+    grep -q "$2" <<<"$flat"
+}
 
 # (`! grep` is exempt from `set -e`, so the negative checks are spelled out.)
 if says "$QB/SKILL.md" 'When all agents return'; then exit 1; fi
