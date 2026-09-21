@@ -45,9 +45,10 @@ a worked example, is in the **[Flight User Guide](flight/GUIDE.md)**; here is wh
   → [File it](flight/GUIDE.md#1-file-it)
 - **A pick-list of what is genuinely workable.** "What should I work on?" filters out anything
   already in progress, in review, or in QA. → [Decide what to do next](flight/GUIDE.md#2-decide-what-to-do-next)
-- **One branch, one worktree, per issue.** Each issue is worked on `feature/<N>-<slug>` in its
-  own `.worktrees/<N>-<slug>`, so several can be in flight without stashing, and the issue's
-  status label flips at every transition so the board never lies.
+- **One branch, one worktree, per issue.** Each issue is worked on `feature/<ref>-<N>-<slug>`
+  (e.g. `feature/fj-42-export-button`) in its own `.worktrees/<ref>-<N>-<slug>`, so several can
+  be in flight without stashing, and the issue's status label flips at every transition so the
+  board never lies.
   → [Work it](flight/GUIDE.md#3-work-it)
 - **A human merge gate.** Work stops at *ready to test*; nothing merges until you say "promote".
   When you do, a work-ledger comment (summary, token cost, model) lands on the issue first.
@@ -63,10 +64,13 @@ a worked example, is in the **[Flight User Guide](flight/GUIDE.md)**; here is wh
   M issues sequentially in isolated worktrees, all stopping at the gate; ship the batch in one
   go with `promoting-branches`. → [The workflow at a glance](flight/GUIDE.md#the-workflow-at-a-glance)
 - **Any backend, no MCP server.** Skills call one dispatcher (`flight <group> <verb>`); it reads
-  `.flightdirector/config.json`, resolves the axis (`code` for PRs/CI, `issues` for the tracker,
-  which may be a different repo or backend), and execs a pure `curl` + `jq` adapter for that
-  backend. Forgejo/Gitea, GitHub, and GitLab at full parity; Jira for the issues axis. Your only
-  secret is a per-repo, least-privilege token, and per-machine differences live in a gitignored
+  `.flightdirector/config.json`, resolves the target (`code` for PRs/CI, or one of the repo's
+  named issue trackers — the same repo, another repo or backend, a Jira project — for issues),
+  and execs a pure `curl` + `jq` adapter for that backend. Forgejo/Gitea, GitHub, and GitLab at
+  full parity; Jira as an issue tracker. A private backlog and a public intake can sit side by
+  side: each tracker has a short ref (`FJ-12`, `GH-7`) and one is the default, set up with the
+  `add-an-issue-tracker` skill. Your only secrets are per-repo, least-privilege tokens, and
+  per-machine differences live in a gitignored
   `config.local.json` layered over the committed config. Everything flight writes to the tracker
   is signed `🤖 via FlightDirector:flight@<version> with <Model/ver>`, so provenance is on the
   record. Runs on Linux, stock macOS, and Windows (Git Bash), all three CI-tested on every change.
