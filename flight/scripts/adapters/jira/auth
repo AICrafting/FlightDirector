@@ -25,9 +25,10 @@ HDRS=(-H "Authorization: Basic $(printf '%s:%s' "$LS_EMAIL" "$LS_TOKEN" | base64
 
 # 1. Identity.
 if probe GET "${SITE}/rest/api/3/myself"; then
-	pass "authenticates" "$(body_field '.displayName // "?"') <$(body_field '.emailAddress // ""')> — token $(mask "$LS_TOKEN")"
+	pass "authenticates" "$(body_field '.displayName // "?"') <$(body_field '.emailAddress // ""')> — token $(token_desc)"
 else
 	fail "authenticates" "$(why)"
+	hint "token $(token_desc)"
 	hint "Basic auth is email:api_token — a wrong issues.email fails the same way a wrong token does"
 	hint "classic API tokens: https://id.atlassian.com/manage-profile/security/api-tokens"
 fi
@@ -40,7 +41,7 @@ else
 fi
 
 # 3. Read probes.
-probe_row "issue search" "Browse Projects" GET "${SITE}/rest/api/3/search/jql?jql=$(printf '%s' "project = ${LS_PROJECT}" | jq -sRr @uri)&maxResults=1"
+probe_row "issue search" "Browse Projects" GET "${SITE}/rest/api/3/search/jql?jql=$(urlenc "project = ${LS_PROJECT}")&maxResults=1"
 probe_row "labels read"  "Browse Projects" GET "${SITE}/rest/api/3/label?maxResults=1"
 
 # 4. Account permissions on the project — the token itself is unscoped, so this

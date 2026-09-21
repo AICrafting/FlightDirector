@@ -41,7 +41,7 @@ case "$verb" in
     esac; done
     [ -n "$number" ] || die "issues get: --number required"
     _api GET "/issues/${number}" \
-      | jq -r '([(.number|tostring), .title] | @tsv), "", (.body // "")'
+      | jq -r '([(.number|tostring), .title, .state] | @tsv), "", (.body // "")'
     ;;
 
   comments)
@@ -178,7 +178,7 @@ case "$verb" in
 
     status_names=()
     while IFS= read -r n; do [ -n "$n" ] && status_names+=("$n"); done \
-      < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[]')
+      < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[] | select(type == "string")')
 
     # Remove every *other* managed status label currently on the issue, then add target.
     current_ids="$(_api GET "/issues/${number}" | jq -c '[.labels[].id]')"
@@ -207,7 +207,7 @@ case "$verb" in
       if printf '%s' "$current_ids" | jq -e --argjson id "$id" 'index($id) != null' >/dev/null; then
         _api DELETE "/issues/${number}/labels/${id}" >/dev/null
       fi
-    done < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[]')
+    done < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[] | select(type == "string")')
     ;;
 
   label-add)

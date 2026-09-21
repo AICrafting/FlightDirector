@@ -67,13 +67,19 @@ for row in "${seed_labels[@]}"; do
   fi
 done
 
-# Ensure the CI workflow exists on the default branch (idempotent).
+# Ensure the CI workflow on the default branch matches the rig's copy (idempotent): create it
+# when missing, update it when the rig's copy has changed (#185) — "exists" is not "current".
 say "Ensuring .github/workflows/ci.yml…"
-if ! curl -fsS "${H[@]}" "$REPO_API/contents/.github/workflows/ci.yml" >/dev/null 2>&1; then
-  content_b64="$(base64 < "$RIG_DIR/workflows/ci.yml" | tr -d '\n')"
+content_b64="$(base64 < "$RIG_DIR/workflows/ci.yml" | tr -d '\n')"
+existing="$(curl -fsS "${H[@]}" "$REPO_API/contents/.github/workflows/ci.yml" 2>/dev/null || true)"
+if [ -z "$existing" ]; then
   curl -fsS "${H[@]}" -X PUT "$REPO_API/contents/.github/workflows/ci.yml" \
     -d "$(jq -n --arg m "rig: add ci workflow" --arg c "$content_b64" '{message:$m, content:$c}')" >/dev/null \
     && say "  created .github/workflows/ci.yml"
+elif [ "$(jq -r '.content' <<<"$existing" | tr -d '\n')" != "$content_b64" ]; then
+  curl -fsS "${H[@]}" -X PUT "$REPO_API/contents/.github/workflows/ci.yml" \
+    -d "$(jq -n --arg m "rig: update ci workflow" --arg c "$content_b64" --arg s "$(jq -r '.sha' <<<"$existing")" '{message:$m, content:$c, sha:$s}')" >/dev/null \
+    && say "  updated .github/workflows/ci.yml"
 fi
 
 # Write the gitignored workdir config.

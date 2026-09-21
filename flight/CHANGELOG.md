@@ -15,6 +15,272 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 _Nothing yet._
 
+## [0.16.0] - 2026-09-21
+
+### Added
+
+- **A repo can name its own check command, and promotion runs it** (#209). New optional
+  `code.preflight`: a shell command string that flight runs, from the checkout holding the code
+  being gated, before work is merged or pushed. A non-zero exit halts the operation and the
+  failing output is shown. It closes a specific hole — a `direct` hop has no CI behind it, so
+  until now the only gate on `feature → develop` was a human saying "promote", and batch agents
+  were told to "run the repo's test command if one exists", leaving the command to each agent's
+  judgment every time. `promoting-a-branch` runs it after the freshness check and before the
+  merge (or before `pr open` on a `pr` hop); `promoting-branches` runs it per
+  branch before that branch's merge on a `direct` hop, so a red gate is a skip and the clean
+  branches still ship, and on a `pr` hop once on each group's integration branch before it is
+  pushed, where a red gate holds back that whole group;
+  `queue-batches` runs it from the **orchestrator** once a zone finishes, once per issue
+  worktree, because a returned agent's shell is gone and cannot report a backgrounded result.
+  **Absent by default**: with no `code.preflight` in the config every one of those steps is
+  skipped and behaviour is exactly what it was, which is every repo configured before this.
+  `setting-up-a-repo` offers it (#229): it suggests the check command the repo already uses and
+  records a declined offer as `"preflight": false`, which behaves exactly like leaving it out, so
+  an existing repo picks the question up on its next setup re-run.
+
+- **A repo can nominate a starting status for newly filed issues** (#193). `setting-up-a-repo`
+  now offers it: a freshly filed issue gets a `status/*` label so a board can tell "nobody has
+  looked at this yet" apart from "someone forgot the label", and "what is untriaged?" becomes a
+  label query. The suggested name is `status/new`, but like every other status role it is
+  **mappable** — point the role at whatever you already call that state (`status/triage`,
+  `status/open`, `status/backlog`), and an equivalent label you already have is adopted rather
+  than duplicated. **Opt-in and off unless asked for**: with no `labels.status.new` in the config
+  nothing changes, which is every repo configured before this. When it is on, `flight issues
+  create` applies the label; passing a `status/*` label of your own leaves it alone, and
+  `--no-status` skips it for one issue. It is an ordinary status, so the first `set-status` —
+  normally when `working-an-issue` starts — removes it, and `triaging-issues` deliberately does
+  **not** treat it as "already in the workflow". Issues filed outside flight do not get it.
+
+### Changed
+
+- **`pr get` and `pr list` report one state vocabulary on every backend** (#206). Both verbs now
+  emit `open` | `closed` | `merged` whatever the backend calls it, so
+  `[ "$(flight pr get --number N | cut -f3)" = open ]` is a correct open check anywhere.
+  Previously `pr get` passed `.state` through raw: GitLab spells an open MR `opened`, so that
+  comparison was false for every open GitLab MR, and `pr list` leaked the same raw value even
+  though its documented shape already promised the normalized one. Nothing in the skills compared
+  the field, so this was a latent trap rather than an active break - but #205 had just normalized
+  `issues get` to `open` | `closed`, which made the asymmetry a reasonable thing to trip over.
+
+  **Compatibility:** on Forgejo and GitHub, `pr get` on a **merged** PR now reports `merged`
+  where it used to report `closed`. Those backends have no merged state on the wire (a merged PR
+  is a closed one with `merged_at` set), and `pr list` has always derived `merged` from it; `pr
+  get` simply was not. GitLab's transient `locked` still passes through unchanged - it has no
+  equivalent on the other backends, and folding it into `open` or `closed` would invent a fact.
+  The contract row now names the possible values, and the rig smokes assert the live post-merge
+  value, which is the case a fake curl can only approximate.
+
+- **The repo's own test suite runs in parallel** (#212). `scripts/run-tests.sh` ran its
+  `scripts/tests/*.test.sh` one at a time, which made the Windows CI leg ~78% of the test
+  workflow's wall clock: a median 488s against 112s for macOS and ~72s for the two Linux legs,
+  and the slowest leg in 38 of 46 runs. The cause was not the setup (checkout, `setup-python`
+  and the `jq` download together came to 7s of a 618s run) and not slow hardware: 28 unrelated
+  test files were each 19-29x their Linux time, which is per-process cost. MSYS has no `fork()`,
+  so every spawn is a `CreateProcess` plus an address-space copy, and these tests spawn
+  constantly. Width is the one lever that helps every leg at once, so files now run concurrently,
+  each output buffered and flushed whole on completion. Locally the suite went from 171s to 51s.
+  `ci-watch.test.sh` is additionally split into one job per backend, because its timeout cases
+  wait on a real clock and it would otherwise set the floor for the whole run; running that file
+  directly still covers all three backends. `TEST_JOBS=1` restores the serial path for debugging,
+  and `TEST_JOBS=N` picks a width (default: cores, capped at 8). Nothing a consumer of the plugin
+  calls changes; this is the repo's own CI.
+
+- **Documented that the terminal stage doesn't have to close the issue** (#154, user-submitted).
+  Plenty of pipelines ship *past* their last branch: merging `main` deploys to dev, while preprod
+  and prod are deployment approvals on the same workflow run, days later, with no branch of their
+  own — so the issue closed when the last branch merged, before it had really shipped. Setting
+  `"closesIssues": false` on the terminal stage has always supported this and the config reference
+  always said so, but nothing showed it: `example-flows.md` demonstrated only the opposite move
+  (closing *early*), and the guide's narrative implied closing at the last branch was inevitable.
+  Both now cover it, with the honest caveat that flight cannot see a deployment, so the final
+  close is yours to make — precisely, if you want, by asking for the issues referenced between the
+  previously released commit and the one just deployed.
+
+- **`issues get` now reports the issue's state** (#205). The first line becomes
+  `number⇥title⇥state`, with `state` normalized to exactly `open` or `closed` on every backend.
+  Previously it emitted `number⇥title` and exited 0 whether the issue was open or closed, so
+  "is #N open?" had no single-issue answer and callers had to scan a paged `issues list --state
+  open`. That scan was also silently coupled to the limit: trim it below the repo's open-issue
+  count and an open issue past the cap reads as closed. `pr get` already returned
+  `number⇥title⇥state⇥url`, so the omission looks to have been accidental rather than designed.
+  The deferral guard in `promoting-a-branch` (#195) and its `promoting-branches` mirror now use
+  the one-call form and the paging caveat is gone.
+
+  Normalization is the substance, not the field: GitLab reports an open issue as `opened`, and
+  Jira has no open/closed field at all, so its status **category** decides (`done` → `closed`,
+  otherwise `open`) - the same rule `issues list`, `close` and `reopen` already use, which means
+  a project with custom workflow status names needs no extra config. **Compatibility:** `state`
+  is appended as field 3, so existing `cut -f1` / `cut -f2` readers are unaffected, but it is a
+  documented-shape change and anything splitting the whole first line should be checked.
+
+- **`promoting-a-branch` Step 3 gates deferrals and guards the no-user-surface hatch** (#195). The
+  step gated on a test plan *existing*; nothing read the PR body for what it said it deliberately
+  did **not** do, so a PR could ship a "known gaps" list, merge, close its issue, and leave the
+  remainder tracked nowhere but a merged body. Step 3 now scans the assembled body for deferral
+  shapes - semantically, so a bare `TODO:` counts as much as an `## Out of scope` heading - and
+  halts unless each one names an `#N` verified open — and states plainly that an issue
+  this PR resolves does not count, since it closes when the work reaches a closing stage and takes
+  the note with it. The `- no user surface` escape hatch is likewise narrowed to an *inherently* absent surface
+  (infra, migration, refactor); a surface that exists but could not be reached from the default
+  seed is **obstructed**, and calls for the real plan, the precondition driven as a step in it, and
+  a successor issue for the durable fixture. `promoting-branches` carries the same two guards in
+  its batch `pr` path.
+
+- **The repo's three floating CI images are pinned** (#167). `alpine:latest` → `alpine:3.22.6`
+  (so the two Linux legs differ only in the interpreter), `cytopia/yamllint:latest` →
+  `cytopia/yamllint:1`, and `koalaman/shellcheck-alpine:latest` → the same image by digest. A run
+  of an unchanged commit could previously get a different toolchain than the run before it, which
+  already cost a day when shellcheck's `latest` dev build gained SC2337 (#152). The dev build is
+  pinned rather than the newest release, because release 0.11.0 predates SC2337 and pinning to it
+  would drop CI's guard against the SIGPIPE pattern #152 fixed; the consequence — a contributor's
+  distro shellcheck will not flag SC2337 locally — is recorded beside the pin. Dev-facing only;
+  nothing a consuming repo sees.
+
+- **The signature flight appends to issue, comment and PR bodies now starts with 🤖** (#183):
+  `🤖 via FlightDirector:flight@<version> with <Model/ver>`, so agent-written text is recognisable
+  at a glance. Re-signing still replaces rather than stacks: an `issues update` / `pr update` over
+  a body signed in any earlier shape (bare, `via …`, or `🤖 via …`) ends with exactly one
+  signature. `--no-signature` and `code.signature.enabled: false` are unchanged. Anything of yours
+  that matches the signature text should allow for the prefix.
+
+### Fixed
+
+- **`queue-batches` no longer reads a parked zone as finished** (#207). The skill gave the
+  orchestrator two triggers for "this zone is done": Section 4 waited for every zone to emit its
+  terminal line, Section 5 started "when all agents return". An agent that returned *without* a
+  terminal line fell between them, and the convenient reading summarized the batch and handed it
+  to `promoting-branches` with work still owed. Section 5 now opens on the Section 4 condition,
+  and Section 4 says what to do when an agent returns early: look for the zone's `ticket=all`
+  line, treat its absence as unfinished regardless of what the agent reported, and check what is
+  really running (the orchestrator's own log watcher shows up in that `ps` listing, so a match is
+  not proof). The Claude Code mechanism (a job the worker backgrounded dies with the worker's
+  shell, so the worker comes back "waiting" on nothing) is in `references/dispatch-claude.md`.
+  Every one of these tests is keyed on the `ticket=all` marker rather than on the line being
+  last, including the two that predate #207: with a `code.preflight` gate configured (#209) the
+  orchestrator appends its own `preflight-pass` lines *after* the terminal line, so a positional
+  reading would have called every finished zone unfinished and stalled the batch. The status-log
+  contract now labels that line "the agent's last" and says to match on the marker.
+- **`ci log` can now show why a PR's CI is red** (#138). Two faults meant the documented failure
+  path of every `pr` hop — `ci log --failed "$BRANCH"` — found nothing on a repo whose workflows run
+  on pull requests. (1) The branch lookup asked for runs under `refs/heads/<branch>`, but a run
+  triggered by a pull-request event carries the PR ref, so it died with "no CI run found" straight
+  after `ci watch --pr` had reported `status=failure`. It now falls back to the branch's head commit
+  (Forgejo, and GitLab for merge-request pipelines; GitHub's branch filter already matched). (2)
+  `ci log --sha` took the *latest* run on the commit; with one run per workflow started in the same
+  second that was as often the green lint as the red tests, and it answered "(no failed jobs)" for
+  a commit whose CI was red. `--sha` now dumps every failed run on the commit. New: **`ci log --pr
+  N`**, resolving the head commit the way `ci watch --pr` does — the promotion skills now use it.
+  All three code backends.
+
+- **The prompt ledger no longer fills with unmeasurable subagent rows, and subagent output tokens
+  are no longer undercounted** (#155, user-submitted). Two separate faults in the Claude Code
+  producer. (1) Claude Code fires `SubagentStop` about every 30 seconds per running background
+  agent for an internal helper that has no `agent_type` and never gets a transcript on disk; the
+  hook wrote a null row for each, so a batch run showed "997 of 1,007 rows had no usage" while its
+  ten real workers were in fact measured. Such a stop now writes no row, and `prompt-log summary`
+  sets the rows older versions already logged aside as `helper_stop_rows` rather than counting
+  them as unmeasured. (2) The per-request de-duplication kept the *first* content block of each
+  request, but in a subagent transcript that block carries the streaming-start placeholder
+  (`output_tokens: 8`) and only the last carries the real count — one worker's 33,686 output
+  tokens were logged as 8,427. The producer now keeps the block with the most output tokens.
+  Costs logged for subagents before this fix are therefore low on the output side. Also: a
+  null-usage row now records why (`usage_missing`: `no-path` / `unreadable` / `no-usage`, both
+  harnesses) and the summary names the causes instead of always saying "hook could not read the
+  transcript"; and the parent-transcript fallback only counts the stopping agent's own entries.
+  (3) Claude Code fires `SubagentStop` for a real agent several times — each time it parks on a
+  background command or a child agent, and again after it hands its report back — and the ledger
+  kept only the first, so a subagent's cost stopped counting at its first pause: 13–28% low in a
+  measured capture, and far more for a worker that backgrounds a long CI watch early. Each stop
+  now logs the usage beyond that agent's earlier rows (`part: 2`, `3`, … from the second row), so
+  an agent's rows always sum to its transcript. Agents launched by other agents were already
+  logged on their own; their rows now carry `parent_agent_id` and `spawn_depth`, and the summary
+  note reads "N subagent row(s) from M agent(s)". Anything that sums ledger rows stays correct;
+  anything that assumed one row per agent should count distinct `turn_id`s instead.
+
+- **`ci watch` no longer reports a run where nothing executed as green** (#150). `skipped` used to
+  be folded into the success side of the aggregate, so a workflow whose runs were all skipped (a
+  path filter that matched nothing, a `needs:` whose dependency was skipped, a conditional that
+  evaluated false) reported `status=success` and was indistinguishable, at the merge gate, from a
+  run that verified everything. Skipped is now counted on its own axis in all three code backends
+  (Forgejo, GitHub, GitLab): the line gained a `skipped=<s>` field, an all-skipped SHA verdicts as
+  the new `status=skipped` rather than `success`, and a partial skip still passes but names how many
+  runs did not run. `promoting-a-branch` and `promoting-branches` now handle that third verdict
+  instead of treating not-failed as passed. This is the false-green counterpart to #43's false red.
+  **Note for anything parsing the output line:** `status=` can now be `skipped`, and `skipped=<s>`
+  sits between `failed=` and `status=`.
+
+- **The Windows CI leg fails at the download when its `jq` fetch goes wrong** (#166). The job
+  fetched `jq.exe` with `curl -sSL`; with no `-f`, an HTTP error page was saved as `jq.exe` and
+  curl exited 0, so the leg died a line later on `jq.exe: line 1: <!DOCTYPE html>` — naming neither
+  the download nor the reason. That is what failed the 0.15.1 release PR while the other three legs
+  passed. Now `curl -fsSL` with `--retry 3 --retry-delay 5` (a transient 5xx no longer fails the
+  leg at all; a genuine 404 still fails immediately), and the download is verified against the
+  sha256 jq publishes for the pinned 1.7.1 asset before it is executed. Dev-facing only; nothing a
+  consuming repo sees.
+
+- **`cleaning-up-branches` now finds the `batch/*` branches `promoting-branches` leaves behind**
+  (#168). A `pr`-hop batch promote opens a `batch/<group>-<short>` integration branch per group and
+  nothing removes it afterwards, but `flight branches` only considered `feature/*`, `bugfix/*` and
+  `release/*` — so the documented cleanup pass never saw them and they accumulated on origin.
+  `batch/*` is now one of the built-in default patterns, and the places that state that list
+  (`flight-setup.md`, `cleaning-up-branches`) agree again. A `batch/*` branch carries no issue
+  number, so it is reported as "no cross-check was possible" rather than silently trusted.
+  `promoting-branches` still does not delete the branch itself, and now says so. Also documented
+  explicitly: a configured `code.branches.patterns` **replaces** the defaults outright rather than
+  adding to them.
+
+- **Every interpolated value in the `pr`, `ci` and `labels` adapters is URL-encoded** (#169).
+  Branch names, label names, usernames and states are caller input that ends up in a query string.
+  Unencoded, a space made curl refuse the whole request ("Malformed input to a URL function"), and
+  a `#` was worse: the request succeeded with everything after it cut off as a fragment, so a PR or
+  CI-log lookup silently matched nothing. Now encoded: `pr list --head/--base` (GitHub, GitLab),
+  `ci log --failed` (all three), and `issues assign --user` (GitLab). Delimiters are assembled
+  around the encoded value rather than through it — Forgejo's `refs/heads/` prefix and GitHub's
+  `owner:ref` colon stay literal — so a branch with no special character sends exactly the URL it
+  always did. The encoder now lives once in `_portable.sh`.
+
+- **`lint.sh` rejects an unknown filter instead of silently linting nothing** (#170). The filter was
+  matched against `all`, `yaml` and `shell`, and when it matched none the script simply ran no
+  check — so `lint.sh yml`, or any typo, printed `Passed: 0  Failed: 0` and exited 0, green having
+  linted nothing. That is the trap #135 closed for a missing linter, arriving by a different door.
+  The filter is now validated before any linter runs: an unrecognised value names itself and the
+  accepted values on stderr and exits 2. The `Passed: N  Failed: N` summary contract (#123, #135)
+  is untouched for every accepted filter. Dev-facing only; nothing a consuming repo sees.
+
+- **`ci watch` no longer reports a healthy run as a hang just because it sat in a queue** (#171).
+  The watcher counted every second since it started against `code.ciWatchTimeout` (default 900),
+  which on a repo with one runner per platform is mostly queue time: a run that took 19m29s wall
+  clock with almost all of it waiting for a runner had its watcher die at 900s calling it a hang.
+  There are now two clocks. **`--timeout` / `code.ciWatchTimeout` changed meaning**: it bounds how
+  long a run may *execute*, not how long the watch may last. Time in which every job of every
+  non-terminal run is waiting for a runner is bounded separately by the new **`--queue-timeout` /
+  `LS_CI_QUEUE_TIMEOUT` / `code.ciQueueTimeout`** (default 3600; `0` disables either cap, as
+  before). Each message names which cap fired and the key that raises it. Because every backend
+  marks a run running as soon as *any* job starts, a run that looks like it is executing is
+  confirmed against its own job list first; anything unreadable counts as executing, so a blip can
+  only ever leave the shorter cap in charge. "No run found at all" is a trigger or push problem,
+  not a queue, and stays bounded by `--timeout` as it was.
+
+- **`auth check` now says which source the token came from** (#177, #196). Token resolution is
+  env-first (`LS_TOKEN` → `FLIGHT_TOKEN` → the legacy `FORGEJO_TOKEN`, then the secrets file) and
+  never said so, so a token exported for a *different* forge — the classic stale `FORGEJO_TOKEN`
+  in a shell profile — produced a flat `HTTP 401` with `.flightdirector/secrets.json` as the
+  obvious, and wrong, suspect. The resolution order is unchanged; the silence is what was fixed.
+  The `authenticates` line now reads `token 024ffe8f… (from $FORGEJO_TOKEN)` or
+  `(from /path/to/repo/.flightdirector/secrets.json)` on every backend, and the *failing* branch
+  carries the same detail as a hint where it previously printed no token at all. Separately, the
+  legacy `FORGEJO_TOKEN` shadowing a present secrets file that holds a different token now gets a
+  one-line note on stderr; `LS_TOKEN` and `FLIGHT_TOKEN` are deliberate backend-neutral
+  overrides and stay quiet. Adapters get the source as `LS_TOKEN_SOURCE` in the environment.
+  The secrets file is named by its **full path**, not the repo-relative form (#196): it is
+  gitignored, so it lives only in the main checkout, and a repo-relative name printed in a linked
+  worktree — where most work happens — points at nothing you can open. The shadow note on stderr
+  uses the same full path. The tracked-by-git warning keeps the repo-relative form on purpose: a
+  tracked file *is* checked out in every worktree, and that is the form you would add to
+  `.gitignore`, which is what the warning asks you to do. `flight-setup.md`'s token-precedence
+  section now points at `auth check` as the way to see which source won, and documents the
+  legacy-shadow note.
+
 ## [0.15.1] - 2026-09-19
 
 ### Fixed

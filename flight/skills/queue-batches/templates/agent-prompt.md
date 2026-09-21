@@ -10,6 +10,7 @@ Placeholders the orchestrator fills before dispatch:
 - `{scratch}` — a writable scratch dir for `--body-file` temp files
 - `{issues_ordered}` — newline-separated `#N <slug>` list, execution order (smallest-first)
 - `{repo_rules}` — verbatim contents of the repo's agent-rules file, or `None configured.`
+- `{preflight}` — the repo's check command (`code.preflight`), or `None configured.`
 - `{pre_made_decisions}` — bullet list of orchestrator decisions so the agent doesn't stall
 
 ---
@@ -29,8 +30,33 @@ mkdir -p "$(dirname {log_path})"; touch {log_path}
 {dispatcher} config '.code.stages[0].name'   # should print {base_branch}
 ```
 
-Record the baseline test status for {base_branch} (run the repo's test command if one exists).
-You'll report deltas at the end.
+Record the baseline test status for {base_branch}. The repo's check command is:
+
+```
+{preflight}
+```
+
+Run **exactly that** — not a subset you pick from memory — from `{repo_root}` (no issue worktree
+exists yet), and run it in the **foreground**:
+
+```bash
+( cd "{repo_root}" && sh -c '<the command above>' )
+```
+
+Never rely on where your shell happens to be sitting. Your shell also does not outlive your
+return, so a backgrounded run has nothing left to write its verdict into. You'll report deltas at
+the end.
+
+Sibling zone agents run this same baseline against `{repo_root}` at roughly the same moment. If
+the command writes build artifacts into that tree, say so in your report rather than trusting the
+numbers — you may be reading another zone's output.
+
+If that block reads `None configured.`, this repo names no gate: run its own test command if one
+is discoverable, and say in your final report which command you used.
+
+The orchestrator re-runs the repo's command in each finished worktree after you return — that
+sweep, not your run, is the authoritative record. Yours is what keeps you from building three
+issues on top of a break.
 
 ## Issues (work in this order, one at a time)
 
@@ -110,7 +136,15 @@ For each issue `#N` with slug `<slug>`:
 4. **Before declaring done — walk the user-visible surface.** Don't satisfy only the literal
    acceptance phrase; trace every related field/element a reporter would see. If the real scope
    is materially larger than the issue's framing, safety-valve instead of shipping a narrow read.
-5. **Hand to the merge gate (do NOT promote):**
+5. **Run the repo's check command** — the one printed under *Setup*, verbatim and in full — from
+   `$WT`, in the foreground. Run it via `sh -c` from that path (`cd "$WT"` in a subshell) rather
+   than trusting the shell's current directory. Skip this step only when *Setup* said
+   `None configured.`
+   Non-zero means the issue is not done: fix it on this branch, or safety-valve with the failing
+   output if you can't fix it quickly. Do not move to the next issue on a red gate — a branch
+   that fails the repo's own check is one the user cannot promote, and the orchestrator's sweep
+   will find it anyway once you've returned and can no longer fix it.
+6. **Hand to the merge gate (do NOT promote):**
    ```bash
    {dispatcher} issues set-status --number <N> --status to-test
    # Write your finishing record (work summary + model/token note; see working-an-issue
@@ -159,7 +193,8 @@ answer. Shipping 3 solid issues beats forcing 5 shaky ones.
   explicit path of their own.
 - **No promotion / no merge to any stage.** Stop each issue at `to-test`.
 - **Dispatcher only** for backend access (`{dispatcher} issues …`) — never curl or MCP.
-- **Tests green after every commit.**
+- **Tests green after every commit** — and where the repo names a check command, that command is
+  what "green" means here. Run it in the foreground; never background it.
 - **Safety-valve on uncertainty** rather than guessing.
 - **Never fork a feature branch from an unfetched `{base_branch}`**, and never `git pull` to
   "fix" a diverged one — stop and report.

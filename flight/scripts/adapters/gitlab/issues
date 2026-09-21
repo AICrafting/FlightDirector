@@ -56,7 +56,9 @@ case "$verb" in
     esac; done
     [ -n "$number" ] || die "issues get: --number required"
     _api GET "/issues/${number}" \
-      | jq -r '([(.iid|tostring), .title] | @tsv), "", (.description // "")'
+      | jq -r '([(.iid|tostring), .title,
+                  (.state | if . == "opened" then "open" else . end)] | @tsv),
+               "", (.description // "")'
     ;;
 
   comments)
@@ -191,7 +193,7 @@ case "$verb" in
     # GitLab applies add_labels/remove_labels in one PUT (removing a label the
     # issue lacks is a harmless no-op).
     remove_csv="$(printf '%s' "$labels_json" | jq -r --arg t "$target_name" \
-      '[.status // {} | .[] | select(. != $t)] | join(",")')"
+      '[.status // {} | .[] | select(type == "string") | select(. != $t)] | join(",")')"
     _api PUT "/issues/${number}" \
       "$(jq -n --arg a "$target_name" --arg r "$remove_csv" \
          '{add_labels:$a} + (if $r == "" then {} else {remove_labels:$r} end)')" >/dev/null
@@ -258,7 +260,7 @@ case "$verb" in
     [ ${#users[@]} -gt 0 ] || die "issues assign: at least one --user required"
     ids="[]"
     for u in "${users[@]}"; do
-      uid="$(curl -sS "${GL_HEADERS[@]}" "${LS_API%/}/users?username=${u}" \
+      uid="$(curl -sS "${GL_HEADERS[@]}" "${LS_API%/}/users?username=$(urlenc "$u")" \
         | jq -r '.[0].id // empty')"
       [ -n "$uid" ] || die "issues assign: no GitLab user '${u}'"
       ids="$(printf '%s' "$ids" | jq -c --argjson id "$uid" '. + [$id]')"

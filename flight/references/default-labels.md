@@ -80,6 +80,7 @@ the skills use your name, not the plugin's.
 
 | Role | Default label | Color | Description | Adopt the repo's label if it has… |
 |---|---|---|---|---|
+| new *(opt-in)* | `status/new` | `#0b6fa4` | Filed, not yet triaged | `status/triage`, `status/open`, `triage`, `untriaged`, `inbox`, `backlog` |
 | in-progress | `status/in progress` | `#1f9d55` | In flight | `status/doing`, `in-progress`, `wip` |
 | awaiting-test | `status/to test` | `#e3a008` | Built, awaiting the user's verification | `status/testing`, `to-test`, `ready-for-test` |
 | blocked | `status/blocked` | `#d11149` | Can't be started | `blocked` |
@@ -87,6 +88,15 @@ the skills use your name, not the plugin's.
 | review | `status/review` | `#8957e5` | In an open PR awaiting review | `review`, `in-review`, `under-review` |
 | qa | `status/qa` | `#0e7490` | Merged, awaiting real-world verification | `qa`, `awaiting-qa` |
 | done | `status/done` | `#216e39` | Shipped / released — the terminal close state | `done`, `shipped`, `released`, `complete` |
+
+**The `new` role is opt-in and off by default.** Unlike the others it is not seeded: absent from
+`labels.status`, the feature simply does not exist for that repo, which is every repo configured
+before it was added. `setting-up-a-repo` asks, and only then creates the label and writes the key.
+When it *is* configured, `flight issues create` applies it, so a freshly filed issue is
+distinguishable from one whose label someone forgot — and "what is untriaged?" becomes a label
+query. It is a status like any other: the first `set-status` (normally to `in-progress`, when
+`working-an-issue` picks the issue up) removes it. Issues filed outside flight — the web UI,
+another tool — do not get it.
 
 **Terminal `issueStatus`.** A terminal stage may set `issueStatus: "done"` so that closing an
 issue also relabels it to `status/done` (the atomic `set-status` drops the prior `status/qa` on

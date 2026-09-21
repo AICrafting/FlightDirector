@@ -26,7 +26,7 @@ a new session afterwards — bundled skills load at session start.
 ## Plugins
 
 These are the **Flight Director** family of plugins (`flight` is the first; `launchpad`,
-`preflight`, `mission-control`, `telemetry` and friends will follow). `flight` was previously
+`mission-control`, `telemetry` and friends will follow). `flight` was previously
 called `lightspeed` during initial development/testing.
 
 | Plugin | What it does |
@@ -51,7 +51,9 @@ a worked example, is in the **[Flight User Guide](flight/GUIDE.md)**; here is wh
   → [Work it](flight/GUIDE.md#3-work-it)
 - **A human merge gate.** Work stops at *ready to test*; nothing merges until you say "promote".
   When you do, a work-ledger comment (summary, token cost, model) lands on the issue first.
-  → [Work it](flight/GUIDE.md#3-work-it)
+  Name your repo's check command in `code.preflight` and every promotion runs it before merging,
+  so a red suite stops the merge even on a hop with no CI.
+  → [Work it](flight/GUIDE.md#3-work-it) · [The preflight gate](flight/GUIDE.md#4-promote-toward-release)
 - **A promotion pipeline that matches how you ship.** Declare your stages once —
   `feature → develop → qa → main` or just `main` — and the same "promote" advances a branch one
   hop: direct-merge where you want speed, PR + test plan + CI watch where you want a gate. Issue
@@ -66,7 +68,7 @@ a worked example, is in the **[Flight User Guide](flight/GUIDE.md)**; here is wh
   backend. Forgejo/Gitea, GitHub, and GitLab at full parity; Jira for the issues axis. Your only
   secret is a per-repo, least-privilege token, and per-machine differences live in a gitignored
   `config.local.json` layered over the committed config. Everything flight writes to the tracker
-  is signed `via FlightDirector:flight@<version> with <Model/ver>`, so provenance is on the
+  is signed `🤖 via FlightDirector:flight@<version> with <Model/ver>`, so provenance is on the
   record. Runs on Linux, stock macOS, and Windows (Git Bash), all three CI-tested on every change.
   → [backends.md](flight/references/backends.md) · [adapter-contract.md](flight/references/adapter-contract.md)
   · [ADR 0001: why curl over MCP](docs/adr/0001-curl-over-mcp-and-adapter-architecture.md)
@@ -109,5 +111,11 @@ Working on the tools in this repo? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 
-- **Aaron Wood** — *The original ideast* 🤣
-- **[Dave Wood](https://davewood.com/)** — *AI wrangler*
+FlightDirector generalizes the agent toolchain Aaron built and ran against
+[Darkwatch](https://github.com/SilicaGel/darkwatch-toolchain) over five months, with the
+project-specific wiring taken out and the design kept. It's being built out here by both
+of us.
+
+- **[Aaron Wood](https://aaronwood.dev/)** — original toolchain and design
+- **[Dave Wood](https://davewood.com/)** — turned it into a plugin: backends, pipeline, and
+  the release machinery

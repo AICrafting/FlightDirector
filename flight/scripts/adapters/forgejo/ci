@@ -15,11 +15,13 @@ case "$verb" in
   # is swallowed and the poll continues, rather than killing the watcher.
   watch)
     sha=""; pr=""; status_file=""; timeout="${LS_CI_WATCH_TIMEOUT:-900}"
+    queue_timeout="${LS_CI_QUEUE_TIMEOUT:-3600}"
     while [ $# -gt 0 ]; do case "$1" in
-      --sha)         sha="$2"; shift 2 ;;
-      --pr)          pr="$2"; shift 2 ;;
-      --status-file) status_file="$2"; shift 2 ;;
-      --timeout)     timeout="$2"; shift 2 ;;
+      --sha)           sha="$2"; shift 2 ;;
+      --pr)            pr="$2"; shift 2 ;;
+      --status-file)   status_file="$2"; shift 2 ;;
+      --timeout)       timeout="$2"; shift 2 ;;
+      --queue-timeout) queue_timeout="$2"; shift 2 ;;
       *) die "ci watch: unknown arg '$1'" ;;
     esac; done
     # --pr is authoritative: the PR head commit IS the SHA the run reports as
@@ -40,6 +42,10 @@ case "$verb" in
 
     poll="${LS_CI_POLL_SECONDS:-30}"
     start="$(date +%s)"; seen=0; last_sig=""
+    # Two clocks (#171): `timeout` bounds EXECUTION, `queue_timeout` bounds time
+    # spent waiting for a runner. `tick` is the start of the interval currently
+    # being attributed; `prev_*` is the state observed at that interval's start.
+    exec_secs=0; queue_secs=0; tick="$start"; prev_seen=0; prev_queued=0
     while true; do
       # /actions/runs (not /actions/tasks): a task only exists once a runner has
       # picked the job up, so a run still `waiting` is invisible to the tasks
@@ -53,7 +59,11 @@ case "$verb" in
         "${REPO_API}/actions/runs?${filter}limit=20" 2>/dev/null || true)"
       # Aggregate over ALL runs for this SHA (a PR can trigger several): keep
       # watching while any is pending; once none are pending the verdict is
-      # failure if any run failed, else success. total/pending/failed on one line.
+      # failure if any run failed, skipped if every run was skipped, else
+      # success. total/pending/failed/skipped on one line.
+      # `skipped` is counted on its own axis (#150): it is not a failure, but
+      # it is not a pass either — a run where nothing executed must not be
+      # indistinguishable from one that verified everything at the merge gate.
       # Superseded attempts don't count (#43): within each workflow, score the
       # latest run per trigger event — a retried-to-green flake must not watch
       # as failure — and if the workflow's newest run is a manual
@@ -72,72 +82,160 @@ case "$verb" in
         | ([$s[] | select(. as $x | ["waiting","running","queued","in_progress","blocked","unknown",""] | index($x))] | length) as $pending
         | ([$s[] | select((. as $x | ["waiting","running","queued","in_progress","blocked","unknown",""] | index($x)) | not)
                  | select((. as $x | ["success","skipped"] | index($x)) | not)] | length) as $failed
-        | "\($total) \($pending) \($failed)"' 2>/dev/null || true)"
-      read -r total pending failed <<<"$metrics" || true
-      total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"
+        | ([$s[] | select(. == "skipped")] | length) as $skipped
+        | "\($total) \($pending) \($failed) \($skipped)"' 2>/dev/null || true)"
+      read -r total pending failed skipped <<<"$metrics" || true
+      total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"; skipped="${skipped:-0}"
       if [ "$total" -gt 0 ]; then
         seen=1
-        if [ "$pending" -gt 0 ]; then agg=pending; elif [ "$failed" -gt 0 ]; then agg=failure; else agg=success; fi
-        sig="${total}/${pending}/${failed}"
+        # Verdict order matters: pending wins, then failure, then an all-skipped
+        # run (#150) — which is its own terminal outcome, NOT a pass, because
+        # nothing in it executed. A partial skip still passes; the skipped count
+        # on the line is what tells the human how much was actually verified.
+        if [ "$pending" -gt 0 ]; then agg=pending
+        elif [ "$failed" -gt 0 ]; then agg=failure
+        elif [ "$skipped" -eq "$total" ]; then agg=skipped
+        else agg=success; fi
+        sig="${total}/${pending}/${failed}/${skipped}"
         if [ "$sig" != "$last_sig" ]; then
-          echo "ci runs=${total} pending=${pending} failed=${failed} status=${agg}"
+          echo "ci runs=${total} pending=${pending} failed=${failed} skipped=${skipped} status=${agg}"
           last_sig="$sig"; _write "$agg"
         fi
         [ "$pending" -eq 0 ] && exit 0
       fi
-      # Hang guard: never poll forever. --timeout 0 disables the cap.
-      if [ "$timeout" -gt 0 ] && [ "$(( $(date +%s) - start ))" -ge "$timeout" ]; then
-        if [ "$seen" = 1 ]; then
-          die "ci watch: timed out after ${timeout}s waiting for run ${sha:0:12} to reach a terminal state"
-        else
-          die "ci watch: timed out after ${timeout}s — no CI run found for ${sha:0:12} (is the branch pushed and does a workflow trigger for it?)"
+
+      # Queued or executing? The run-level status alone cannot say. Forgejo
+      # marks a run `running` the moment ANY job starts, so a run with three
+      # legs green and the fourth still waiting for its runner reads `running`
+      # while nothing at all is executing — which is exactly the 19-minute case
+      # this guard exists for. So every run that LOOKS executing is confirmed
+      # against its own job list before its time counts as execution.
+      queued=0
+      if [ "$pending" -gt 0 ]; then
+        queued=1
+        run_ids="$(printf '%s' "$body" | jq -r --arg sha "$sha" '
+          .workflow_runs[]? | select((.commit_sha // .head_sha // "")|startswith($sha))
+          | select((.status // "") == "running") | .id' 2>/dev/null || true)"
+        while IFS= read -r rid; do
+          [ -n "$rid" ] || continue
+          jobs="$(curl -sS -H "Authorization: token ${LS_TOKEN}" \
+            "${REPO_API}/actions/runs/${rid}/jobs" 2>/dev/null || true)"
+          jm="$(printf '%s' "$jobs" | jq -r '
+            [.[]? | .status // ""] as $s
+            | ([$s[] | select(. == "running")] | length) as $r
+            | ([$s[] | select(. as $x | ["waiting","queued","blocked"] | index($x))] | length) as $w
+            | "\($r) \($w)"' 2>/dev/null || true)"
+          jrun=""; jwait=""
+          read -r jrun jwait <<<"$jm" || true
+          # Conservative on anything unclear: an unreadable job list, a job
+          # actually running, or a run whose jobs are all terminal while the run
+          # is not, all count as executing — so a blip can only ever leave the
+          # SHORTER cap in charge, never silently extend the wait to an hour.
+          if [ -z "$jrun" ] || [ "${jrun:-0}" -gt 0 ] || [ "${jwait:-0}" -eq 0 ]; then
+            queued=0; break
+          fi
+        done <<<"$run_ids"
+      fi
+
+      # Attribute the interval that just ended to the state seen at its start.
+      now="$(date +%s)"; delta=$(( now - tick )); tick="$now"
+      if [ "$prev_seen" = 1 ]; then
+        if [ "$prev_queued" = 1 ]; then queue_secs=$(( queue_secs + delta ))
+        else exec_secs=$(( exec_secs + delta )); fi
+      fi
+      prev_seen="$seen"; prev_queued="$queued"
+
+      # Hang guards: never poll forever. Either timeout set to 0 disables that
+      # cap. Each message names the cap that fired and the key that raises it.
+      if [ "$seen" = 1 ]; then
+        if [ "$timeout" -gt 0 ] && [ "$exec_secs" -ge "$timeout" ]; then
+          die "ci watch: timed out after ${exec_secs}s of execution waiting for run ${sha:0:12} to reach a terminal state (plus ${queue_secs}s queued; raise --timeout / code.ciWatchTimeout)"
         fi
+        if [ "$queue_timeout" -gt 0 ] && [ "$queue_secs" -ge "$queue_timeout" ]; then
+          die "ci watch: gave up after ${queue_secs}s queued — run ${sha:0:12} never started executing, every job is still waiting for a runner (raise --queue-timeout / code.ciQueueTimeout)"
+        fi
+      elif [ "$timeout" -gt 0 ] && [ "$(( now - start ))" -ge "$timeout" ]; then
+        die "ci watch: timed out after ${timeout}s — no CI run found for ${sha:0:12} (is the branch pushed and does a workflow trigger for it?)"
       fi
       sleep "$poll"
     done
     ;;
 
-  # Dump the failed jobs' logs for a commit (or the latest failed run on a
-  # branch). Forgejo 16's Actions API serves per-job plaintext logs
-  # (/actions/jobs/{id}/logs) — jobs are listed per run, failed ones dumped.
+  # Dump the failed jobs' logs for a PR, a commit, or a branch. Forgejo 16's
+  # Actions API serves per-job plaintext logs (/actions/jobs/{id}/logs) — jobs
+  # are listed per run, failed ones dumped.
+  #
+  # Everything resolves to a SHA and then to EVERY failed run on it (#138). A
+  # commit usually carries several runs (one per workflow, often started in the
+  # same second), so "the latest run" is as likely to be the green lint as the
+  # red tests — `log` exists to show failures, so it looks for those.
   log)
-    sha=""; branch=""
+    sha=""; branch=""; pr=""
     while [ $# -gt 0 ]; do case "$1" in
       --sha)    sha="$2"; shift 2 ;;
+      --pr)     pr="$2"; shift 2 ;;
       --failed) branch="$2"; shift 2 ;;
       *) die "ci log: unknown arg '$1'" ;;
     esac; done
-    [ -n "$sha" ] || [ -n "$branch" ] || die "ci log: --sha SHA or --failed BRANCH required"
+    [ -n "$sha" ] || [ -n "$branch" ] || [ -n "$pr" ] || die "ci log: --pr N, --sha SHA or --failed BRANCH required"
 
+    # --pr is authoritative, exactly as in `watch`: the PR's head commit is the
+    # SHA its runs report.
+    if [ -n "$pr" ]; then
+      sha="$(_api GET "/pulls/${pr}" | jq -r '.head.sha // empty')"
+      [ -n "$sha" ] || die "ci log: could not resolve head sha for PR #${pr}"
+    fi
+
+    runs="[]"
+    if [ -z "$sha" ]; then
+      # The `refs/heads/` prefix is ours and stays literal; only the branch name
+      # the caller passed is encoded, so an ordinary branch sends the same URL
+      # it always did and `feat/a b` no longer breaks the request.
+      runs="$(_api GET "/actions/runs?ref=refs/heads/$(urlenc "$branch")&status=failure&limit=1" \
+        | jq -c '[.workflow_runs[0] // empty]')"
+      if [ "$(printf '%s' "$runs" | jq 'length')" -eq 0 ]; then
+        # A run triggered by a pull_request event carries the PR ref, never
+        # refs/heads/<branch>, so a repo whose workflows only run on PRs has
+        # nothing under the branch ref. Its runs are still on the branch's head
+        # commit — go and look there.
+        sha="$(_api GET "/branches/$(urlenc "$branch")" 2>/dev/null | jq -r '.commit.id // empty' 2>/dev/null || true)"
+        [ -n "$sha" ] || die "ci log: no CI run found for ${branch}"
+      fi
+    fi
     if [ -n "$sha" ]; then
       # ?head_sha= is an exact match — only usable for a full 40-char SHA; the
       # client-side startswith keeps short prefixes working (and harmlessly
       # re-checks the full-SHA case).
       filter=""; [ "${#sha}" -eq 40 ] && filter="head_sha=${sha}&"
-      run="$(_api GET "/actions/runs?${filter}limit=20" \
+      runs="$(_api GET "/actions/runs?${filter}limit=20" \
         | jq -c --arg sha "$sha" '[.workflow_runs[]? | select((.commit_sha // "")|startswith($sha))]
-          | sort_by(.started // .created) | last // empty')"
-    else
-      run="$(_api GET "/actions/runs?ref=refs/heads/${branch}&status=failure&limit=1" \
-        | jq -c '.workflow_runs[0] // empty')"
+          | sort_by(.started // .created, .id)')"
+      [ "$(printf '%s' "$runs" | jq 'length')" -gt 0 ] || die "ci log: no CI run found for ${branch:-${pr:+PR #$pr }$sha}"
+      failed_runs="$(printf '%s' "$runs" | jq -c '[.[] | select(.status=="failure")]')"
+      if [ "$(printf '%s' "$failed_runs" | jq 'length')" -eq 0 ]; then
+        printf '%s' "$runs" | jq -r '"(no failed jobs for run \(map(.id|tostring)|join(", ")): \(map(.status)|unique|join("/")))"'
+        exit 0
+      fi
+      runs="$failed_runs"
     fi
-    [ -n "$run" ] || die "ci log: no CI run found for ${sha:-$branch}"
-    run_id="$(printf '%s' "$run" | jq -r '.id')"
-    printf '%s' "$run" | jq -r '"run \(.id): status=\(.status)  \(.html_url // "")"'
 
     # Job list is a bare array; a job's terminal failure state is status=failure
     # (Forgejo folds conclusion into status).
-    failed_jobs="$(_api GET "/actions/runs/${run_id}/jobs" \
-      | jq -c '[.[]? | select(.status=="failure")]')"
-    if [ "$(printf '%s' "$failed_jobs" | jq 'length')" -eq 0 ]; then
-      echo "(no failed jobs for run ${run_id})"; exit 0
-    fi
-    printf '%s' "$failed_jobs" | jq -r '.[] | "\(.id)\t\(.name // "?")"' \
-    | while IFS="$(printf '\t')" read -r jid jname; do
-      echo "── job ${jid}: ${jname} ──"
-      _api GET "/actions/jobs/${jid}/logs" || true
-      echo
-    done
+    while IFS= read -r run; do
+      [ -n "$run" ] || continue
+      run_id="$(printf '%s' "$run" | jq -r '.id')"
+      printf '%s' "$run" | jq -r '"run \(.id): status=\(.status)  \(.html_url // "")"'
+      failed_jobs="$(_api GET "/actions/runs/${run_id}/jobs" \
+        | jq -c '[.[]? | select(.status=="failure")]')"
+      if [ "$(printf '%s' "$failed_jobs" | jq 'length')" -eq 0 ]; then
+        echo "(no failed jobs for run ${run_id})"; continue
+      fi
+      while IFS="$(printf '\t')" read -r jid jname; do
+        echo "── job ${jid}: ${jname} ──"
+        _api GET "/actions/jobs/${jid}/logs" || true
+        echo
+      done < <(printf '%s' "$failed_jobs" | jq -r '.[] | "\(.id)\t\(.name // "?")"')
+    done < <(printf '%s' "$runs" | jq -c '.[]')
     ;;
 
   *) die "unknown verb '${verb}' (ci: watch log)" ;;

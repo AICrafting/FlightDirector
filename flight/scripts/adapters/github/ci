@@ -15,11 +15,13 @@ case "$verb" in
   # is swallowed and the poll continues, rather than killing the watcher.
   watch)
     sha=""; pr=""; status_file=""; timeout="${LS_CI_WATCH_TIMEOUT:-900}"
+    queue_timeout="${LS_CI_QUEUE_TIMEOUT:-3600}"
     while [ $# -gt 0 ]; do case "$1" in
-      --sha)         sha="$2"; shift 2 ;;
-      --pr)          pr="$2"; shift 2 ;;
-      --status-file) status_file="$2"; shift 2 ;;
-      --timeout)     timeout="$2"; shift 2 ;;
+      --sha)           sha="$2"; shift 2 ;;
+      --pr)            pr="$2"; shift 2 ;;
+      --status-file)   status_file="$2"; shift 2 ;;
+      --timeout)       timeout="$2"; shift 2 ;;
+      --queue-timeout) queue_timeout="$2"; shift 2 ;;
       *) die "ci watch: unknown arg '$1'" ;;
     esac; done
     # --pr is authoritative: the PR head commit IS the SHA the run reports as
@@ -40,12 +42,20 @@ case "$verb" in
 
     poll="${LS_CI_POLL_SECONDS:-5}"
     start="$(date +%s)"; seen=0; last_sig=""
+    # Two clocks (#171): `timeout` bounds EXECUTION, `queue_timeout` bounds time
+    # spent waiting for a runner. `tick` is the start of the interval currently
+    # being attributed; `prev_*` is the state observed at that interval's start.
+    exec_secs=0; queue_secs=0; tick="$start"; prev_seen=0; prev_queued=0
     while true; do
       body="$(curl -sS -L "${GH_HEADERS[@]}" \
         "${REPO_API}/actions/runs?head_sha=${sha}&per_page=20" 2>/dev/null || true)"
       # Aggregate over ALL runs for this SHA (a PR can trigger several workflows):
       # keep watching while any is not yet `completed`; once all are completed the
-      # verdict is failure if any conclusion isn't success/skipped/neutral.
+      # verdict is failure if any conclusion isn't success/skipped/neutral, skipped
+      # if every run's conclusion was `skipped`, else success.
+      # `skipped` is counted on its own axis (#150): it is not a failure, but it is
+      # not a pass either — a run where nothing executed must not be
+      # indistinguishable from one that verified everything at the merge gate.
       # Superseded attempts don't count (#43): within each workflow, score the
       # latest run per trigger event (in-run re-runs already mutate the same
       # run via run_attempt; this handles repeated dispatches), and a newest
@@ -62,60 +72,133 @@ case "$verb" in
         | ([$r[] | select(.status != "completed")] | length) as $pending
         | ([$r[] | select(.status == "completed")
                  | select((.conclusion as $c | ["success","skipped","neutral"] | index($c)) | not)] | length) as $failed
-        | "\($total) \($pending) \($failed)"' 2>/dev/null || true)"
-      read -r total pending failed <<<"$metrics" || true
-      total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"
+        | ([$r[] | select(.status == "completed") | select(.conclusion == "skipped")] | length) as $skipped
+        | "\($total) \($pending) \($failed) \($skipped)"' 2>/dev/null || true)"
+      read -r total pending failed skipped <<<"$metrics" || true
+      total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"; skipped="${skipped:-0}"
       if [ "$total" -gt 0 ]; then
         seen=1
-        if [ "$pending" -gt 0 ]; then agg=pending; elif [ "$failed" -gt 0 ]; then agg=failure; else agg=success; fi
-        sig="${total}/${pending}/${failed}"
+        # Verdict order matters: pending wins, then failure, then an all-skipped
+        # run (#150) — which is its own terminal outcome, NOT a pass, because
+        # nothing in it executed. A partial skip still passes; the skipped count
+        # on the line is what tells the human how much was actually verified.
+        if [ "$pending" -gt 0 ]; then agg=pending
+        elif [ "$failed" -gt 0 ]; then agg=failure
+        elif [ "$skipped" -eq "$total" ]; then agg=skipped
+        else agg=success; fi
+        sig="${total}/${pending}/${failed}/${skipped}"
         if [ "$sig" != "$last_sig" ]; then
-          echo "ci runs=${total} pending=${pending} failed=${failed} status=${agg}"
+          echo "ci runs=${total} pending=${pending} failed=${failed} skipped=${skipped} status=${agg}"
           last_sig="$sig"; _write "$agg"
         fi
         [ "$pending" -eq 0 ] && exit 0
       fi
-      # Hang guard: never poll forever. --timeout 0 disables the cap.
-      if [ "$timeout" -gt 0 ] && [ "$(( $(date +%s) - start ))" -ge "$timeout" ]; then
-        if [ "$seen" = 1 ]; then
-          die "ci watch: timed out after ${timeout}s waiting for run ${sha:0:12} to complete"
-        else
-          die "ci watch: timed out after ${timeout}s — no CI run found for ${sha:0:12} (is the branch pushed and does a workflow trigger for it?)"
+
+      # Queued or executing? The run-level status alone cannot say. GitHub marks
+      # a run `in_progress` the moment ANY job starts, so a run with three legs
+      # green and the fourth still waiting for a runner reads `in_progress`
+      # while nothing at all is executing. A run that only LOOKS executing is
+      # therefore confirmed against its own job list before its time counts as
+      # execution; `queued`/`waiting`/`requested`/`pending` need no extra call.
+      queued=0
+      if [ "$pending" -gt 0 ]; then
+        queued=1
+        run_ids="$(printf '%s' "$body" | jq -r '
+          .workflow_runs[]? | select((.status // "") == "in_progress") | .id' 2>/dev/null || true)"
+        while IFS= read -r rid; do
+          [ -n "$rid" ] || continue
+          jobs="$(curl -sS -L "${GH_HEADERS[@]}" \
+            "${REPO_API}/actions/runs/${rid}/jobs?per_page=100" 2>/dev/null || true)"
+          jm="$(printf '%s' "$jobs" | jq -r '
+            [.jobs[]? | .status // ""] as $s
+            | ([$s[] | select(. == "in_progress")] | length) as $r
+            | ([$s[] | select(. as $x | ["queued","waiting","pending","requested"] | index($x))] | length) as $w
+            | "\($r) \($w)"' 2>/dev/null || true)"
+          jrun=""; jwait=""
+          read -r jrun jwait <<<"$jm" || true
+          # Conservative on anything unclear: an unreadable job list, a job
+          # actually running, or a run whose jobs are all terminal while the run
+          # is not, all count as executing — so a blip can only ever leave the
+          # SHORTER cap in charge, never silently extend the wait to an hour.
+          if [ -z "$jrun" ] || [ "${jrun:-0}" -gt 0 ] || [ "${jwait:-0}" -eq 0 ]; then
+            queued=0; break
+          fi
+        done <<<"$run_ids"
+      fi
+
+      # Attribute the interval that just ended to the state seen at its start.
+      now="$(date +%s)"; delta=$(( now - tick )); tick="$now"
+      if [ "$prev_seen" = 1 ]; then
+        if [ "$prev_queued" = 1 ]; then queue_secs=$(( queue_secs + delta ))
+        else exec_secs=$(( exec_secs + delta )); fi
+      fi
+      prev_seen="$seen"; prev_queued="$queued"
+
+      # Hang guards: never poll forever. Either timeout set to 0 disables that
+      # cap. Each message names the cap that fired and the key that raises it.
+      if [ "$seen" = 1 ]; then
+        if [ "$timeout" -gt 0 ] && [ "$exec_secs" -ge "$timeout" ]; then
+          die "ci watch: timed out after ${exec_secs}s of execution waiting for run ${sha:0:12} to complete (plus ${queue_secs}s queued; raise --timeout / code.ciWatchTimeout)"
         fi
+        if [ "$queue_timeout" -gt 0 ] && [ "$queue_secs" -ge "$queue_timeout" ]; then
+          die "ci watch: gave up after ${queue_secs}s queued — run ${sha:0:12} never started executing, every job is still waiting for a runner (raise --queue-timeout / code.ciQueueTimeout)"
+        fi
+      elif [ "$timeout" -gt 0 ] && [ "$(( now - start ))" -ge "$timeout" ]; then
+        die "ci watch: timed out after ${timeout}s — no CI run found for ${sha:0:12} (is the branch pushed and does a workflow trigger for it?)"
       fi
       sleep "$poll"
     done
     ;;
 
-  # Dump the failed jobs' logs for a commit (or the latest failed run on a branch).
+  # Dump the failed jobs' logs for a PR, a commit, or the latest failed run on a branch.
   # Per-job logs are plain text via redirect — avoids the run-level .zip.
+  # A commit usually carries several runs (one per workflow), so --sha/--pr dump
+  # EVERY failed run on it rather than "the latest", which is as likely to be
+  # the green one (#138). `?branch=` matches a run's head_branch, which a
+  # pull_request run from a same-repo branch also carries, so --failed needs no
+  # fallback here.
   log)
-    sha=""; failed_branch=""
+    sha=""; failed_branch=""; pr=""
     while [ $# -gt 0 ]; do case "$1" in
       --sha)    sha="$2"; shift 2 ;;
+      --pr)     pr="$2"; shift 2 ;;
       --failed) failed_branch="$2"; shift 2 ;;
       *) die "ci log: unknown arg '$1'" ;;
     esac; done
-    [ -n "$sha" ] || [ -n "$failed_branch" ] || die "ci log: --sha or --failed required"
+    [ -n "$sha" ] || [ -n "$failed_branch" ] || [ -n "$pr" ] || die "ci log: --pr, --sha or --failed required"
+
+    if [ -n "$pr" ]; then
+      sha="$(_api GET "/pulls/${pr}" | jq -r '.head.sha // empty')"
+      [ -n "$sha" ] || die "ci log: could not resolve head sha for PR #${pr}"
+    fi
 
     if [ -n "$sha" ]; then
-      run_id="$(_api GET "/actions/runs?head_sha=${sha}&per_page=20" \
-        | jq -r '[.workflow_runs[]?] | sort_by(.run_started_at) | last | .id // empty')"
+      runs="$(_api GET "/actions/runs?head_sha=${sha}&per_page=20" \
+        | jq -c '[.workflow_runs[]?] | sort_by(.run_started_at, .id)')"
+      [ "$(printf '%s' "$runs" | jq 'length')" -gt 0 ] || die "ci log: no workflow run found"
+      run_ids="$(printf '%s' "$runs" | jq -r '.[] | select(.conclusion=="failure") | .id')"
+      if [ -z "$run_ids" ]; then
+        printf '%s' "$runs" | jq -r '"(no failed jobs for run \(map(.id|tostring)|join(", ")))"'
+        exit 0
+      fi
     else
-      run_id="$(_api GET "/actions/runs?branch=${failed_branch}&status=failure&per_page=1" \
+      run_ids="$(_api GET "/actions/runs?branch=$(urlenc "$failed_branch")&status=failure&per_page=1" \
         | jq -r '.workflow_runs[0].id // empty')"
+      [ -n "$run_ids" ] || die "ci log: no workflow run found"
     fi
-    [ -n "$run_id" ] || die "ci log: no workflow run found"
 
-    job_ids="$(_api GET "/actions/runs/${run_id}/jobs?per_page=100" \
-      | jq -r '.jobs[]? | select(.conclusion=="failure") | .id')"
-    [ -n "$job_ids" ] || { echo "(no failed jobs for run ${run_id})"; exit 0; }
-
-    while IFS= read -r jid; do
-      [ -n "$jid" ] || continue
-      echo "── job ${jid} ──"
-      curl -sS -L "${GH_HEADERS[@]}" "${REPO_API}/actions/jobs/${jid}/logs" || true
-    done <<< "$job_ids"
+    while IFS= read -r run_id; do
+      [ -n "$run_id" ] || continue
+      echo "run ${run_id}"
+      job_ids="$(_api GET "/actions/runs/${run_id}/jobs?per_page=100" \
+        | jq -r '.jobs[]? | select(.conclusion=="failure") | .id')"
+      [ -n "$job_ids" ] || { echo "(no failed jobs for run ${run_id})"; continue; }
+      while IFS= read -r jid; do
+        [ -n "$jid" ] || continue
+        echo "── job ${jid} ──"
+        curl -sS -L "${GH_HEADERS[@]}" "${REPO_API}/actions/jobs/${jid}/logs" || true
+      done <<< "$job_ids"
+    done <<< "$run_ids"
     ;;
 
   *) die "unknown verb '${verb}' (ci: watch log)" ;;

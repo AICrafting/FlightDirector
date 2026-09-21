@@ -56,9 +56,20 @@ case "$verb" in
       *) die "issues get: unknown arg '$1'" ;;
     esac; done
     [ -n "$number" ] || die "issues get: --number required"
-    _api GET "/rest/api/3/issue/${number}?fields=summary,description" \
+    # `status` joins the field list for the state column. Jira has no open/closed
+    # flag, so the status CATEGORY decides — the same rule `list` (statusCategory
+    # != Done) and `close`/`reopen` (transition by category key) already use, so a
+    # per-project workflow with custom status names maps correctly without config.
+    # A missing category is an error, not an "open": Jira is the only backend that
+    # DERIVES state rather than reading it, and defaulting to open is the one
+    # direction that would let a done issue pass a caller's open/closed check.
+    _api GET "/rest/api/3/issue/${number}?fields=summary,description,status" \
       | jq -r "$ADF_JQ"'
-          ([.key, (.fields.summary // "")] | @tsv), "",
+          ([.key, (.fields.summary // ""),
+            (.fields.status.statusCategory.key
+             | if . == null then error("issues get: no status category in the response")
+               elif . == "done" then "closed" else "open" end)]
+           | @tsv), "",
           ((.fields.description // "") | if type=="string" then . else adf_to_text end)'
     ;;
 
@@ -171,7 +182,7 @@ case "$verb" in
     # Atomic single-status: remove every OTHER managed status label present, add target.
     current="$(_api GET "/rest/api/3/issue/${number}?fields=labels" | jq -c '.fields.labels // []')"
     others="$(printf '%s' "$labels_json" | jq -c --arg t "$target_name" --argjson cur "$current" \
-      '[(.status // {} | .[]) | select(. != $t) | select(. as $n | $cur | index($n) != null)]')"
+      '[(.status // {} | .[]) | select(type == "string") | select(. != $t) | select(. as $n | $cur | index($n) != null)]')"
     ops="$(jq -n --arg t "$target_name" --argjson rm "$others" \
       '[$rm[] | {remove:.}] + [{add:$t}]')"
     _api PUT "/rest/api/3/issue/${number}" "$(jq -n --argjson o "$ops" '{update:{labels:$o}}')" >/dev/null
@@ -245,7 +256,7 @@ case "$verb" in
     esac; done
     [ -n "$number" ] || die "issues assign: --number required"
     [ -n "$user" ]   || die "issues assign: --user required"
-    aid="$(_api GET "/rest/api/3/user/search?query=$(jq -rn --arg q "$user" '$q|@uri')" \
+    aid="$(_api GET "/rest/api/3/user/search?query=$(urlenc "$user")" \
       | jq -r '.[0].accountId // empty')"
     [ -n "$aid" ] || die "issues assign: no Jira user matches '${user}'"
     _api PUT "/rest/api/3/issue/${number}/assignee" "$(jq -n --arg id "$aid" '{accountId:$id}')" >/dev/null

@@ -31,8 +31,10 @@ case "$verb" in
     # (cheap, and keeps the fetch inside --limit), then re-check client-side so the
     # output is identical to the backends that can only filter locally.
     q="state=${api_state}"
-    [ -n "$head" ] && q="${q}&head=${LS_OWNER}:${head}"
-    [ -n "$base" ] && q="${q}&base=${base}"
+    # Branch names are caller input: encode each value, leaving the ':' that
+    # separates owner from ref as the delimiter GitHub expects.
+    [ -n "$head" ] && q="${q}&head=$(urlenc "$LS_OWNER"):$(urlenc "$head")"
+    [ -n "$base" ] && q="${q}&base=$(urlenc "$base")"
     _paged_get "/pulls" "$q" "$limit" \
       | jq -r --arg h "$head" --arg b "$base" --argjson m "$merged_only" '
           select($h == "" or .head.ref == $h)
@@ -101,8 +103,12 @@ case "$verb" in
       *) die "pr get: unknown arg '$1'" ;;
     esac; done
     [ -n "$number" ] || die "pr get: --number required"
+    # Forgejo/GitHub have no `merged` state — a merged PR is a closed one with
+    # `merged_at` set — so the projection derives it, exactly as `pr list` does.
     _api GET "/pulls/${number}" \
-      | jq -r '[(.number|tostring), .title, .state, .html_url] | @tsv'
+      | jq -r '[(.number|tostring), .title,
+                (if .merged_at != null then "merged" else .state end),
+                .html_url] | @tsv'
     ;;
 
   merge)
