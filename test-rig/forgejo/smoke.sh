@@ -89,9 +89,17 @@ PR="$(lsp pr open --head "$BR" --base main --title "Smoke PR")"
 prnum="$(awk -F'\t' '{print $1}' <<<"$PR")"
 [[ "$prnum" =~ ^[0-9]+$ ]] && grep -q "http" <<<"$PR" && ok "pr open returns number⇥url ($prnum)" \
   || no "pr open returns number⇥url" "got '$PR'"
+# `pr get`'s state is normalized to open|closed|merged (#206). Forgejo already says
+# `open` on the wire, but reports a MERGED PR as `closed` with merged_at set — the
+# post-merge value below is the one a fake curl can only approximate.
+PST="$(lsp pr get --number "$prnum" | cut -f3)"
+[ "$PST" = open ] && ok "pr get reports state=open before the merge" || no "pr get reports state=open" "got '$PST'"
 if lsp pr merge --number "$prnum" --strategy squash; then
   merged="$(curl -fsS -H "Authorization: token $TOKEN" "$REPO_API/pulls/$prnum" | jq -r '.merged')"
   [ "$merged" = "true" ] && ok "pr merged" || no "pr merged" "merged=$merged"
+  PST="$(lsp pr get --number "$prnum" | cut -f3)"
+  [ "$PST" = merged ] && ok "pr get reports state=merged after the merge" \
+    || no "pr get reports state=merged (closed + merged_at on the wire)" "got '$PST'"
 else no "pr merge exits 0"; fi
 
 echo "── close ──"
