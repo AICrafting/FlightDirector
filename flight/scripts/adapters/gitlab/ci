@@ -11,8 +11,12 @@ verb="${1:-}"; shift || true
 
 # GitLab pipeline statuses that mean "still going" vs. a clean pass. Anything
 # terminal that isn't a clean pass (failed, canceled) counts as a failure.
+# _SKIPPED is a subset of _PASSED: a skipped pipeline is not a failure, but
+# nothing in it executed, so it is scored on its own axis rather than folded
+# into the pass side (#150).
 _PENDING='["created","waiting_for_resource","preparing","pending","running","scheduled"]'
 _PASSED='["success","skipped","manual"]'
+_SKIPPED='["skipped"]'
 
 case "$verb" in
   # Stream one line per CI state change for a commit, exit on a terminal state.
@@ -20,11 +24,13 @@ case "$verb" in
   # is swallowed and the poll continues, rather than killing the watcher.
   watch)
     sha=""; pr=""; status_file=""; timeout="${LS_CI_WATCH_TIMEOUT:-900}"
+    queue_timeout="${LS_CI_QUEUE_TIMEOUT:-3600}"
     while [ $# -gt 0 ]; do case "$1" in
-      --sha)         sha="$2"; shift 2 ;;
-      --pr)          pr="$2"; shift 2 ;;
-      --status-file) status_file="$2"; shift 2 ;;
-      --timeout)     timeout="$2"; shift 2 ;;
+      --sha)           sha="$2"; shift 2 ;;
+      --pr)            pr="$2"; shift 2 ;;
+      --status-file)   status_file="$2"; shift 2 ;;
+      --timeout)       timeout="$2"; shift 2 ;;
+      --queue-timeout) queue_timeout="$2"; shift 2 ;;
       *) die "ci watch: unknown arg '$1'" ;;
     esac; done
     # --pr is authoritative: the MR head commit IS the SHA pipelines report. Prefer
@@ -45,18 +51,23 @@ case "$verb" in
 
     poll="${LS_CI_POLL_SECONDS:-10}"
     start="$(date +%s)"; seen=0; last_sig=""
+    # Two clocks (#171): `timeout` bounds EXECUTION, `queue_timeout` bounds time
+    # spent waiting for a runner. `tick` is the start of the interval currently
+    # being attributed; `prev_*` is the state observed at that interval's start.
+    exec_secs=0; queue_secs=0; tick="$start"; prev_seen=0; prev_queued=0
     while true; do
       body="$(curl -sS "${GL_HEADERS[@]}" \
         "${PROJECT_API}/pipelines?sha=${sha}&per_page=20" 2>/dev/null || true)"
       # Aggregate over ALL pipelines for this SHA: keep watching while any is
-      # pending; once none are pending the verdict is failure if any failed.
+      # pending; once none are pending the verdict is failure if any failed,
+      # skipped if every pipeline was skipped, else success.
       # Superseded pipelines don't count (#43): job retries mutate the pipeline
       # in place (same id), so per-source only the latest pipeline is scored; a
       # newest `web` pipeline (manual "run pipeline") supersedes ALL earlier
       # pipelines for the sha — a human explicitly re-ran it. A missing source
       # falls back to the pipeline's own id, i.e. no collapse.
       metrics="$(printf '%s' "$body" | jq -r \
-        --argjson pend "$_PENDING" --argjson pass "$_PASSED" '
+        --argjson pend "$_PENDING" --argjson pass "$_PASSED" --argjson skip "$_SKIPPED" '
         [.[]?]
         | (if length == 0 then []
            elif (max_by(.id).source // "") == "web" then [max_by(.id)]
@@ -65,59 +76,136 @@ case "$verb" in
         | ([$r[] | select(.status as $s | $pend | index($s))] | length) as $pending
         | ([$r[] | select(.status as $s | ($pend | index($s)) | not)
                  | select(.status as $s | ($pass | index($s)) | not)] | length) as $failed
-        | "\($total) \($pending) \($failed)"' 2>/dev/null || true)"
-      read -r total pending failed <<<"$metrics" || true
-      total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"
+        | ([$r[] | select(.status as $s | $skip | index($s))] | length) as $skipped
+        | "\($total) \($pending) \($failed) \($skipped)"' 2>/dev/null || true)"
+      read -r total pending failed skipped <<<"$metrics" || true
+      total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"; skipped="${skipped:-0}"
       if [ "$total" -gt 0 ]; then
         seen=1
-        if [ "$pending" -gt 0 ]; then agg=pending; elif [ "$failed" -gt 0 ]; then agg=failure; else agg=success; fi
-        sig="${total}/${pending}/${failed}"
+        # Verdict order matters: pending wins, then failure, then an all-skipped
+        # run (#150) — which is its own terminal outcome, NOT a pass, because
+        # nothing in it executed. A partial skip still passes; the skipped count
+        # on the line is what tells the human how much was actually verified.
+        if [ "$pending" -gt 0 ]; then agg=pending
+        elif [ "$failed" -gt 0 ]; then agg=failure
+        elif [ "$skipped" -eq "$total" ]; then agg=skipped
+        else agg=success; fi
+        sig="${total}/${pending}/${failed}/${skipped}"
         if [ "$sig" != "$last_sig" ]; then
-          echo "ci runs=${total} pending=${pending} failed=${failed} status=${agg}"
+          echo "ci runs=${total} pending=${pending} failed=${failed} skipped=${skipped} status=${agg}"
           last_sig="$sig"; _write "$agg"
         fi
         [ "$pending" -eq 0 ] && exit 0
       fi
-      # Hang guard: never poll forever. --timeout 0 disables the cap.
-      if [ "$timeout" -gt 0 ] && [ "$(( $(date +%s) - start ))" -ge "$timeout" ]; then
-        if [ "$seen" = 1 ]; then
-          die "ci watch: timed out after ${timeout}s waiting for run ${sha:0:12} to complete"
-        else
-          die "ci watch: timed out after ${timeout}s — no CI run found for ${sha:0:12} (is the branch pushed and does a pipeline trigger for it?)"
+
+      # Queued or executing? The pipeline-level status alone cannot say. GitLab
+      # marks a pipeline `running` the moment ANY job starts, so a pipeline with
+      # three jobs green and the fourth still `pending` for a runner reads
+      # `running` while nothing at all is executing. A pipeline that only LOOKS
+      # executing is therefore confirmed against its own job list before its
+      # time counts as execution; the other pending statuses need no extra call.
+      queued=0
+      if [ "$pending" -gt 0 ]; then
+        queued=1
+        run_ids="$(printf '%s' "$body" | jq -r '
+          .[]? | select((.status // "") == "running") | .id' 2>/dev/null || true)"
+        while IFS= read -r rid; do
+          [ -n "$rid" ] || continue
+          jobs="$(curl -sS "${GL_HEADERS[@]}" \
+            "${PROJECT_API}/pipelines/${rid}/jobs?per_page=100" 2>/dev/null || true)"
+          jm="$(printf '%s' "$jobs" | jq -r '
+            [.[]? | .status // ""] as $s
+            | ([$s[] | select(. == "running")] | length) as $r
+            | ([$s[] | select(. as $x
+                 | ["created","pending","preparing","waiting_for_resource","scheduled"] | index($x))] | length) as $w
+            | "\($r) \($w)"' 2>/dev/null || true)"
+          jrun=""; jwait=""
+          read -r jrun jwait <<<"$jm" || true
+          # Conservative on anything unclear: an unreadable job list, a job
+          # actually running, or a pipeline whose jobs are all terminal while it
+          # is not, all count as executing — so a blip can only ever leave the
+          # SHORTER cap in charge, never silently extend the wait to an hour.
+          if [ -z "$jrun" ] || [ "${jrun:-0}" -gt 0 ] || [ "${jwait:-0}" -eq 0 ]; then
+            queued=0; break
+          fi
+        done <<<"$run_ids"
+      fi
+
+      # Attribute the interval that just ended to the state seen at its start.
+      now="$(date +%s)"; delta=$(( now - tick )); tick="$now"
+      if [ "$prev_seen" = 1 ]; then
+        if [ "$prev_queued" = 1 ]; then queue_secs=$(( queue_secs + delta ))
+        else exec_secs=$(( exec_secs + delta )); fi
+      fi
+      prev_seen="$seen"; prev_queued="$queued"
+
+      # Hang guards: never poll forever. Either timeout set to 0 disables that
+      # cap. Each message names the cap that fired and the key that raises it.
+      if [ "$seen" = 1 ]; then
+        if [ "$timeout" -gt 0 ] && [ "$exec_secs" -ge "$timeout" ]; then
+          die "ci watch: timed out after ${exec_secs}s of execution waiting for run ${sha:0:12} to complete (plus ${queue_secs}s queued; raise --timeout / code.ciWatchTimeout)"
         fi
+        if [ "$queue_timeout" -gt 0 ] && [ "$queue_secs" -ge "$queue_timeout" ]; then
+          die "ci watch: gave up after ${queue_secs}s queued — run ${sha:0:12} never started executing, every job is still waiting for a runner (raise --queue-timeout / code.ciQueueTimeout)"
+        fi
+      elif [ "$timeout" -gt 0 ] && [ "$(( now - start ))" -ge "$timeout" ]; then
+        die "ci watch: timed out after ${timeout}s — no CI run found for ${sha:0:12} (is the branch pushed and does a pipeline trigger for it?)"
       fi
       sleep "$poll"
     done
     ;;
 
-  # Dump the failed jobs' traces for a commit (or the latest failed pipeline on a branch).
+  # Dump the failed jobs' traces for an MR, a commit, or the latest failed pipeline on a branch.
+  # A commit can carry several pipelines (branch + merge-request), so --sha/--pr
+  # dump EVERY failed one (#138). A merge-request pipeline's ref is
+  # refs/merge-requests/<iid>/head, never the branch, so --failed falls back to
+  # the branch's head commit when nothing failed under the branch ref itself.
   log)
-    sha=""; failed_branch=""
+    sha=""; failed_branch=""; pr=""
     while [ $# -gt 0 ]; do case "$1" in
       --sha)    sha="$2"; shift 2 ;;
+      --pr)     pr="$2"; shift 2 ;;
       --failed) failed_branch="$2"; shift 2 ;;
       *) die "ci log: unknown arg '$1'" ;;
     esac; done
-    [ -n "$sha" ] || [ -n "$failed_branch" ] || die "ci log: --sha or --failed required"
+    [ -n "$sha" ] || [ -n "$failed_branch" ] || [ -n "$pr" ] || die "ci log: --pr, --sha or --failed required"
 
-    if [ -n "$sha" ]; then
-      pipeline_id="$(_api GET "/pipelines?sha=${sha}&order_by=id&sort=desc&per_page=20" \
-        | jq -r 'first(.[]? | select(.status != "success" and .status != "skipped") | .id) // (.[0].id // empty)')"
-    else
-      pipeline_id="$(_api GET "/pipelines?ref=${failed_branch}&status=failed&order_by=id&sort=desc&per_page=1" \
-        | jq -r '.[0].id // empty')"
+    if [ -n "$pr" ]; then
+      sha="$(_api GET "/merge_requests/${pr}" | jq -r '.sha // .diff_refs.head_sha // empty')"
+      [ -n "$sha" ] || die "ci log: could not resolve head sha for MR !${pr}"
     fi
-    [ -n "$pipeline_id" ] || die "ci log: no pipeline found"
 
-    job_ids="$(_api GET "/pipelines/${pipeline_id}/jobs?scope=failed&per_page=100" \
-      | jq -r '.[]? | .id')"
-    [ -n "$job_ids" ] || { echo "(no failed jobs for pipeline ${pipeline_id})"; exit 0; }
+    pipeline_ids=""
+    if [ -z "$sha" ]; then
+      pipeline_ids="$(_api GET "/pipelines?ref=$(urlenc "$failed_branch")&status=failed&order_by=id&sort=desc&per_page=1" \
+        | jq -r '.[0].id // empty')"
+      if [ -z "$pipeline_ids" ]; then
+        sha="$(_api GET "/repository/branches/$(urlenc "$failed_branch")" 2>/dev/null | jq -r '.commit.id // empty' 2>/dev/null || true)"
+        [ -n "$sha" ] || die "ci log: no pipeline found"
+      fi
+    fi
+    if [ -n "$sha" ]; then
+      pipelines="$(_api GET "/pipelines?sha=${sha}&order_by=id&sort=asc&per_page=20")"
+      [ "$(printf '%s' "$pipelines" | jq 'length')" -gt 0 ] || die "ci log: no pipeline found"
+      pipeline_ids="$(printf '%s' "$pipelines" | jq -r '.[]? | select(.status=="failed") | .id')"
+      if [ -z "$pipeline_ids" ]; then
+        printf '%s' "$pipelines" | jq -r '"(no failed jobs for pipeline \(map(.id|tostring)|join(", ")))"'
+        exit 0
+      fi
+    fi
 
-    while IFS= read -r jid; do
-      [ -n "$jid" ] || continue
-      echo "── job ${jid} ──"
-      curl -sS "${GL_HEADERS[@]}" "${PROJECT_API}/jobs/${jid}/trace" || true
-    done <<< "$job_ids"
+    while IFS= read -r pipeline_id; do
+      [ -n "$pipeline_id" ] || continue
+      echo "pipeline ${pipeline_id}"
+      job_ids="$(_api GET "/pipelines/${pipeline_id}/jobs?scope=failed&per_page=100" \
+        | jq -r '.[]? | .id')"
+      [ -n "$job_ids" ] || { echo "(no failed jobs for pipeline ${pipeline_id})"; continue; }
+      while IFS= read -r jid; do
+        [ -n "$jid" ] || continue
+        echo "── job ${jid} ──"
+        curl -sS "${GL_HEADERS[@]}" "${PROJECT_API}/jobs/${jid}/trace" || true
+      done <<< "$job_ids"
+    done <<< "$pipeline_ids"
     ;;
 
   *) die "unknown verb '${verb}' (ci: watch log)" ;;

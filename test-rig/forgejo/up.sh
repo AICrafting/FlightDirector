@@ -2,6 +2,7 @@
 #
 # Bring up a disposable Forgejo and provision it for flight adapter testing:
 #   - admin user, scoped API token, a test repo, seed status labels
+#   - an Actions runner (host mode, label `rig`) so `ci watch` / `ci log` have real runs
 #   - writes .flightdirector/config.json + .flightdirector/secrets.json into a gitignored workdir
 #
 # Re-runnable: tears down nothing, but creates a fresh token each run.
@@ -18,13 +19,21 @@ WORK="$RIG_DIR/.work"
 MAIN="$(cd "$(git -C "$RIG_DIR" rev-parse --git-common-dir)/.." && pwd)"
 _env_port="${RIG_PORT:-}"; _env_image="${FORGEJO_IMAGE:-}"; _env_user="${FLIGHT_FORGEJO_USER:-}"
 _env_pass="${FLIGHT_FORGEJO_PASS:-}"; _env_email="${FLIGHT_FORGEJO_EMAIL:-}"; _env_repo="${FLIGHT_FORGEJO_REPO:-}"
+_env_runner="${FORGEJO_RUNNER_IMAGE:-}"; _env_host="${RIG_HOST:-}"
 # shellcheck disable=SC1091  # .env is gitignored; shellcheck can't follow it
 if [ -f "$MAIN/test-rig/forgejo/.env" ]; then . "$MAIN/test-rig/forgejo/.env"
 elif [ -f "$RIG_DIR/.env" ]; then . "$RIG_DIR/.env"; fi
 
 PORT="${_env_port:-${RIG_PORT:-3000}}"
-IMAGE="${_env_image:-${FORGEJO_IMAGE:-code.forgejo.org/forgejo/forgejo:15}}"
-API="http://localhost:${PORT}/api/v1"
+IMAGE="${_env_image:-${FORGEJO_IMAGE:-code.forgejo.org/forgejo/forgejo:16}}"
+RUNNER_IMAGE="${_env_runner:-${FORGEJO_RUNNER_IMAGE:-code.forgejo.org/forgejo/runner:13}}"
+# Where the *rig scripts* reach Forgejo. `localhost` is right when up.sh runs on the machine
+# publishing the port. In CI the scripts run inside a job container driving the host's docker
+# through its socket, so the published port lands on the host, not on `localhost` here — the
+# workflow sets RIG_HOST to the host's address (#187). The compose network is unaffected:
+# the runner container still reaches Forgejo as http://forgejo:3000 whatever this says.
+HOST="${_env_host:-${RIG_HOST:-localhost}}"
+API="http://${HOST}:${PORT}/api/v1"
 USER="${_env_user:-${FLIGHT_FORGEJO_USER:-rig}}"
 PASS="${_env_pass:-${FLIGHT_FORGEJO_PASS:-rigpass123}}"
 EMAIL="${_env_email:-${FLIGHT_FORGEJO_EMAIL:-rig@example.com}}"
@@ -39,7 +48,8 @@ command -v jq >/dev/null || die "jq not found"
 say "Starting Forgejo (port $PORT)…"
 # Pass the resolved values explicitly so compose sees the same ones even when the .env
 # lives at the main repo root rather than next to compose.yaml.
-( cd "$RIG_DIR" && RIG_PORT="$PORT" FORGEJO_IMAGE="$IMAGE" docker compose up -d )
+compose() { ( cd "$RIG_DIR" && RIG_PORT="$PORT" RIG_HOST="$HOST" FORGEJO_IMAGE="$IMAGE" FORGEJO_RUNNER_IMAGE="$RUNNER_IMAGE" docker compose "$@" ); }
+compose up -d
 
 say "Waiting for the API to come up…"
 for i in $(seq 1 60); do
@@ -50,7 +60,7 @@ done
 say "Up: $(curl -fsS "$API/version")"
 
 say "Ensuring admin user '$USER'…"
-( cd "$RIG_DIR" && docker compose exec -T -u 1000 forgejo \
+( compose exec -T -u 1000 forgejo \
     forgejo admin user create --admin --username "$USER" --password "$PASS" \
     --email "$EMAIL" --must-change-password=false ) >/dev/null 2>&1 \
   && say "  created" || say "  already exists (ok)"
@@ -76,6 +86,23 @@ for spec in "status/in progress:#fbca04" "status/to test:#0e8a16" "status/blocke
     "$API/repos/$USER/$REPO/labels" >/dev/null 2>&1 && printf '  + %s\n' "$name" || printf '  · %s (exists)\n' "$name"
 done
 
+# Actions runner. Soft on purpose: every non-CI verb works without it, and smoke.sh skips
+# its CI section when no runner is online, so a registration hiccup must not sink the rig.
+say "Registering the Actions runner…"
+RUNNER=offline
+if compose exec -T runner test -f /data/.runner 2>/dev/null; then
+  say "  already registered (ok)"; RUNNER=registered
+else
+  REG="$(compose exec -T -u 1000 forgejo forgejo actions generate-runner-token 2>/dev/null | tr -d '\r\n' || true)"
+  if [ -n "$REG" ] && compose exec -T runner forgejo-runner register --no-interactive \
+       --instance http://forgejo:3000 --token "$REG" --name flight-rig --labels rig:host >/dev/null 2>&1; then
+    say "  registered (host mode, label 'rig')"; RUNNER=registered
+  else
+    if [ "${RIG_STRICT:-0}" = 1 ]; then die "could not register the runner (RIG_STRICT=1)"; fi
+    printf '\033[33m  ⚠ could not register the runner — ci watch / ci log checks will be skipped\033[0m\n'
+  fi
+fi
+
 say "Writing config into workdir ($WORK)…"
 rm -rf "$WORK"; mkdir -p "$WORK/.flightdirector"; git -C "$WORK" init -q
 jq -n --arg api "$API" --arg owner "$USER" --arg repo "$REPO" '{
@@ -90,10 +117,11 @@ jq -n --arg t "$TOKEN" '{ code: { token:$t } }' > "$WORK/.flightdirector/secrets
 cat <<EOF
 
 $(printf '\033[32m✓ Rig ready.\033[0m')
-  Web:    http://localhost:$PORT/    (login: $USER / $PASS)
+  Web:    http://$HOST:$PORT/    (login: $USER / $PASS)
   API:    $API
   Repo:   $USER/$REPO
   Workdir:$WORK   (git repo with .flightdirector/config.json + secrets)
+  Runner: $RUNNER
 
 Run the smoke tests:   ./smoke.sh
 Drive the adapters by hand, e.g.:

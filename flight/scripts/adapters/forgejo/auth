@@ -53,11 +53,12 @@ else
 fi
 
 if [ "$identity_ok" = 1 ]; then
-	pass "authenticates" "$login (id $uid) — token $(mask "$LS_TOKEN")"
+	pass "authenticates" "$login (id $uid) — token $(token_desc)"
 elif [ "$identity_scope" = 1 ] && [ "$repo_ok" = 1 ]; then
-	note "authenticates" "identity not exposed to a repo-scoped token (needs read:user, which Forgejo cannot grant per-repository) — token $(mask "$LS_TOKEN"); repository access below proves it works"
+	note "authenticates" "identity not exposed to a repo-scoped token (needs read:user, which Forgejo cannot grant per-repository) — token $(token_desc); repository access below proves it works"
 else
 	fail "authenticates" "$identity_why"
+	hint "token $(token_desc)"
 	hint "Forgejo tokens are created at <instance>/user/settings/applications"
 fi
 

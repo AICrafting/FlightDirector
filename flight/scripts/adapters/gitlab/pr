@@ -29,13 +29,15 @@ case "$verb" in
       *) die "pr list: --state must be open|closed|merged|all" ;;
     esac
     q="state=${api_state}"
-    [ -n "$head" ] && q="${q}&source_branch=${head}"
-    [ -n "$base" ] && q="${q}&target_branch=${base}"
+    [ -n "$head" ] && q="${q}&source_branch=$(urlenc "$head")"
+    [ -n "$base" ] && q="${q}&target_branch=$(urlenc "$base")"
     _paged_get "/merge_requests" "$q" "$limit" \
       | jq -r --arg h "$head" --arg b "$base" '
           select($h == "" or .source_branch == $h)
           | select($b == "" or .target_branch == $b)
-          | [ (.iid|tostring), .state, .source_branch, .target_branch, .title ] | @tsv'
+          | [ (.iid|tostring),
+              (.state | if . == "opened" then "open" else . end),
+              .source_branch, .target_branch, .title ] | @tsv'
     ;;
 
   open)
@@ -97,8 +99,12 @@ case "$verb" in
       *) die "pr get: unknown arg '$1'" ;;
     esac; done
     [ -n "$number" ] || die "pr get: --number required"
+    # GitLab spells an open MR `opened`; `merged` and `locked` are its own states
+    # and pass through. Same mapping as `pr list` above.
     _api GET "/merge_requests/${number}" \
-      | jq -r '[(.iid|tostring), .title, .state, .web_url] | @tsv'
+      | jq -r '[(.iid|tostring), .title,
+                (.state | if . == "opened" then "open" else . end),
+                .web_url] | @tsv'
     ;;
 
   merge)

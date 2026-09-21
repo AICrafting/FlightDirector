@@ -69,6 +69,7 @@ Backend, coordinates, and preferences, across two independent axes:
   "issues": { "backend": "forgejo", "owner": "acme", "repo": "planning" }, // omit to inherit code
   "labels": {
     "status": {
+      "new":         "status/new",
       "in-progress": "status/in progress",
       "to-test":     "status/to test",
       "blocked":     "status/blocked",
@@ -150,6 +151,53 @@ Backend, coordinates, and preferences, across two independent axes:
   For backwards compatibility a legacy `trunkBranch` is still read
   **first** if present; otherwise `stages[0].name` is used.
 
+### Repo preflight gate (optional)
+
+The repo's own check command, run before work is merged or pushed. Nothing changes for a repo
+that leaves it out — this is the one key whose absence is the whole of its unset behaviour.
+`setting-up-a-repo` offers it; a declined offer is recorded as `"preflight": false`, which every
+reader treats exactly like an absent key.
+
+```jsonc
+"code": {
+  // …existing keys (backend, owner, repo, api, stages)…
+  "preflight": "./scripts/run-checks.sh"
+}
+```
+
+- `code.preflight` — a **shell command string**, run with `sh -c`. Read it with:
+  ```
+  PREFLIGHT="$(flight config '.code.preflight // empty')"
+  [ -n "$PREFLIGHT" ] || echo "no preflight configured"   # absent and null both land here
+  ```
+  **Working directory:** always the checkout that holds the code being gated, passed explicitly
+  (`sh -c "$PREFLIGHT"` run from that path, never from whatever directory the shell has wandered
+  into). That is the feature worktree `$WT` in `promoting-a-branch`, each feature worktree in
+  `promoting-branches`, the integration worktree on a `pr` group, and each `.worktrees/<N>-<slug>`
+  in `queue-batches`. Write the command so it works from a repo root that is not the main
+  checkout — a hard-coded absolute path defeats the point.
+  **Exit code is the verdict:** zero passes, non-zero halts the operation and the failing output
+  is shown. Nothing parses stdout.
+  **A pass belongs to the commit it judged.** `promoting-a-branch` records the verdict against
+  the commit the gate ran on and never reuses it: every promotion runs the gate again, and the
+  merge (or `pr open`) goes ahead only on a pass for the exact commit being promoted. So if the
+  branch moves between the gate and the merge, or a promotion tries to lean on an earlier run,
+  it stops with *"preflight gate is not green"* even though the last run you saw was green.
+  That is not a false red: the gate has not seen that commit. Promote again and it will.
+  **Where it runs:** `promoting-a-branch` before the merge on a `direct` hop and before
+  `pr open` on a `pr` hop (that hop never pushes the source branch — it expects it on origin
+  already); `promoting-branches` before each branch's merge on a `direct` hop (a failure skips
+  that branch and the group continues), and on a `pr` hop once on the group's assembled
+  integration branch before it is pushed (a failure skips the **whole group**: nothing pushed, no
+  PR, other groups continue);
+  `queue-batches` from the **orchestrator** once a zone finishes, per issue worktree.
+  The command is the repo's problem, so a repo on Windows writes one that works there. It is a
+  local gate, not a CI replacement — a `pr` hop still watches CI afterwards.
+
+> Not to be confused with the **runtime preflight** every skill performs before its first
+> dispatcher call ([runtime.md](runtime.md)) — that resolves the dispatcher path and reconciles
+> plugin metadata. `code.preflight` is the *repo's* check command and is unrelated to it.
+
 ### Branch cleanup config (optional)
 
 Consumed by the `cleaning-up-branches` skill and the `branches` dispatcher group.
@@ -157,19 +205,22 @@ Consumed by the `cleaning-up-branches` skill and the `branches` dispatcher group
 ```jsonc
 "code": {
   // …existing keys (backend, owner, repo, api, stages)…
-  "branches": { "patterns": ["feature/*", "bugfix/*", "release/*"] }
+  "branches": { "patterns": ["feature/*", "bugfix/*", "release/*", "batch/*"] }
 }
 ```
 
 - `code.branches.patterns` — globs naming which branches are cleanup *candidates* at all.
-  Defaults to `["feature/*", "bugfix/*", "release/*"]` when absent, which matches flight's own
-  `feature/<N>-<slug>` convention plus the usual bugfix and release-fold names. Set it when your
-  repo spells them differently (`feat/*`, `fix/*`) so you don't pass `--pattern` every time.
+  Defaults to `["feature/*", "bugfix/*", "release/*", "batch/*"]` when absent, which matches
+  flight's own `feature/<N>-<slug>` convention and the `batch/<group>-<short>` integration
+  branches `promoting-branches` opens on a `pr` hop, plus the usual bugfix and release-fold
+  names. Set it when your repo spells them differently (`feat/*`, `fix/*`) so you don't pass
+  `--pattern` every time — your list **replaces** the defaults outright rather than adding to
+  them, so repeat any built-in prefix you still want covered.
   Widening it is safe: stage branches, `archived/*`, and any branch checked out in the main
   checkout or in a worktree outside `.worktrees/` are protected regardless of what the patterns
   say. Read it with:
   ```
-  flight config '.code.branches.patterns // ["feature/*","bugfix/*","release/*"]'
+  flight config '.code.branches.patterns // ["feature/*","bugfix/*","release/*","batch/*"]'
   ```
   There is deliberately **no** "delete on the remote by default" knob: remote deletion is the one
   irreversible step, so it stays an explicit `--remote` on each run.
@@ -205,9 +256,34 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
 
 - `code.signature.enabled` — when `true` (the default, and absent counts as `true`) the
   dispatcher ends every issue body, comment and PR body it writes with a `---` rule and
-  `via FlightDirector:flight@<version> with <Model/ver>` (the model clause only when the skill passed
+  `🤖 via FlightDirector:flight@<version> with <Model/ver>` (the model clause only when the skill passed
   `--model`). Set `false` to write bare bodies; `--no-signature` does the same for one call.
   Details: [adapter-contract.md](adapter-contract.md) → **Body signature**.
+
+### CI watch timeouts (optional)
+
+```jsonc
+"code": {
+  "ciWatchTimeout": 900,
+  "ciQueueTimeout": 3600
+}
+```
+
+`ci watch` keeps two clocks, because "still queued" and "hung" are not the same failure and a
+repo with one runner per platform hits the first constantly.
+
+- `code.ciWatchTimeout` — seconds a run may spend **executing**. Default `900`; `0` disables the
+  cap. Precedence: `--timeout` → `LS_CI_WATCH_TIMEOUT` → this → default. Time in which every job
+  of every non-terminal run is waiting for a runner does **not** count against it.
+- `code.ciQueueTimeout` — seconds every run for the SHA may spend **waiting for a runner**, in
+  total. Default `3600`; `0` disables the cap. Precedence: `--queue-timeout` →
+  `LS_CI_QUEUE_TIMEOUT` → this → default. When it fires the message says the run never started
+  executing, so a queue is never reported as a hang.
+
+Raise `ciQueueTimeout` on a repo where several PRs land at once and serialize on a scarce
+runner; raise `ciWatchTimeout` only when the tests themselves got slower. The one case still
+bounded by `ciWatchTimeout` alone is "no run exists at all" — that is a trigger or push problem,
+not a queue, and is still reported within `ciWatchTimeout`.
 
 ### Prompt ledger (optional, off by default)
 
@@ -308,6 +384,18 @@ your `.gitignore` — ignoring the whole family (`secrets.local.json`, `secrets.
 Token precedence: `LS_TOKEN` or `FLIGHT_TOKEN` in the environment override everything
 (`FORGEJO_TOKEN` is still honoured as the legacy name); otherwise the secrets file (the axis's
 token, inheriting `code`'s).
+
+**Not sure which token is in play? Run `flight auth check`** — it names the source it used
+beside the masked token, either the env var (`(from $FLIGHT_TOKEN)`) or the secrets file's full
+path (`(from /path/to/repo/.flightdirector/secrets.json)`). The path is absolute on purpose: the
+secrets file is gitignored, so it exists only in the main checkout and a repo-relative name
+would not resolve from a linked worktree. Reach for this before assuming a 401 is about the
+file — an old export is the likelier culprit, and the check says so outright.
+
+One shadowing case is loud enough not to wait for `auth check`: when the legacy `FORGEJO_TOKEN`
+is set *and* the secrets file holds a different token, every verb prints a note on stderr saying
+the environment variable won. The backend-neutral `LS_TOKEN` / `FLIGHT_TOKEN` stay silent there
+— overriding with those is deliberate, and a two-forge setup should not be nagged on every call.
 
 ### `.flightdirector/config.local.json` — optional, gitignored
 

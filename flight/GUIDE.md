@@ -123,9 +123,12 @@ That triggers **`setting-up-a-repo`**, which walks you through setup:
    - **(a) Simple** — `develop → main`
    - **(b) Multi-stage** — `develop → qa → main`
    - **(c) Advanced** — a custom ordered set of stages, or hand-edit afterward.
-4. **Preferences** — the default worker model for parallel batches, and whether to turn on the
-   prompt ledger (see [Cost ledger](#cost-ledger-optional)). Every answer is recorded, "no"
-   included, so a re-run asks only what's new.
+4. **Preferences** — the default worker model for parallel batches; whether to turn on the
+   prompt ledger (see [Cost ledger](#cost-ledger-optional)); whether newly filed issues get a
+   **starting status** such as `status/new` (see [File it](#1-file-it)); and whether flight
+   should run a **check command** before it merges (see
+   [the preflight gate](#4-promote-toward-release)). Every answer is recorded, "no" included,
+   so a re-run asks only what's new.
 5. **Labels** — it reconciles a default label taxonomy against what your repo already has,
    *adopting your existing names* (if you already call a state `status/qa`, it keeps that),
    shows you a plan, and creates only what's missing.
@@ -170,6 +173,12 @@ duplicate, drafts a clear title + body, suggests 1–3 labels, and creates the i
 
 > **Claude:** *Created #42: "Disable the export button while a download is in progress" — labeled `bug`, `ux`.*
 
+If you opted into a **starting status** at setup, the new issue also gets that label
+(`status/new`, or whatever you named it), so "what hasn't anyone looked at yet?" is a label
+query rather than a guess. It is an ordinary status: the first status change — normally when
+work starts — replaces it. Issues filed outside flight don't get it, and `--no-status` skips it
+for one issue.
+
 ### 2. Decide what to do next
 
 > **You:** "what should I work on?"
@@ -210,7 +219,7 @@ what came through the workflow and from which version:
 
 ```
 ---
-via FlightDirector:flight@0.15.0 with Fable/5.1
+🤖 via FlightDirector:flight@0.15.0 with Fable/5.1
 ```
 
 The `with …` part names the model the skill was running (it passes its own id as `--model`);
@@ -232,6 +241,31 @@ on the linked issues and closes them only when they reach a stage that closes �
 (`main`) by default, adjustable per stage with `closesIssues`. So a linked issue stays open and
 visible (e.g. `status/to test`, then `status/qa`) as it climbs the pipeline, and closes when it
 lands in the final stage.
+
+Closing there isn't compulsory. If your real release happens somewhere flight can't see — a
+deployment approval, an environment promotion, a change window after the last branch merges —
+set `"closesIssues": false` on that final stage and give it an `issueStatus`. The issue then
+stays open in its last status until you (or the agent, once you say it shipped) close it. See
+[example-flows.md](references/example-flows.md) → *"when the last branch isn't the last step"*.
+
+**The preflight gate (optional).** A `direct` hop — usually `feature → develop` — has no CI
+behind it, so without anything else the only check before that merge is you saying "promote".
+If you give flight your repo's check command, it runs it first:
+
+```jsonc
+"code": { "preflight": "./scripts/run-checks.sh" }
+```
+
+**promoting-a-branch** runs it from the branch's worktree just before the merge (or before
+opening the PR, on a `pr` hop). Only the exit code counts: zero carries on, anything else stops
+the promotion and shows you the failing output. **promoting-branches** depends on the hop: on a
+`direct` hop it runs it per branch, so one red branch is skipped while the clean ones still
+ship; on a `pr` hop it runs it once on each group's assembled integration branch, and a red
+result holds back that whole group (nothing pushed, no PR) while the other groups carry on.
+**queue-batches** runs it for each issue once a zone finishes. It's a local gate, not a CI
+replacement — a `pr` hop still watches CI afterwards. Leave it out and nothing changes. Write
+the command so it works from any worktree, not just your main checkout; details in
+[flight-setup.md](references/flight-setup.md#repo-preflight-gate-optional).
 
 **Choosing how a PR merges.** On a `pr` hop you can pick the merge strategy — tell Claude
 "promote to main, squash" (or pass `--strategy`):
@@ -296,6 +330,10 @@ deleted until you say go, and deleting on **origin** is a separate yes from dele
 
 - **`code.signature.enabled`** (optional, default `true`) — the tracker signature described in
   [step 3](#3-work-it). `false` writes bare bodies.
+- **`code.preflight`** (optional, off by default) — your repo's check command, run before a
+  merge; see [the preflight gate](#4-promote-toward-release).
+- **`labels.status.new`** (optional, off by default) — the starting status given to newly filed
+  issues; see [File it](#1-file-it).
 
 Want a different pipeline later? Edit `code.stages` in `.flightdirector/config.json` — e.g. add a `qa`
 stage between `develop` and `main`. The skills pick it up immediately. For worked setups at 1, 2, 3,

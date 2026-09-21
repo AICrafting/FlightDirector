@@ -18,7 +18,21 @@ cp .env.example .env   # gitignored; fill in FLIGHT_GITLAB_TOKEN / _API / _PROJE
 - **Workdir:** `.work/` — gitignored; holds `.flightdirector/config.json` + `.flightdirector/secrets.json` (token).
 - **Markers:** rig artifacts carry a `[rig]` title prefix and the `rig` label. `down.sh` only
   touches those. GitLab REST can't delete issues — rig issues are **closed**, not removed.
-- The rig only writes to `rig/*` branches and MRs between them; it never writes to the default branch.
+- `smoke.sh` only writes to `rig/*` branches and MRs between them; it never writes to the default
+  branch. The one thing the rig keeps there is `.gitlab-ci.yml`, which `up.sh` creates when missing.
+- **Watch, then merge (#185):** the smoke test opens its MR, watches the push pipeline on the head
+  commit, and only then merges. A project with "delete source branch" on by default removes the
+  branch at merge, and a runner picks the job up a few seconds after the push — merge first and
+  its fetch of `refs/heads/<branch>` fails with exit 128 before the script runs.
+- **`ci log` on a red merge request (#138):** the last smoke section opens a second MR whose head
+  branch carries `gitlab-ci-mr.yml` (as that branch's `.gitlab-ci.yml`) — a job that fails while a `rig-fail` file exists and one that always
+  passes, so one commit holds a red and a green run that started together, under the MR ref
+  rather than the branch. It asserts `ci watch --pr` ends at `status=failure`; that `ci log --pr`,
+  `--sha` and `--failed <branch>` each show the red job's log and not the green one's; and, after
+  `rig-fail` is removed, that the new head watches green and `ci log --pr` says
+  `(no failed jobs …)`. Adds a few minutes of real CI time. If CI never reaches a verdict the
+  section warns and skips its checks rather than failing.
 - **CI note:** pipelines need an available runner. On gitlab.com, shared-runner minutes may be
   gated per account/project; if none run, `ci watch` in the smoke suite reports a soft warning
-  (it correctly times out non-zero rather than hanging).
+  (it correctly times out non-zero rather than hanging). That is the only soft case: once a
+  pipeline reaches a verdict, anything but `status=success` fails the smoke test.

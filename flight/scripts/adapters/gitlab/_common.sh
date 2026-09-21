@@ -18,14 +18,14 @@ command -v jq   >/dev/null 2>&1 || { echo "gitlab adapter: jq is required" >&2; 
 
 # GitLab addresses a project by numeric id OR URL-encoded path. owner/repo maps to
 # the encoded "group/project" path (all '/' → %2F, incl. subgroups). @uri does that.
-PROJECT_ENC="$(printf '%s' "${LS_OWNER}/${LS_REPO}" | jq -sRr @uri)"
+PROJECT_ENC="$(urlenc "${LS_OWNER}/${LS_REPO}")"
 PROJECT_API="${LS_API%/}/projects/${PROJECT_ENC}"
 
 die()  { echo "${ADAPTER_NAME:-gitlab}: $*" >&2; exit 1; }
 warn() { echo "${ADAPTER_NAME:-gitlab}: warning: $*" >&2; }
 
-# Percent-encode one URL path segment. Label names commonly contain '/'.
-urlenc() { printf '%s' "$1" | jq -sRr @uri; }
+# `urlenc` comes from ../../_portable.sh — every value interpolated into a URL
+# goes through it. See the "URL encoding" rule in ../../../references/adapter-contract.md.
 
 # GitLab auth header applied to every request (personal/project access token).
 GL_HEADERS=(-H "PRIVATE-TOKEN: ${LS_TOKEN}")

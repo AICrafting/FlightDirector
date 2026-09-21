@@ -41,10 +41,20 @@ The dispatcher:
    (`auth check --axis issues` overrides that one) — applying `code → issues` inheritance when the
    `issues` block is omitted.
 3. Exports the resolved coordinates + token into the adapter's environment: `LS_API`,
-   `LS_OWNER`, `LS_REPO`, `LS_TOKEN`, `LS_TRUNK` (code's trunk branch), `LS_LABELS_JSON`
-   (the `labels` map, for role→name resolution), and `LS_BACKEND`. Token precedence:
-   `LS_TOKEN` / `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a legacy
-   name), else the secrets file (axis, `code → issues`).
+   `LS_OWNER`, `LS_REPO`, `LS_TOKEN`, `LS_TOKEN_SOURCE`, `LS_TRUNK` (code's trunk branch),
+   `LS_LABELS_JSON` (the `labels` map, for role→name resolution), and `LS_BACKEND`. Token
+   precedence: `LS_TOKEN` / `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a
+   legacy name), else the secrets file (axis, `code → issues`). `LS_TOKEN_SOURCE` names which
+   of those won — the env var as `$FLIGHT_TOKEN` (leading `$`), or the secrets file's path in a
+   form that resolves from wherever the caller ran: absolute for the repo's own (gitignored,
+   main-checkout-only) file, or exactly the argument when `auth check --secrets` supplied a
+   candidate. It is empty when no token resolved. Print it verbatim; do not shorten it against
+   the repo root, because the common caller is a linked worktree where the repo-relative form
+   names nothing (#196). It exists so `auth check` can say where the token came from instead of
+   leaving a 401 to be blamed on the file (#177). On top of that, and only for the legacy
+   `FORGEJO_TOKEN`, the dispatcher notes on stderr when it shadows a present secrets file
+   holding a different token — the backend-neutral names are a deliberate override and stay
+   quiet on the every-verb path.
 4. **Signs the body** on `issues create|update|comment` and `pr open|update` (see **Body
    signature** below), and strips its own flags (`--model`, `--no-signature`) from the args.
 5. Execs `adapters/<backend>/<group> <verb> [args…]`.
@@ -63,6 +73,26 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 - **Exit code**: `0` success; non-zero on any failure (network, HTTP ≥ 400, bad args), with a
   one-line reason on stderr. Skills must check it — a non-zero exit is a hard stop, never a
   silent no-op.
+
+## URL encoding
+
+**Every caller-supplied value an adapter puts in a URL — query parameter or path segment — is
+percent-encoded, through the one shared `urlenc` in `flight/scripts/_portable.sh`.** Adapters do
+not define their own; `_portable.sh` is sourced by every adapter and by `_authlib.sh`, so `urlenc`
+is simply in scope. It is `jq`'s `@uri`, which leaves the RFC 3986 unreserved set alone
+(`A-Z a-z 0-9 - _ . ~`) and encodes everything else as UTF-8 bytes. It goes through `_portable.sh`'s
+`jq` wrapper, so a Windows `jq.exe` cannot smuggle a CR into the URL.
+
+Encode the **value**, never the assembled URL: the `?`, `&` and `=` that separate parameters, a
+fixed path prefix such as `refs/heads/`, and GitHub's `owner:ref` colon are delimiters, so they are
+written around what `urlenc` returns rather than passed through it.
+
+Branch names, label names, states and usernames are all caller input and all reach a query string.
+Unencoded, a space makes curl refuse the whole request outright ("Malformed input to a URL
+function") and a `#` truncates the query at the fragment — the second is the dangerous one, because
+the request succeeds and the lookup silently matches nothing. Values the adapter itself produced,
+and backend ids that are verified integers or hex SHAs, need no encoding; encoding them anyway is
+harmless and byte-identical.
 
 ## Paging
 
@@ -100,7 +130,7 @@ GitLab comment endpoints do cap, and are paged.
 | Verb        | Args                                   | stdout |
 |-------------|----------------------------------------|--------|
 | `list`      | `--state open\|closed\|all` `--limit N` `--label NAME` (repeatable) | one row per issue: `number⇥title⇥comma,labels`. `--limit` is a true ceiling: the adapter pages underneath it (see **Paging**), so `--limit 200` returns up to 200 rows rather than one server-clamped page |
-| `get`       | `--number N`                           | `number⇥title` then a blank line then the raw body (the one verb that emits a body) |
+| `get`       | `--number N`                           | `number⇥title⇥state` then a blank line then the raw body (the one verb that emits a body). `state` is **normalized to exactly `open` or `closed`** on every backend, so a caller can ask "is #N open?" in one call; it is field 3 because appending leaves `cut -f1`/`cut -f2` readers untouched |
 | `comments`  | `--number N`                           | one block per comment, oldest-first: `author⇥created_at` header line, the raw comment body, then a blank separator line. Empty output (exit 0) = no comments. Unbounded: the thread is always returned whole, because oldest-first rendering means a truncated fetch drops the **newest** comments, and "the later comment wins" depends on those |
 | `create`    | `--title T` `--body B` (or `--body-file PATH`) `--label NAME` (repeatable) | the new issue `number`; labels resolved name→id, applied at creation |
 | `update`    | `--number N` `--title T` and/or `--body B` (or `--body-file PATH`) | (nothing) — patches only the fields passed |
@@ -133,10 +163,10 @@ GitLab comment endpoints do cap, and are paged.
 | Verb    | Args                                                   | stdout |
 |---------|--------------------------------------------------------|--------|
 | `open`  | `--head BRANCH` `--base BRANCH` `--title T` `--body-file PATH` | `number⇥url` |
-| `get`   | `--number N`                                           | `number⇥title⇥state⇥url` |
+| `get`   | `--number N`                                           | `number⇥title⇥state⇥url`. `state` is **normalized to the vocabulary `pr list` already uses — `open` \| `closed` \| `merged`** — whatever the backend calls it on the wire, so `[ "$(flight pr get --number N \| cut -f3)" = open ]` is a correct open check on every backend. GitLab spells an open MR `opened` (mapped) and has a first-class `merged` (kept); Forgejo and GitHub have no merged state at all — a merged PR is a closed one with `merged_at` set — so the adapter derives it, the same expression its `list` projection uses. GitLab's transient `locked` is the one value that passes through unchanged: it has no equivalent anywhere else, and folding it into `open` or `closed` would invent a fact |
 | `update`| `--number N` `--title T` and/or `--body B` (or `--body-file PATH`) | (nothing) — patches only the fields passed, so a title fix leaves the body alone (mirrors `issues update`) |
 | `merge` | `--number N` `--strategy merge\|squash\|rebase`        | (nothing) |
-| `list`  | `--state open\|closed\|merged\|all` (default `open`) `[--head BRANCH] [--base BRANCH] [--limit N]` (default 30) | one row per PR: `number⇥state⇥head⇥base⇥title`; `state` is `merged` for a merged PR whatever the backend calls it. `--state merged --head <branch>` is how `branches` detects a **squash/rebase** merge, whose commits are rewritten so the branch tip never becomes an ancestor of the target. `--limit` bounds the **fetch**, not the matches — on Forgejo, where `--head`/`--base` filter client-side, a small limit can hide an old PR. The fetch itself is paged (see **Paging**), so the limit is honoured in full rather than clamped to one page. |
+| `list`  | `--state open\|closed\|merged\|all` (default `open`) `[--head BRANCH] [--base BRANCH] [--limit N]` (default 30) | one row per PR: `number⇥state⇥head⇥base⇥title`; `state` is the same normalized `open` \| `closed` \| `merged` as `pr get` — `merged` for a merged PR whatever the backend calls it, and `open` for a GitLab MR the wire calls `opened`. `--state merged --head <branch>` is how `branches` detects a **squash/rebase** merge, whose commits are rewritten so the branch tip never becomes an ancestor of the target. `--limit` bounds the **fetch**, not the matches — on Forgejo, where `--head`/`--base` filter client-side, a small limit can hide an old PR. The fetch itself is paged (see **Paging**), so the limit is honoured in full rather than clamped to one page. |
 
 ### `auth`
 
@@ -169,8 +199,8 @@ skills exercise, and the token's expiry where the backend exposes it. Rules:
 
 | Verb    | Args                                              | stdout |
 |---------|---------------------------------------------------|--------|
-| `watch` | `--pr N` \| `--sha SHA` `[--status-file PATH] [--timeout SECS]` | one line per state change: `ci runs=<n> pending=<p> failed=<f> status=<pending\|success\|failure>`; **aggregates all runs** for the SHA — stays watching while any is pending, verdict is `failure` if any run failed. Exits 0 once none pending. `--pr` resolves the PR's head SHA (the SHA the run reports — prefer it; a local `--sha` may be unpushed). `--timeout` (env `LS_CI_WATCH_TIMEOUT` / config `code.ciWatchTimeout`; default 900; 0 disables) exits non-zero rather than polling forever. **Superseded runs don't count**: only the latest attempt per (workflow, trigger event) is scored — a retried-to-green flake watches green — and a newest manual re-dispatch (`workflow_dispatch`; GitLab: `web` pipeline) supersedes that workflow's earlier runs outright. Background-friendly for the `Monitor` tool. |
-| `log`   | `--sha SHA` (or `--failed BRANCH`)                | failed jobs' plaintext logs to stdout, one `── job <id>: <name> ──` header per job, fetched via the backend's per-job logs API (Forgejo 16+: `/actions/jobs/{id}/logs`) |
+| `watch` | `--pr N` \| `--sha SHA` `[--status-file PATH] [--timeout SECS]` | one line per state change: `ci runs=<n> pending=<p> failed=<f> skipped=<s> status=<pending\|success\|failure\|skipped>`; **aggregates all runs** for the SHA — stays watching while any is pending, verdict is `failure` if any run failed. Exits 0 once none pending (the exit code says a terminal state was reached, not that it was green — read `status=`). **Skipped is its own verdict, never a pass**: `skipped` runs are counted on their own axis, and a SHA whose runs were *all* skipped reports `status=skipped` rather than `success`, because nothing executed. A partial skip still reports `success`, with `skipped=<s>` naming how much did not run. `--pr` resolves the PR's head SHA (the SHA the run reports — prefer it; a local `--sha` may be unpushed). **Two clocks**: `--timeout` (env `LS_CI_WATCH_TIMEOUT` / config `code.ciWatchTimeout`; default 900; 0 disables) bounds how long a run may **execute**, while `--queue-timeout` (env `LS_CI_QUEUE_TIMEOUT` / config `code.ciQueueTimeout`; default 3600; 0 disables) bounds time in which every job of every non-terminal run is waiting for a runner. Queued time does not count against `--timeout`, so a healthy run serialized behind a scarce runner is no longer reported as a hang; each message names which cap fired and the key that raises it. The run-level status cannot tell the two apart — every backend reports a run as running once ANY job starts — so a run that looks executing is confirmed against its own job list (`/actions/runs/{id}/jobs`, GitLab `/pipelines/{id}/jobs`), and anything unreadable counts as executing, i.e. keeps the shorter cap in charge. "No run found at all" is a trigger/push problem rather than a queue and stays bounded by `--timeout`. **Superseded runs don't count**: only the latest attempt per (workflow, trigger event) is scored — a retried-to-green flake watches green — and a newest manual re-dispatch (`workflow_dispatch`; GitLab: `web` pipeline) supersedes that workflow's earlier runs outright. Background-friendly for the `Monitor` tool. |
+| `log`   | `--pr N` \| `--sha SHA` \| `--failed BRANCH`      | failed jobs' plaintext logs to stdout, one `── job <id>: <name> ──` header per job, fetched via the backend's per-job logs API (Forgejo 16+: `/actions/jobs/{id}/logs`). `--pr` resolves the PR/MR head commit exactly as `watch --pr` does, and is the form to use after a red `watch --pr`. `--pr` and `--sha` dump **every failed run** on the commit, oldest first, each under a `run <id>` line — a commit usually carries one run per workflow, often started in the same second, so "the latest run" is as likely to be the green one. `--failed BRANCH` takes the latest failed run under the branch ref, and when there is none falls back to the branch's head commit: runs triggered by a pull-request event (Forgejo) or merge-request pipelines (GitLab) carry the PR/MR ref, never `refs/heads/<branch>` (GitHub's `?branch=` filter already matches both). A commit whose runs all passed prints `(no failed jobs for run …)` and exits 0; no run at all is a non-zero `no CI run found`. |
 
 ### `branches` (dispatcher-owned, not a backend adapter)
 
@@ -186,7 +216,7 @@ behaves identically when invoked from a linked worktree. Driven by the
 |---------|------|--------|
 | `list`  | `[--merged-into STAGE] [--pattern GLOB]… [--no-fetch]` | one row per **merged** candidate: `branch⇥where⇥merged-into⇥pr⇥issue⇥worktree`. `where` is `local`/`remote`/`local+remote`; `pr` is the merged PR number when the evidence came from the backend, else `-`; `issue` is the `N` parsed from `<prefix>/<N>-<slug>`, else `-`; `worktree` is the `.worktrees/` path still holding it, else `-`. Runs `git fetch --prune origin` first unless `--no-fetch` (a fetch failure warns, it does not stop). Unmerged branches are absent, not flagged. |
 | `prune` | `[--merged-into STAGE] [--pattern GLOB]… [--branch NAME]… [--local] [--remote] [--worktrees] [--dry-run] [--no-fetch]` | one row per action: `action⇥branch⇥detail`, where action is `remove-worktree`, `delete-local`, `delete-remote`, the `would-…` preview form, or `skip` (detail = why). Exits non-zero if anything was skipped because an operation *failed*. |
-| `sync-down` | `--from STAGE` | After a promotion into `STAGE` (`stages[i]`, `i ≥ 1`): for `j = i-1 … 0`, merge `stages[j+1]` back into `stages[j]` per that stage's `syncDown` (`direct` \| `pr` \| `none`, default = its `merge`). One row per stage, in cascade order: `stage⇥outcome⇥detail`, outcome ∈ `fast-forwarded` \| `merged` \| `already-level` \| `pr-merged` (detail starts `#N`) \| `skipped` (`none`) \| `stopped` \| `nothing-below` (`STAGE` is `stages[0]`). Runs the freshness check on each lower stage first (behind → fast-forward; ahead/diverged → `stopped`). `direct` merges with `--ff` (a merge commit only when needed) in the checkout holding the stage, or in a throwaway worktree when that checkout is dirty or absent, then pushes; `pr` recurses through the dispatcher — `pr open` (head = upper, base = lower, no issue keywords), `ci watch --pr`, then `pr merge --strategy merge` on green — and leaves the PR open on red CI. A conflict is aborted and reported. Stops the cascade and exits non-zero on the first `stopped` row; never resolves, rebases or resets a stage ([ADR 0002](../../docs/adr/0002-sync-down-after-promotion.md)). |
+| `sync-down` | `--from STAGE` | After a promotion into `STAGE` (`stages[i]`, `i ≥ 1`): for `j = i-1 … 0`, merge `stages[j+1]` back into `stages[j]` per that stage's `syncDown` (`direct` \| `pr` \| `none`, default = its `merge`). One row per stage, in cascade order: `stage⇥outcome⇥detail`, outcome ∈ `fast-forwarded` \| `merged` \| `already-level` \| `pr-merged` (detail starts `#N`) \| `skipped` (`none`) \| `stopped` \| `nothing-below` (`STAGE` is `stages[0]`). Runs the freshness check on each lower stage first (behind → fast-forward; ahead/diverged → `stopped`). `direct` merges with `--ff` (a merge commit only when needed) in the checkout holding the stage, or in a throwaway worktree when that checkout is dirty or absent, then pushes; `pr` recurses through the dispatcher — `pr open` (head = upper, base = lower, no issue keywords), `ci watch --pr`, then `pr merge --strategy merge` **only** on `status=success` — and leaves the PR open on anything else (red CI, or an all-skipped run that verified nothing). A conflict is aborted and reported. Stops the cascade and exits non-zero on the first `stopped` row; never resolves, rebases or resets a stage ([ADR 0002](../../docs/adr/0002-sync-down-after-promotion.md)). |
 
 **Merged** means either the branch tip is an ancestor of a configured stage, or the backend
 reports a merged PR whose head was that branch and whose base is a configured stage. Candidates
@@ -221,10 +251,10 @@ Safety is in the verb, not in the caller:
 
   ```
   ---
-  via FlightDirector:flight@0.14.0 with Fable/5.1
+  🤖 via FlightDirector:flight@0.14.0 with Fable/5.1
   ```
 
-  A blank line, a rule, then `via FlightDirector:flight@<installed version>`, plus ` with
+  A blank line, a rule, then `🤖 via FlightDirector:flight@<installed version>`, plus ` with
   <Model/ver>` when the model is known. The model comes from the dispatcher-owned `--model <id>`
   flag (stripped before the adapter sees the args) or `FLIGHT_MODEL` / `LS_MODEL` in the env,
   rendered as `Fable/5.1` from `claude-fable-5-1`, `Sol/5.6` from `gpt-5.6-sol`, `GPT/5` from
@@ -239,9 +269,10 @@ Safety is in the verb, not in the caller:
   github adapter resolves and applies labels by name internally (skills are unchanged). `issues
   attach` is **not supported** on GitHub (no REST API for issue attachments) and exits non-zero
   with that reason. `issues list` filters out pull requests (GitHub returns PRs from the issues
-  endpoint). `pr merge` maps `--strategy` to GitHub's `merge_method`. `pr list` has no `merged` state
-  either — merged is closed-with-`merged_at` — but GitHub *does* filter by branch server-side, so
-  the adapter sends `head=<owner>:<branch>` and `base=` and re-checks client-side. `ci log` streams per-job
+  endpoint). `pr merge` maps `--strategy` to GitHub's `merge_method`. `pr` has no `merged` state
+  either — merged is closed-with-`merged_at`, which both `pr list` and `pr get` read to report
+  `merged` — but GitHub *does* filter by branch server-side, so the adapter sends
+  `head=<owner>:<branch>` and `base=` and re-checks client-side. `ci log` streams per-job
   logs (`/actions/jobs/{id}/logs`) rather than the run-level zip. Note GitHub's `issues list`
   endpoint is **eventually consistent** — a just-created issue can take a few seconds to appear in
   the list, though `issues get` reflects it immediately; don't rely on a list snapshot taken
@@ -249,7 +280,10 @@ Safety is in the verb, not in the caller:
 - **GitLab backend specifics:** GitLab addresses a project by its URL-encoded path — the
   adapter builds `projects/<owner%2Frepo>` from `owner`/`repo` (subgroups' slashes encode too).
   Issues are addressed by their per-project **`iid`** (what the contract calls `--number`), and
-  the body lives in `description`, not `body`. Labels are applied **by name** (like GitHub) via
+  the body lives in `description`, not `body`. GitLab reports an open issue's state as
+  **`opened`**, not `open`, and spells an open MR's state the same way, so `issues get`, `pr get` and
+  `pr list` all normalize it — a caller comparing the raw wire value against `open` would read every
+  open GitLab issue and MR as not-open. Labels are applied **by name** (like GitHub) via
   `add_labels`/`remove_labels`; `set-status` does the single-status swap in one `PUT`. Auth is a
   `PRIVATE-TOKEN` header (personal/project access token). `issues comments` drops GitLab **system
   notes** (label/state-change activity) so only real comments come back. `issues attach` uploads
@@ -259,10 +293,13 @@ Safety is in the verb, not in the caller:
   merge otherwise follows the project's configured *merge method* (GitLab's merge endpoint has no
   per-request `merge_method`). `ci` is **pipelines**: `ci watch` aggregates all pipelines for the
   SHA (`?sha=`), `--pr` resolves the MR head SHA (`.sha`); pending = created/waiting/preparing/
-  pending/running/scheduled, a clean pass = success/skipped/manual, anything else (failed/canceled)
-  counts as failure. `ci log` pulls the failed pipeline's failed-job traces (`/jobs/:id/trace`).
+  pending/running/scheduled, not-a-failure = success/skipped/manual, anything else (failed/canceled)
+  counts as failure; `skipped` is additionally counted on its own axis, so an all-skipped SHA verdicts
+  as `skipped`. `ci log` pulls the failed pipeline's failed-job traces (`/jobs/:id/trace`).
   `pr list` is the one backend with a first-class `merged` state and server-side
-  `source_branch`/`target_branch` filters; `--state open` is spelled `opened`.
+  `source_branch`/`target_branch` filters; `--state open` is spelled `opened`. It is also the only
+  backend with a `locked` state (transient, while a merge is in flight), which `pr get`/`pr list`
+  pass through rather than mapping.
   MR **mergeability is computed asynchronously**, so an immediate `pr merge` right after `pr open`
   can transiently 405 until GitLab finishes its merge check — retry briefly (the rig smoke does).
 - **Jira backend specifics:** Jira is an **issues-axis-only** backend (an issue tracker, not a git
@@ -280,6 +317,11 @@ Safety is in the verb, not in the caller:
     remove-other-status-labels), matching the single-status model — it does **not** drive workflow
     transitions. Jira labels are **single tokens**: status label names in config must be
     **space-free** (e.g. `status/in-progress`, not `status/in progress`).
+  - **State is the status *category*, not a flag.** Jira has no open/closed field: `issues get`
+    reports `closed` when `.fields.status.statusCategory.key` is **`done`** and `open`
+    otherwise. That is the same rule `list` (`statusCategory != Done`) and `close`/`reopen`
+    already use, so a project with custom workflow status names maps correctly with no extra
+    config — only the category matters.
   - **`close`/`reopen` → workflow transitions.** Labels can't close a Jira issue, so `close` finds
     the transition into a status whose category is **`done`** and posts it; `reopen` transitions
     back to a **`new`** (To-Do) or, failing that, **`indeterminate`** (In-Progress) category. This

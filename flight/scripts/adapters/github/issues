@@ -41,7 +41,7 @@ case "$verb" in
     esac; done
     [ -n "$number" ] || die "issues get: --number required"
     _api GET "/issues/${number}" \
-      | jq -r '([(.number|tostring), .title] | @tsv), "", (.body // "")'
+      | jq -r '([(.number|tostring), .title, .state] | @tsv), "", (.body // "")'
     ;;
 
   comments)
@@ -155,7 +155,7 @@ case "$verb" in
       if printf '%s' "$current_names" | jq -e --arg n "$n" 'index($n) != null' >/dev/null; then
         _api DELETE "/issues/${number}/labels/$(urlenc "$n")" >/dev/null
       fi
-    done < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[]')
+    done < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[] | select(type == "string")')
     _api POST "/issues/${number}/labels" "$(jq -n --arg n "$target_name" '{labels:[$n]}')" >/dev/null
     ;;
 
@@ -173,7 +173,7 @@ case "$verb" in
       if printf '%s' "$current_names" | jq -e --arg n "$n" 'index($n) != null' >/dev/null; then
         _api DELETE "/issues/${number}/labels/$(urlenc "$n")" >/dev/null
       fi
-    done < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[]')
+    done < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[] | select(type == "string")')
     ;;
 
   label-add)
