@@ -85,7 +85,7 @@ Each row is `branch⇥where⇥merged-into⇥pr⇥issue⇥worktree`:
 | `where` | `local`, `remote`, or `local+remote` |
 | `merged-into` | the stage its work landed in |
 | `pr` | the merged PR number when the evidence came from the backend, else `-` |
-| `issue` | the branch's issue as a qualified id (`FJ-71`, `JIR-4`), `unbound` for a legacy `feature/71-…` branch whose tracker cannot be recovered, else `-`. It comes from the shared identity helper — the branch name, or the migration's binding for a legacy branch — never from whichever tracker is the default now. (A repo still on a pre-schema-3 config shows the bare `71`.) |
+| `issue` | the branch's issue as a qualified id (`FJ-71`, `JIR-4`), `unbound` for a legacy `feature/71-…` branch whose tracker cannot be recovered, `error` when the lookup itself failed (the reason is on stderr), else `-`. It comes from the shared identity helper — the branch name, or the migration's binding for a legacy branch — never from whichever tracker is the default now. (A repo still on a pre-schema-3 config shows the bare `71`.) |
 | `worktree` | the `.worktrees/` path still holding it, else `-` |
 
 **Merged** means one of two things, and the `pr` column says which:
@@ -138,6 +138,10 @@ Then judge each row:
   `"$ISSUE_IDENTITY" from-branch --branch "<branch>" --tracker <REF>` (the helper from
   [runtime preflight](../../references/runtime.md)) and cross-check it like any other row. If
   nobody knows, treat it like a row with no issue: the user decides it on its own.
+- `error` → the identity lookup failed (typically a binding that names a tracker no longer in the
+  config); the reason is on stderr. **Skip it and flag it with that reason** — it is NOT a
+  no-issue row, and a branch is never deleted on a lookup that did not run. Fix the config or
+  bindings and re-list.
 - Issue is **closed**, or **open carrying the merged stage's status or any later stage's** →
   the branch is a genuine leftover. Keep it in the delete set.
 - Issue is **open with an earlier status** (`status/in progress`, `status/blocked`) or **no

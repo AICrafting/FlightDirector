@@ -194,6 +194,18 @@ printf '%s\n' '{"schemaVersion":1,"branches":{},"manifests":{}}' >"$BINDINGS"
 out="$(run list)"
 check "a legacy branch with no recoverable binding reports unbound" "$([ "$(row feature/1-merged "$out")" = unbound ] && echo 1 || echo 0)" "out=$out"
 check "…while qualified branches need no binding" "$([ "$(row feature/gh-10-second "$out")" = GH-10 ] && echo 1 || echo 0)" "out=$out"
+# A lookup that FAILS (here: the binding's legacy default names a tracker since removed
+# from the config) is not "no issue" — the column says `error` and the reason reaches
+# stderr, so the cleanup skill cannot wave the branch through as issue-less.
+printf '%s\n' '{"schemaVersion":1,"legacyDefaultTracker":"OLD","branches":{},"manifests":{}}' >"$BINDINGS"
+errf="$SANDBOX/branches.err"
+out="$(run list)"
+FLIGHT_REPO_ROOT="$R" FLIGHT_CONFIG="$R/.flightdirector/config.json" FLIGHT_SELF="$STUB" \
+	bash "$BRANCHES" list --no-fetch >/dev/null 2>"$errf" || true
+check "a failed identity lookup reports error, not no-issue" "$([ "$(row feature/1-merged "$out")" = error ] && echo 1 || echo 0)" "out=$out"
+check "…and forwards the helper's reason to stderr" \
+	"$(grep -q 'feature/1-merged' "$errf" && grep -q "unknown tracker 'OLD'" "$errf" && echo 1 || echo 0)" "err=$(cat "$errf")"
+check "…while qualified branches are unaffected" "$([ "$(row feature/gh-10-second "$out")" = GH-10 ] && echo 1 || echo 0)" "out=$out"
 # Back to the pre-schema-3 fixture the rest of this file expects.
 cp "$SANDBOX/config.legacy" "$R/.flightdirector/config.json"
 rm -rf "$R/.flightdirector/batches"

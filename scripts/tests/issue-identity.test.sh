@@ -130,6 +130,29 @@ check "concurrent remembers keep every update (shared lock protocol)" \
 	"$([ "$concurrent_ok" = 1 ] && [ "$(jq '[.branches | keys[] | select(test("concurrent"))] | length' "$BIND")" -eq 5 ] && [ ! -d "$BIND.lock" ] && echo 1 || echo 0)"
 check "the helper never writes the retired work-items.json location" "$([ ! -e "$R/.flightdirector/work-items.json" ] && echo 1 || echo 0)"
 
+printf '\033[1m── bare #N from history ──\033[0m\n'
+# A bare #N has two writers: pre-migration history (the legacy tracker) and PR bodies
+# written since, which say `Closes #N` for the code repository's own tracker (FJ here).
+cp "$SANDBOX/bind.good" "$BIND"
+out="$(run from-history --ref '#40')"
+check "legacy tracker == code-repo tracker: a bare #N maps to it" "$([ "$(field qualified "$out")" = FJ-40 ] && echo 1 || echo 0)" "$out"
+jq '.legacyDefaultTracker = "GH"' "$SANDBOX/bind.good" >"$BIND"
+check "legacy tracker != code-repo tracker: a bare #N is ambiguous (4)" "$([ "$(status_of from-history --ref '#40')" = 4 ] && echo 1 || echo 0)"
+check "…and the error names both candidates and asks for --tracker" \
+	"$(errtext from-history --ref '#40' | grep 'ambiguous' | grep 'GH' | grep 'FJ' | grep -q 'rerun with --tracker' && echo 1 || echo 0)" \
+	"$(errtext from-history --ref '#40')"
+out="$(run from-history --ref '#40' --tracker gh)"
+check "…which an explicit --tracker settles" "$([ "$(field qualified "$out")" = GH-40 ] && echo 1 || echo 0)" "$out"
+jq '(.issueTrackers[] | select(.ref == "FJ")) |= (.repo = "tickets" | del(.credentialRef))' "$SANDBOX/config.good" >"$CFG"
+out="$(run from-history --ref '#40')"
+check "no code-repo tracker: a bare #N maps to the legacy tracker" "$([ "$(field qualified "$out")" = GH-40 ] && echo 1 || echo 0)" "$out"
+jq 'del(.legacyIssueTracker)' "$SANDBOX/config.good" >"$CFG"
+printf '{"schemaVersion":1,"branches":{},"manifests":{}}\n' >"$BIND"
+out="$(run from-history --ref '#40')"
+check "a never-migrated repo: a bare #N is its code-repo tracker's" "$([ "$(field qualified "$out")" = FJ-40 ] && echo 1 || echo 0)" "$out"
+cp "$SANDBOX/config.good" "$CFG"
+cp "$SANDBOX/bind.good" "$BIND"
+
 printf '\033[1m── code PR issue line ──\033[0m\n'
 fj='{"tracker":"FJ","number":"3","qualified":"FJ-3","branchPrefix":"fj-3"}'
 gh='{"tracker":"GH","number":"3","qualified":"GH-3","branchPrefix":"gh-3"}'
@@ -145,6 +168,49 @@ rm -f "$R/.flightdirector/config.local.json"
 jq '(.issueTrackers[] | select(.ref == "FJ")) |= (.api = "https://other.example.com/api/v1" | del(.credentialRef))' "$SANDBOX/config.good" >"$CFG"
 check "same owner/repo on another host is not the same repository" "$([ "$(run pr-reference --identity "$fj" --closes true)" = 'Tracks FJ-3' ] && echo 1 || echo 0)"
 cp "$SANDBOX/config.good" "$CFG"
+
+printf '\033[1m── Windows: native jq.exe writes CRLF ──\033[0m\n'
+# Emulate MSYS with a native jq.exe: OSTYPE=msys switches _portable.sh's shim on, and a
+# jq on PATH ending every line in \r stands in for jq.exe's text-mode stdout. The helper
+# must strip it like every other entrypoint does — or the schema check, the tracker
+# lookups and the pr-reference comparison fail on an invisible byte. Outputs are
+# compared byte-exact: `$(…)` strips the newline but keeps a \r.
+CRLF_BIN="$SANDBOX/crlf-bin"; mkdir -p "$CRLF_BIN"
+REAL_JQ="$(command -v jq)"
+cat >"$CRLF_BIN/jq" <<SH
+#!/usr/bin/env bash
+"$REAL_JQ" "\$@" | awk '{ printf "%s\r\n", \$0 }'; exit \${PIPESTATUS[0]}
+SH
+chmod +x "$CRLF_BIN/jq"
+msys() { (cd "$R" && PATH="$CRLF_BIN:$PATH" OSTYPE=msys "$IDENTITY" "$@"); }
+msys_status() { local rc=0; msys "$@" >/dev/null 2>&1 || rc=$?; echo "$rc"; }
+has_cr() { od -c | grep -q '\\r'; }
+check "the emulated jq really emits CR" "$(printf '1\n' | "$CRLF_BIN/jq" . | has_cr && echo 1 || echo 0)"
+cp "$SANDBOX/bind.good" "$BIND"
+out="$(msys from-branch --branch feature/gh-1-second 2>&1 || true)"
+check "msys: a qualified branch resolves, CR-free" \
+	"$([ "$out" = '{"tracker":"GH","number":"1","qualified":"GH-1","branchPrefix":"gh-1"}' ] && echo 1 || echo 0)" "$out"
+out="$(msys from-branch --branch feature/12-old-work 2>&1 || true)"
+check "msys: a bound legacy branch resolves" \
+	"$([ "$out" = '{"tracker":"FJ","number":"12","qualified":"FJ-12","branchPrefix":"fj-12"}' ] && echo 1 || echo 0)" "$out"
+out="$(msys from-branch --branch bugfix/17-unbound 2>&1 || true)"
+check "msys: an unbound legacy branch uses the legacy default" \
+	"$([ "$out" = '{"tracker":"FJ","number":"17","qualified":"FJ-17","branchPrefix":"fj-17"}' ] && echo 1 || echo 0)" "$out"
+out="$(msys from-branch --branch feature/12-old-work --tracker fj 2>&1 || true)"
+check "msys: an alias/case lookup compares clean refs" \
+	"$([ "$out" = '{"tracker":"FJ","number":"12","qualified":"FJ-12","branchPrefix":"fj-12"}' ] && echo 1 || echo 0)" "$out"
+out="$(msys from-manifest --run-id run1 --entry 5 2>&1 || true)"
+check "msys: a legacy manifest entry resolves" "$([ "$out" = '{"tracker":"FJ","number":"5","qualified":"FJ-5","branchPrefix":"fj-5"}' ] && echo 1 || echo 0)" "$out"
+out="$(msys from-history --ref '#40' 2>&1 || true)"
+check "msys: a bare history reference resolves" "$([ "$out" = '{"tracker":"FJ","number":"40","qualified":"FJ-40","branchPrefix":"fj-40"}' ] && echo 1 || echo 0)" "$out"
+check "msys: a non-issue branch is still 'no identity' (3)" "$([ "$(msys_status from-branch --branch release/0.1.0)" = 3 ] && echo 1 || echo 0)"
+check "msys: remember stores a verified identity" "$(ok msys remember --branch feature/gh-2-msys --identity '{"tracker":"GH","number":"2","qualified":"GH-2","branchPrefix":"gh-2"}')"
+check "msys: the bindings file stays CR-free" "$(has_cr <"$BIND" && echo 0 || echo 1)"
+out="$(msys pr-reference --identity "$fj" --closes true 2>&1 || true)"
+check "msys: the code repository's own issue still gets Closes #N" "$([ "$out" = 'Closes #3' ] && echo 1 || echo 0)" "$out"
+out="$(msys pr-reference --identity "$gh" --closes true 2>&1 || true)"
+check "msys: another tracker's issue still gets Tracks" "$([ "$out" = 'Tracks GH-3' ] && echo 1 || echo 0)" "$out"
+cp "$SANDBOX/bind.good" "$BIND"
 
 printf '\033[1m── schema guard ──\033[0m\n'
 jq '.schemaVersion = 2 | del(.issueTrackers, .legacyIssueTracker) | .issues = {"backend":"forgejo"}' "$SANDBOX/config.good" >"$CFG"

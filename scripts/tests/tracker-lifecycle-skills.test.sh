@@ -72,6 +72,16 @@ check "batch manifests are written with qualified identities" "$(has "$SK/queue-
 
 check "runtime preflight defines the identity helper" \
 	"$(has "$REPO_ROOT/flight/references/runtime.md" 'ISSUE_IDENTITY=<plugin-root>/scripts/issue-identity.sh')"
+check "runtime preflight says reconcile may migrate the config to schema 3" \
+	"$(has "$REPO_ROOT/flight/references/runtime.md" 'may also **migrate the config**')"
+check "runtime preflight stops the skill when reconcile fails" \
+	"$(has "$REPO_ROOT/flight/references/runtime.md" '**If reconcile exits non-zero, stop and report its message')"
+check "promoting-a-branch asks on an ambiguous bare history reference" \
+	"$(has "$SK/promoting-a-branch/SKILL.md" 'Exit 4 always means "ask"')"
+check "cleaning-up-branches never treats a failed lookup as no issue" \
+	"$(has "$SK/cleaning-up-branches/SKILL.md" '`error` → the identity lookup failed')"
+check "the adapter contract documents the branches error value" \
+	"$(has "$REPO_ROOT/flight/references/adapter-contract.md" '`error` when the identity lookup itself failed')"
 hits="$(grep -rn 'work-items\.json\|bind-legacy-default' "$REPO_ROOT/flight" "$REPO_ROOT/.gitignore" || true)"
 check "nothing uses the retired work-items.json path or a second legacy binder" "$(none "$hits")" "$hits"
 
