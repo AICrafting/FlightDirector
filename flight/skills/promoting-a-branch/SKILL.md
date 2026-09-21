@@ -126,7 +126,10 @@ default tracker may have changed since the work started. `$ISSUE_IDENTITY` is th
   ISSUE="$("$ISSUE_IDENTITY" from-history --ref "FJ-12")"      # or --ref "#12"
   ```
   A bare `#12` from history belongs to the tracker the repo migrated from — never to whichever is
-  the default now — and exit 4 again means "ask". A merged branch name can go through
+  the default now. But PR bodies written since the migration still say `Closes #12` for the code
+  repo's own tracker, so when that tracker is not the migrated one the helper cannot tell them
+  apart and exits 4. Exit 4 always means "ask": ask the user which tracker the reference means and
+  rerun with `--tracker REF`. A merged branch name can go through
   `from-branch` instead.
 
 For each identity keep `ISSUE` and

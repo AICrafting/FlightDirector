@@ -79,12 +79,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   - Triage, filing's duplicate scan and queue planning list **every** tracker (`FJ-12`, `JIR-7`)
     and filter each by its own status labels; a tracker that cannot be reached is reported as
     unavailable, not shown as an empty backlog.
-  - `flight branches list` reports the qualified issue (`FJ-12`, or `unbound`) in its issue
-    column, and batch manifests record full identities (`batch-manifest groups` prints
+  - `flight branches list` reports the qualified issue (`FJ-12`, `unbound`, or `error` with the
+    reason on stderr when the lookup fails) in its issue column, and batch manifests record full identities (`batch-manifest groups` prints
     `zone⇥FJ-7,GH-12`); manifests written before the upgrade keep working through the same
     bindings. Both behave exactly as before on a config that has not migrated yet.
   - New helper `scripts/issue-identity.sh` (the one place branch names, manifest entries and
-    history references become an identity), used by the scripts and skills alike.
+    history references become an identity), used by the scripts and skills alike. A bare `#12`
+    found in history maps to the tracker the repo migrated from only while that is also the
+    code repo's own tracker (or there is none); otherwise it is ambiguous and the promotion asks
+    which tracker it means.
 
 - **A repo can name its own check command, and promotion runs it** (#209). New optional
   `code.preflight`: a shell command string that flight runs, from the checkout holding the code

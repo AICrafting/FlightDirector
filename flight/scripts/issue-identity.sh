@@ -29,6 +29,12 @@
 # `flight issues resolve` against the CURRENT default instead.
 set -euo pipefail
 
+# Windows shims (jq CRLF, path form); a no-op elsewhere. Without it a native jq.exe's
+# values keep a trailing \r: the schema check, the tracker lookups and the pr-reference
+# comparison all fail against an invisible byte.
+# shellcheck source-path=SCRIPTDIR source=_portable.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+
 die() { printf 'issue-identity: %s\n' "$1" >&2; exit "${2:-1}"; }
 command -v jq >/dev/null 2>&1 || die "jq is required"
 
@@ -55,14 +61,16 @@ schema="$(jq -r '.schemaVersion // 1' "$CFG_DIR/config.json" 2>/dev/null || echo
 
 bindings() { if [ -f "$FILE" ]; then cat "$FILE"; else echo '{}'; fi; }
 
-# The four canonical keys, compact — `legacy` and any other metadata are dropped, so a
-# reconcile-bound entry and a fresh `issues resolve` compare equal.
-canonical() { jq -c '{tracker, number, qualified, branchPrefix}' <<<"$1"; }
-
 valid_identity() {
 	jq -e 'type == "object" and ([.tracker, .number, .qualified, .branchPrefix] | all(type == "string" and length > 0))' \
 		<<<"$1" >/dev/null 2>&1
 }
+
+# The four canonical keys, compact — `legacy` and any other metadata are dropped, so a
+# reconcile-bound entry and a fresh `issues resolve` compare equal. Fails on anything
+# that is not an identity: a failed `resolve` inside `$(canonical "$(resolve …)")` hands
+# it an empty string, and printing nothing with status 0 would pass for success.
+canonical() { valid_identity "$1" || return 1; jq -c '{tracker, number, qualified, branchPrefix}' <<<"$1"; }
 
 resolve() { # resolve <input> [tracker]
 	if [ -n "${2:-}" ]; then flight issues resolve --number "$1" --tracker "$2"
@@ -178,15 +186,55 @@ from_manifest() { # from_manifest <run id> <legacy entry>
 	canonical "$(resolve "${entry#\#}" "$tracker")"
 }
 
+# SAME_TARGET — jq `same_target($code; $tracker)`: true when the tracker is the code
+# repository's own issue tracker — same backend, same api (trailing / ignored), same
+# owner/repo. Only those issues get closing keywords in a code PR. A Jira tracker never
+# is one: its issues cannot live in a forge repository.
+# shellcheck disable=SC2016  # jq program: $c, $t, $k are jq variables
+SAME_TARGET='
+	def norm: (. // "") | tostring | sub("/+$"; "") | ascii_downcase;
+	def same_target($c; $t):
+		def same($k): ($c[$k] | norm) != "" and ($c[$k] | norm) == ($t[$k] | norm);
+		($t.backend | norm) != "jira" and ($c.backend | norm) != "jira"
+		and same("backend") and same("api") and same("owner") and same("repo");'
+
+# code_repo_trackers — the refs (one per line) of every tracker that is the code
+# repository's own issue tracker.
+code_repo_trackers() {
+	local cfg
+	cfg="$(flight config '{code: (.code // {}), trackers: (.issueTrackers // [])}')" || return 1
+	jq -r "$SAME_TARGET"' . as $x | $x.trackers[] | select(same_target($x.code; .)) | .ref' <<<"$cfg"
+}
+
 # ── from-history ──────────────────────────────────────────────────────────────
 # A reference found in persisted history — a commit subject, a merge message, an old
-# PR body. Qualified references resolve to their own tracker; a bare #N predates the
-# migration (new work always writes REF-N), so it belongs to the legacy tracker.
+# PR body. Qualified references resolve to their own tracker. A bare #N has two
+# sources: history from before the migration (the legacy tracker), and PR bodies
+# written since, which still say `Closes #N`/`Ready #N` for the code repository's OWN
+# tracker (see pr-reference). So a bare #N maps to the legacy tracker only when those
+# two agree — no code-repo tracker, or the code-repo tracker IS the legacy one. When
+# they differ it is ambiguous (4): the caller asks and passes --tracker. A repo that
+# never migrated (no binding default and no `legacyIssueTracker` — set up on schema 3)
+# has no pre-migration history, so its one code-repo tracker is the only writer. A
+# migrated repo whose binding default is missing (4) cannot tell.
 from_history() { # from_history <ref> [explicit tracker]
-	local ref="$1" explicit="${2:-}" tracker
+	local ref="$1" explicit="${2:-}" tracker legacy code_refs
 	if [[ "$ref" =~ ^#?[0-9]+$ ]]; then
 		tracker="$explicit"
-		[ -n "$tracker" ] || tracker="$(bindings | jq -r '.legacyDefaultTracker // empty' 2>/dev/null || true)"
+		if [ -z "$tracker" ]; then
+			legacy="$(bindings | jq -r '.legacyDefaultTracker // empty' 2>/dev/null || true)"
+			code_refs="$(code_repo_trackers)" || die "cannot read the tracker configuration"
+			if [ -z "$code_refs" ]; then
+				tracker="$legacy"
+			elif [ -n "$legacy" ] && grep -qixF -- "$legacy" <<<"$code_refs"; then
+				tracker="$legacy"
+			elif [ -z "$legacy" ] && [ -z "$(flight config '.legacyIssueTracker // empty')" ] \
+				&& [ "$(grep -c . <<<"$code_refs")" = 1 ]; then
+				tracker="$code_refs"
+			else
+				die "bare reference '$ref' is ambiguous: it may predate the migration (${legacy:-no legacy tracker}) or come from a code PR naming the code repository's tracker ($(tr '\n' ' ' <<<"$code_refs" | sed 's/ $//')); rerun with --tracker REF (flight never guesses)" 4
+			fi
+		fi
 		[ -n "$tracker" ] || die "bare reference '$ref' has no recoverable tracker; rerun with --tracker REF (flight never guesses)" 4
 		canonical "$(resolve "${ref#\#}" "$tracker")"
 	else
@@ -197,8 +245,8 @@ from_history() { # from_history <ref> [explicit tracker]
 # ── pr-reference ──────────────────────────────────────────────────────────────
 # The issue line for a code PR body. GitHub/Forgejo/GitLab act on `Closes #N` against
 # the PR's OWN repository, so it is emitted only when the issue lives in exactly that
-# repository: same backend, same api (trailing / ignored), same owner/repo (Jira:
-# project). Otherwise the line names the qualified id, which no forge acts on, and the
+# repository (SAME_TARGET: same backend, same api with trailing / ignored, same
+# owner/repo; never Jira). Otherwise the line names the qualified id, which no forge acts on, and the
 # promotion drives that tracker explicitly. No URL, body or ledger is ever printed.
 pr_reference() { # pr_reference <identity> <closes>
 	local id="$1" closes="$2" code tracker same
@@ -206,11 +254,7 @@ pr_reference() { # pr_reference <identity> <closes>
 	case "$closes" in true|false) ;; *) die "--closes must be true or false";; esac
 	code="$(flight config '.code // {}')" || die "cannot read the code config"
 	tracker="$(flight issues tracker --tracker "$(jq -r '.tracker' <<<"$id")")" || die "cannot read tracker $(jq -r '.tracker' <<<"$id")"
-	same="$(jq -rn --argjson c "$code" --argjson t "$tracker" '
-		def norm: (. // "") | tostring | sub("/+$"; "") | ascii_downcase;
-		def same($k): ($c[$k] | norm) != "" and ($c[$k] | norm) == ($t[$k] | norm);
-		same("backend") and same("api")
-		and (if ($t.backend | norm) == "jira" then same("project") else same("owner") and same("repo") end)')"
+	same="$(jq -rn --argjson c "$code" --argjson t "$tracker" "$SAME_TARGET"' same_target($c; $t)')"
 	if [ "$same" = true ]; then
 		if [ "$closes" = true ]; then printf 'Closes #%s\n' "$(jq -r '.number' <<<"$id")"
 		else printf 'Ready #%s\n' "$(jq -r '.number' <<<"$id")"; fi
