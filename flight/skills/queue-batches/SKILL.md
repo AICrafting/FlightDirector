@@ -54,8 +54,9 @@ git -C "$ROOT" worktree list | grep -E '\.worktrees/[0-9]+-' || true
 ls "$SCRATCH"/queue-status/*.log 2>/dev/null || true
 ```
 
-For each leftover, classify from the log's last line: no `ticket=all status=done` → **agent still
-working**; `status=done` but worktrees still present → **done, awaiting serial ship/cleanup**.
+For each leftover, classify from its `ticket=all` line, wherever it sits: no
+`ticket=all status=done` → **agent still working**; `status=done` but worktrees still present →
+**done, awaiting serial ship/cleanup**.
 
 A lingering **run manifest** (`batch-manifest groups` prints zones) is *not* by itself a block:
 a manifest whose issues have **no** `.worktrees/<N>-*` worktree left is **stale** — its run was
@@ -158,28 +159,28 @@ batch-manifest write --run-id "$RUN_ID" \
 ## 4. Monitor + render
 
 On every worker or log update, parse the line and re-render the board. If the active harness has a
-task-board primitive, update the matching issue task (`queued` → pending; `starting`/`working` →
-in progress; `complete` → completed; `blocked` → in progress with the note). When a zone's
-`ticket=all` line reads `status=done`, render that zone's header with `⇥` (done, awaiting
-promotion); `ticket=all status=safety-valved` means the zone did not finish its queue — render its header with `✗` and
+task-board primitive, update the matching issue task (`queued` → pending; `starting`/`working` → in
+progress; `complete` → completed; `blocked` → in progress with the note). When a zone's `ticket=all`
+line reads `status=done`, render that zone's header with `⇥` (done, awaiting promotion); `ticket=all
+status=safety-valved` means the zone did not finish its queue — render its header with `✗` and
 surface its unfinished issues as deferred. When a zone emits its terminal line, start that zone's
-repo gate sweep (4a) before rendering it as `⇥`. Once every zone has emitted a terminal line
+repo gate sweep (4a) before rendering it as `⇥`. Once every zone has emitted its terminal line
 **and** its sweep has finished, proceed to Section 5. Match tasks by the `[<zone>] #<N>` subject
 prefix.
 
 **An agent returning is not that signal — its `ticket=all` line is.** When a zone's agent returns,
 look for that zone's `ticket=all` line. No such line means the zone is **unfinished, regardless of
-what the agent said**: a returned agent's account of its own state is the one piece of evidence
-that cannot be trusted here (4a's "From the orchestrator, not from the agent" carries the
-argument; the harness-specific mechanism is in [Claude Code](references/dispatch-claude.md)). Key
-on `ticket=all`, never on the log's last line — with `code.preflight` configured, 4a's own lines
-land after it. If the agent's latest line is `status=blocked`, that is a question still to route
-(below). Otherwise it has most likely parked, so establish what is actually still running before
-doing anything. Footgun: the orchestrator's own log watcher appears in a `ps` listing matched on
-the log path or worktree, so a match is not proof the worker's job is alive — look for the
-worker's own command. If nothing is, resume the agent through the harness's agent-messaging
-primitive (nothing is running; redo the step in the foreground and carry on); if it cannot be
-resumed, surface its unfinished issues as deferred, as for `safety-valved`.
+what the agent said**: a returned agent's account of its own state is the one piece of evidence that
+cannot be trusted here (4a's "From the orchestrator, not from the agent" carries the argument; the
+harness-specific mechanism is in [Claude Code](references/dispatch-claude.md)). Key on `ticket=all`
+wherever it sits, never on position — with `code.preflight` configured, 4a's own lines land after
+it. If the agent's latest line is `status=blocked`, that is a question still to route (below).
+Otherwise it has most likely parked, so establish what is actually still running before doing
+anything. Footgun: the orchestrator's own log watcher appears in a `ps` listing matched on the log
+path or worktree, so a match is not proof the worker's job is alive — look for the worker's own
+command. If nothing is, resume the agent through the harness's agent-messaging primitive (nothing is
+running; redo the step in the foreground and carry on); if it cannot be resumed, surface its
+unfinished issues as deferred, as for `safety-valved`.
 
 ### 4a. Repo gate sweep — the orchestrator runs it, not the agents
 
@@ -284,8 +285,8 @@ orchestrator never auto-promotes:
   context ceiling.
 - **Zoning by label alone.** Labels lie — read the issue body before placing.
 - **Skipping plan approval.** The user must OK the triage before dispatch.
-- **Taking a returned agent's word for its zone's state.** Read the log's last line; no terminal
-  line means unfinished, whatever the report said.
+- **Taking a returned agent's word for its zone's state.** Look for the zone's `ticket=all`
+  line; no such line means unfinished, whatever the report said.
 - **Forgetting `tail -f` + `Monitor`.** Without them you're blind between completions.
 - **Letting an agent push or promote.** Both are banned in the prompt — keep it that way.
 - **Delegating the preflight sweep to the agents.** Their shells die when they return, so a
