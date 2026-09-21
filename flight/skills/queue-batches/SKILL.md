@@ -208,6 +208,12 @@ until mkdir "$LOCK" 2>/dev/null; do
   T=$((T + 20))
   if [ "$T" -ge 1800 ]; then
     # 30 minutes on a lock nobody released: assume a killed sweep, and say so per issue.
+    # NOTE (#227): a fixed bound cannot tell *wedged* from *busy*, and this one is too
+    # short for the documented 3x5 default — the last zone legitimately waits
+    # (N-1) x M x <suite>, so 3 zones x 5 issues x 5 min means a 50-minute honest wait
+    # that trips this at 30 and records five FALSE skips. Read 1800 as a stopgap, not a
+    # considered value. #227 replaces it with a heartbeat, which can also reclaim the
+    # stale directory this path deliberately leaves standing.
     for ISSUE_NUM in <that zone's issues with status=complete>; do
       echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-skip note=\"lock timeout; stale $LOCK?\"" >> "$ZONE_LOG"
     done
