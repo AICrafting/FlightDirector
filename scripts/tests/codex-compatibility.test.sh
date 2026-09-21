@@ -38,22 +38,41 @@ if says "$QB/SKILL.md" "last line"; then exit 1; fi
 if says "$QB/SKILL.md" "final line"; then exit 1; fi
 if says "$QB/SKILL.md" "ends in a terminal line"; then exit 1; fi
 says "$QB/SKILL.md" 'never on position'
-# INVARIANT: one positive per CONDITION that decides whether a zone is finished, and each
-# pattern spans the WHOLE condition rather than a recognisable fragment of it. The site is not
-# the unit of failure: Section 5 alone carries three conditions (every zone, marker form, 4a
-# sweep finished), so pinning one leaves the other two rewritable — "every" became "any" and the
-# sweep conjunct vanished while the marker positive still matched. Antecedent without consequent
-# is the same trap one level down: "look for the ticket=all line" kept matching when the
-# "unfinished" it leads to was flipped to "finished". A condition added below with no line here
-# is a visible omission. Each pattern is still as short as it can be while covering the whole
-# condition, because every positive is a hostage to rewording; `.` stands in for a backtick and
-# `..` for a bold marker, so the patterns survive SC2016 and BRE quantifier quirks alike.
-# The connective is part of the condition too: Section 5's two halves are pinned by ONE pattern
-# spanning the `**and**` between them, because two separate patterns both kept matching when the
-# `and` was changed to an `or`.
+# INVARIANT: one positive per STATUS VALUE the orchestrator branches on when deciding whether a
+# zone is finished, plus one per condition guarding a handoff. That set is CLOSED and enumerated
+# in the status-log contract block of the skill itself, so completeness is checkable against the
+# file rather than against whether anyone thought of another phrasing — a status added to the
+# contract with no line here is a visible omission a reader can spot in ten seconds.
+#
+#   ticket=all status=done           -> finished; render ⇥
+#   ticket=all status=safety-valved  -> NOT finished; render ✗, issues surfaced as deferred
+#   status=blocked                   -> NOT finished; the question gets routed
+#   no ticket=all line at all        -> NOT finished, whatever the agent reported (two sites)
+#   preflight-pass / preflight-fail  -> the orchestrator's own lines, never the verdict
+#
+# Each pattern spans a WHOLE condition, antecedent through consequent, and includes the
+# connective. Three failure modes are behind that, all found by mutation rather than reasoning:
+# a pattern starting after the quantifier matched when "every zone" became "any zone"; a pattern
+# covering only the antecedent matched when the "unfinished" it leads to was flipped to
+# "finished"; and two patterns over the halves of one condition both matched when the `and`
+# between them became an `or`. `.` stands in for a backtick and `..` for a bold marker, which
+# keeps the patterns clear of SC2016 and of BRE quantifier quirks.
+#
+# Both statements of the handoff condition are pinned. Section 5 opens by deferring to "the
+# Section 4 condition", so Section 4's sentence IS the condition and Section 5's is a restatement
+# — guarding only the restatement is this issue's own defect one level up.
+#
+# NOT pinned, deliberately: the rationale prose in dispatch-claude.md ("its report is wrong by
+# construction"). It argues FOR the rule rather than being a condition anything branches on, and
+# SKILL.md carries the instruction. Pinning rationale is where a contract test stops guarding a
+# property and starts transcribing the skill.
 says "$QB/SKILL.md" 'classify from its .ticket=all. line, wherever it sits: no .ticket=all status=done. → ..agent still working..'
 says "$QB/SKILL.md" 'ticket=all. line reads .status=done., render that zone.s header'
+says "$QB/SKILL.md" 'ticket=all status=safety-valved. means the zone did not finish its queue'
+says "$QB/SKILL.md" 'render its header with .✗. and surface its unfinished issues as deferred'
+says "$QB/SKILL.md" 'Once every zone has emitted its terminal line ..and.. its sweep has finished, proceed to Section 5'
 says "$QB/SKILL.md" 'look for that zone.s .ticket=all. line. No such line means the zone is ..unfinished, regardless of what the agent said..'
+says "$QB/SKILL.md" 'latest line is .status=blocked., that is a question still to route'
 says "$QB/SKILL.md" 'match on .ticket=all., not on position'
 says "$QB/SKILL.md" 'Once every zone has a .ticket=all. line reading .status=done. or .status=safety-valved. ..and.. its 4a sweep .when one is configured. has finished'
 says "$QB/SKILL.md" 'Look for the zone.s .ticket=all. line; no such line means unfinished, whatever the report said'
