@@ -160,10 +160,13 @@ for each branch in the group:
       || { git -C "$SCRATCH/int-<zone>" merge --abort; record SKIPPED(<N>, conflict); }
 # Repo gate on the assembled group, in the integration worktree, before the push: the branches
 # are merged here but nothing is on origin yet, so a red gate costs a re-run, not a revert.
+# The verdict must GUARD the push — a comment saying "stop" stops nothing, and an unguarded
+# push here is the red-reaches-a-reviewer outcome this gate exists to prevent.
 if [ -n "$PREFLIGHT" ]; then
     ( cd "$SCRATCH/int-<zone>" && sh -c "$PREFLIGHT" ) >"$SCRATCH/preflight-<zone>.log" 2>&1 \
-      || { tail -40 "$SCRATCH/preflight-<zone>.log"; record FAILED(<zone>, preflight); }
-      # STOP this group — do not push, do not open the PR. Other groups continue.
+      || { tail -40 "$SCRATCH/preflight-<zone>.log"; record FAILED(<zone>, preflight)
+           git -C "$MAIN" worktree remove --force "$SCRATCH/int-<zone>"
+           continue; }   # next GROUP: no push, no PR. Red gate = skipped, same as a conflict.
 fi
 git -C "$SCRATCH/int-<zone>" push -u origin "$INT"
 # Assemble the PR body: Summary + a per-issue test plan — read each issue's body AND comments first

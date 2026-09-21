@@ -159,7 +159,9 @@ batch-manifest write --run-id "$RUN_ID" \
 
 On every worker or log update, parse the line and re-render the board. If the active harness has a
 task-board primitive, update the matching issue task (`queued` → pending; `starting`/`working` →
-in progress; `complete` → completed; `blocked` → in progress with the note). When a zone's
+in progress; `complete` → completed; `blocked` → in progress with the note; `preflight-fail` →
+back to **in progress** with the failing log path, since that issue is not shippable and was
+already marked completed; `preflight-pass` and `preflight-skip` → leave the task as it is). When a zone's
 final line is `status=done`, render that zone's header with `⇥` (done, awaiting promotion); a final
 `status=safety-valved` means the zone did not finish its queue — render its header with `✗` and
 surface its unfinished issues as deferred. When a zone emits its terminal line, start that zone's
@@ -176,21 +178,42 @@ preflight, which guards against a prior run, or the runtime preflight in
 Skip this entirely when `$PREFLIGHT` is empty; nothing below changes for a repo without the key.
 
 When a zone logs its terminal line, run `$PREFLIGHT` once **per completed issue in that zone**,
-in that issue's own worktree. Background the loop as a **whole** — one backgrounded run per zone,
-sequential inside it — so the orchestrator stays responsive without putting M test suites in
-sibling worktrees in competition for the same cores and ports. Then let `Monitor` wake you on the
-log:
+in that issue's own worktree. Background the loop as a whole so the orchestrator stays responsive,
+and let `Monitor` wake you on the log.
+
+**One sweep runs at a time, across all zones.** Zones finish within minutes of each other, so
+backgrounding *per zone* would still put N suites in flight at once — and a check command that
+binds a port or a shared fixture then fails in the second zone for reasons that have nothing to do
+with the code, recording false reds on green branches. Keep a single sweep queue: if a sweep is
+already running when another zone lands, queue that zone behind it and start it when the first
+finishes. Nothing is waiting on these, so serial costs only wall clock.
 
 ```bash
+# ZONE and ZONE_LOG are this sweep's own, not whatever Section 3's loop left bound.
+ZONE=<zone>
+ZONE_LOG="$SCRATCH/queue-status/$ZONE.log"
+
 for ISSUE_NUM in <that zone's issues with status=complete>; do
-  PFLOG="$SCRATCH/queue-status/<zone>-preflight-$ISSUE_NUM.log"
-  if ( cd "$ROOT/.worktrees/$ISSUE_NUM-<slug>" && sh -c "$PREFLIGHT" ) >"$PFLOG" 2>&1; then
-    echo "$(date -u +%FT%TZ) <zone> ticket=#$ISSUE_NUM status=preflight-pass" >> "$LOG"
+  PFLOG="$SCRATCH/queue-status/$ZONE-preflight-$ISSUE_NUM.log"
+  # Resolve the worktree by glob — the loop knows the number, not the slug. A missing
+  # worktree is NOT a gate failure: recording it as one says "your code is broken" when
+  # the truth is "I could not find your code".
+  WTP="$(echo "$ROOT/.worktrees/$ISSUE_NUM"-*)"
+  if [ ! -d "$WTP" ]; then
+    echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-skip note=\"no worktree\"" >> "$ZONE_LOG"
+    continue
+  fi
+  if ( cd "$WTP" && sh -c "$PREFLIGHT" ) >"$PFLOG" 2>&1; then
+    echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-pass" >> "$ZONE_LOG"
   else
-    echo "$(date -u +%FT%TZ) <zone> ticket=#$ISSUE_NUM status=preflight-fail note=\"$PFLOG\"" >> "$LOG"
+    echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-fail note=\"$PFLOG\"" >> "$ZONE_LOG"
   fi
 done
 ```
+
+Write `$ZONE_LOG` from this sweep's own zone name. `$LOG` from Section 3 is bound **inside** the
+per-zone dispatch loop, so by the time a sweep runs it holds the last-dispatched zone's path, and
+every verdict would be filed against the wrong zone.
 
 **Per worktree, not once per zone.** Each worktree holds exactly one issue's change on top of
 `$BASE`, so a red gate names the issue that broke it. A single run over the merged result would
@@ -210,12 +233,14 @@ orchestrator's sweep is the authoritative record.
 Agents append one line per state change to `$SCRATCH/queue-status/<zone>.log`:
 
 ```
-<ISO-timestamp> <zone> ticket=<#N> status=<queued|starting|working|complete|blocked|preflight-pass|preflight-fail> [commit=<sha7>] [note="…"]
+<ISO-timestamp> <zone> ticket=<#N> status=<queued|starting|working|complete|blocked|preflight-pass|preflight-fail|preflight-skip> [commit=<sha7>] [note="…"]
 ```
 `queued` is pre-seeded by the orchestrator before dispatch; workers emit `starting`/`working`/`complete`/`blocked`.
-`preflight-pass`/`preflight-fail` are written by the **orchestrator** after the zone's terminal
-line (Section 4a), `note=` carrying the failing log's path; they appear only when `code.preflight`
-is configured. Final per-zone line: `<ts> <zone> ticket=all status=<done|safety-valved> note="…"`.
+The three `preflight-*` statuses are written by the **orchestrator** after the zone's terminal
+line (Section 4a) and appear only when `code.preflight` is configured: `preflight-fail` carries
+the failing log's path in `note=`, and `preflight-skip` means the gate could not be **run** (no
+worktree) rather than that it failed — never conflate the two, since one is a problem with the
+code and the other is a problem with the workspace. Final per-zone line: `<ts> <zone> ticket=all status=<done|safety-valved> note="…"`.
 
 ## Display format (stacked, phone-legible)
 
@@ -232,9 +257,9 @@ is configured. Final per-zone line: `<ts> <zone> ticket=all status=<done|safety-
 ```
 
 Legend: `✓` complete · `◐` working (also shown for `starting`) · `?` blocked · `○` queued ·
-`!` preflight failed · `✗` zone safety-valved · `⇥` done, awaiting promotion. One line per issue.
-A `preflight-pass` line leaves the issue's `✓` alone — the gate is only worth pixels when it
-fails.
+`!` preflight failed · `~` preflight skipped (no worktree) · `✗` zone safety-valved · `⇥` done,
+awaiting promotion. One line per issue. A `preflight-pass` line leaves the issue's `✓` alone —
+the gate is only worth pixels when it doesn't pass.
 
 ## Question routing protocol
 

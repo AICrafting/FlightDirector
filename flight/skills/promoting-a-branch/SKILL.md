@@ -73,6 +73,10 @@ WT="$(cd "$(git rev-parse --show-toplevel)" && pwd)"
 MAIN="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 
 BRANCH="$(git -C "$WT" branch --show-current)"
+# Any FILENAME built from a branch name needs the slash flattened first. `feature/12-foo`
+# in a redirect target or a --status-file path names a *directory* that does not exist, so
+# the write fails and whatever depended on it reports a failure that never happened.
+SAFE_BRANCH="$(printf '%s' "$BRANCH" | tr '/' '-')"
 STAGES="$(flight config '.code.stages')"
 ```
 
@@ -215,12 +219,18 @@ every repo that has not opted in, and their promotions are unchanged.
 ```
 PREFLIGHT="$(flight config '.code.preflight // empty')"
 if [ -n "$PREFLIGHT" ]; then
+    # $SAFE_BRANCH, not $BRANCH — Step 1 flattened the slash. A raw `feature/<N>-<slug>`
+    # here names a directory that does not exist, so the redirection fails *before* the
+    # gate runs and a PASSING gate is reported red with no output to explain it.
+    PFLOG="$SCRATCH/preflight-$SAFE_BRANCH.log"
     # Run in the branch's own worktree, by path — never rely on the shell's cwd.
-    ( cd "$WT" && sh -c "$PREFLIGHT" ) >"$SCRATCH/preflight-$BRANCH.log" 2>&1 || {
-        tail -40 "$SCRATCH/preflight-$BRANCH.log"
-        echo "preflight failed — full output: $SCRATCH/preflight-$BRANCH.log" >&2
-        # STOP. Do not merge, do not push.
-    }
+    if ( cd "$WT" && sh -c "$PREFLIGHT" ) >"$PFLOG" 2>&1; then
+        echo "preflight: passed ($PREFLIGHT)"
+    else
+        tail -40 "$PFLOG"
+        echo "preflight failed — full output: $PFLOG" >&2
+        # STOP. Do not merge, do not push. Report and hand back to the user.
+    fi
 fi
 ```
 
@@ -316,7 +326,7 @@ a `--timeout` (default 900s) rather than polling forever:
 
 ```
 flight ci watch --pr "$PR_NUM" \
-   --status-file "$SCRATCH/ls-ci-$BRANCH.json"
+   --status-file "$SCRATCH/ls-ci-$SAFE_BRANCH.json"   # flattened: a raw $BRANCH has a slash in it
 ```
 
 Read the verdict off the `status=` field of the last line, **not** off the exit code — `ci watch`
