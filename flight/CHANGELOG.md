@@ -30,6 +30,21 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
+- **The repo's own test suite runs in parallel** (#212). `scripts/run-tests.sh` ran its
+  `scripts/tests/*.test.sh` one at a time, which made the Windows CI leg ~78% of the test
+  workflow's wall clock: a median 488s against 112s for macOS and ~72s for the two Linux legs,
+  and the slowest leg in 38 of 46 runs. The cause was not the setup (checkout, `setup-python`
+  and the `jq` download together came to 7s of a 618s run) and not slow hardware: 28 unrelated
+  test files were each 19-29x their Linux time, which is per-process cost. MSYS has no `fork()`,
+  so every spawn is a `CreateProcess` plus an address-space copy, and these tests spawn
+  constantly. Width is the one lever that helps every leg at once, so files now run concurrently,
+  each output buffered and flushed whole on completion. Locally the suite went from 171s to 51s.
+  `ci-watch.test.sh` is additionally split into one job per backend, because its timeout cases
+  wait on a real clock and it would otherwise set the floor for the whole run; running that file
+  directly still covers all three backends. `TEST_JOBS=1` restores the serial path for debugging,
+  and `TEST_JOBS=N` picks a width (default: cores, capped at 8). Nothing a consumer of the plugin
+  calls changes; this is the repo's own CI.
+
 - **Documented that the terminal stage doesn't have to close the issue** (#154, user-submitted).
   Plenty of pipelines ship *past* their last branch: merging `main` deploys to dev, while preprod
   and prod are deployment approvals on the same workflow run, days later, with no branch of their

@@ -85,8 +85,22 @@ There are three distinct layers — keep them straight:
 
 ```bash
 scripts/run-checks.sh    # lint + signature checks (what the pre-push hook runs)
-scripts/run-tests.sh     # all scripts/tests/*.test.sh
+scripts/run-tests.sh     # all scripts/tests/*.test.sh, in parallel
 ```
+
+Unit tests run in parallel, since each test file builds its own `mktemp -d` sandbox.
+Each file's output is buffered and flushed whole when it finishes, so blocks stay
+contiguous, but they arrive in **completion order, not alphabetical**. Two knobs:
+
+```bash
+TEST_JOBS=1 scripts/run-tests.sh   # serial; reach for this first when a failure
+                                   # looks like it depends on what else was running
+TEST_JOBS=4 scripts/run-tests.sh   # a specific width (default: cores, capped at 8)
+```
+
+`ci-watch.test.sh` is split into one job per backend (`CI_WATCH_BACKENDS`), because
+its timeout cases wait on a real clock and it would otherwise set the floor for the
+whole run. Running that file directly still covers all three backends.
 
 `lint.sh` can only run the linters you have: install `yamllint` and `shellcheck` first
 (see [Prerequisites](#prerequisites)), or the local lint pass covers less than CI's does.
@@ -112,6 +126,11 @@ shellcheck) and **`tests`** (`run-tests.sh`).
 (`run-checks.sh` runs each that is executable). A unit test is any `*.test.sh` in
 `scripts/tests/` (`run-tests.sh` runs each). Keep unit tests out of `scripts/checks/`
 — the pre-push path is for cleanliness, not for testing individual scripts.
+
+A new unit test must be **self-contained**: build a `mktemp -d` sandbox, touch nothing
+under `$HOME` or the repo, and never `git config --global`. The runner runs files
+concurrently, so a test that reaches outside its sandbox will fail intermittently and
+blame whichever test it collided with. `run-tests.test.sh` covers the runner itself.
 
 **Executable bit — important.** This repo has `core.fileMode = false`, so a plain
 `chmod +x` is **not** recorded by git; a fresh clone would get a `644` file and
