@@ -176,8 +176,9 @@ that leaves it out — this is the one key whose absence is the whole of its uns
   checkout — a hard-coded absolute path defeats the point.
   **Exit code is the verdict:** zero passes, non-zero halts the operation and the failing output
   is shown. Nothing parses stdout.
-  **Where it runs:** `promoting-a-branch` before the merge on a `direct` hop and before the
-  source branch is pushed on a `pr` hop; `promoting-branches` before each branch's merge (a
+  **Where it runs:** `promoting-a-branch` before the merge on a `direct` hop and before
+  `pr open` on a `pr` hop (that hop never pushes the source branch — it expects it on origin
+  already); `promoting-branches` before each branch's merge (a
   failure skips that branch and the group continues) or before the integration branch is pushed;
   `queue-batches` from the **orchestrator** once a zone finishes, per issue worktree.
   The command is the repo's problem, so a repo on Windows writes one that works there. It is a

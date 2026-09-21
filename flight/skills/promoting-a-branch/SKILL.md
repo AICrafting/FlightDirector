@@ -252,9 +252,10 @@ On a failure, show the tail and the log path, **stop**, and leave the branch unm
 belongs on the feature branch. On a pass, say so in one line (*"preflight `<cmd>`: passed"*) so
 the promotion report records that the gate ran; when the key is unset, say nothing.
 
-A `direct` hop runs this before the merge below. A `pr` hop runs it before `$BRANCH` is pushed
-and before `pr open` (see the source guard in the `pr` block), so a red gate never reaches CI or
-a reviewer. It does not replace CI on a `pr` hop; it front-runs it.
+A `direct` hop runs this before the merge below. A `pr` hop runs it before `pr open` — that hop
+does not push `$BRANCH` at all, it requires the branch to be on origin already (see the source
+guard in the `pr` block, which tells you to push first rather than pushing for you) — so a red
+gate never reaches CI or a reviewer. It does not replace CI on a `pr` hop; it front-runs it.
 
 **Case 1 — `<target>` is checked out in a worktree** (the usual case for `feature → stages[0]`,
 where the main checkout sits on `develop`): merge in that worktree's path (usually `$MAIN`).

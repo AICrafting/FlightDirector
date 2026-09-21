@@ -22,7 +22,7 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   until now the only gate on `feature → develop` was a human saying "promote", and batch agents
   were told to "run the repo's test command if one exists", leaving the command to each agent's
   judgment every time. `promoting-a-branch` runs it after the freshness check and before the
-  merge (or before the source branch is pushed on a `pr` hop); `promoting-branches` runs it per
+  merge (or before `pr open` on a `pr` hop); `promoting-branches` runs it per
   branch before that branch's merge, so a red gate is a skip and the clean branches still ship;
   `queue-batches` runs it from the **orchestrator** once a zone finishes, once per issue
   worktree, because a returned agent's shell is gone and cannot report a backgrounded result.
