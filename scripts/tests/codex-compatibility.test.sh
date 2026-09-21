@@ -33,8 +33,8 @@ says "$QB/SKILL.md" "own log watcher"
 # The terminal line is found by its ticket=all marker, never by position: with code.preflight
 # configured the orchestrator appends 4a lines after it. This is a CLASS check, not a phrase one
 # — no instruction anywhere in the skill may key on a line being last, so the skill states the
-# property as "never on position" and these two stay blanket. A legitimate need to write "last
-# line" here would mean the rule has an exception, which is the thing #207 exists to prevent.
+# property as "never on position" and the three below stay blanket. A legitimate need to write
+# "last line" here would mean the rule has an exception, which is what #207 exists to prevent.
 if says "$QB/SKILL.md" "last line"; then exit 1; fi
 if says "$QB/SKILL.md" "final line"; then exit 1; fi
 if says "$QB/SKILL.md" "ends in a terminal line"; then exit 1; fi
