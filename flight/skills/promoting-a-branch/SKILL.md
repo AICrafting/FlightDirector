@@ -139,18 +139,16 @@ records as deliberately not done is a deferral, however it happens to be phrased
 what this rule exists to catch, and it matches none of them.
 
 Every deferred item needs a **live tracker** — an `#N` you have verified *open*, or an issue you
-file right then. `issues get` succeeds on a closed issue, so check state against the open list
-instead — fetched once into a variable, then matched with a here-string rather than piped into
-`grep -q` (a pipe into an early-exiting reader trips SC2337 under `set -o pipefail`):
+file right then. `issues get` reports state as field 3, normalized to `open`/`closed` on every
+backend (#205):
 
 ```
-OPEN="$(flight issues list --state open --limit 500 | cut -f1)"
-grep -qx "<N>" <<<"$OPEN"        # exit 0 → open, deferral is tracked; non-zero → HALT
+IFS=$'	' read -r _ _ STATE <<<"$(flight issues get --number "<N>")"
+[ "$STATE" = open ]              # true → open, deferral is tracked; false → HALT
 ```
 
-The `--limit` must stay comfortably above the repo's open-issue count, and `issues list` pages
-underneath it (#149) rather than clamping to the server's per-page cap. Don't "simplify" it back
-down: an open issue past the cap would read as closed and halt a PR that was correctly tracked.
+A number that doesn't exist makes `issues get` exit non-zero and leaves `$STATE` empty, so an
+invented `#N` halts on the same test rather than slipping through.
 
 A closed `#N` is a failure, not a pass. And **an issue this PR resolves does not count as the
 tracker** — not even on a `Ready #N` hop where it stays open for now. It closes when the work

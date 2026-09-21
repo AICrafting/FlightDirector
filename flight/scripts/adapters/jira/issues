@@ -56,9 +56,15 @@ case "$verb" in
       *) die "issues get: unknown arg '$1'" ;;
     esac; done
     [ -n "$number" ] || die "issues get: --number required"
-    _api GET "/rest/api/3/issue/${number}?fields=summary,description" \
+    # `status` joins the field list for the state column. Jira has no open/closed
+    # flag, so the status CATEGORY decides — the same rule `list` (statusCategory
+    # != Done) and `close`/`reopen` (transition by category key) already use, so a
+    # per-project workflow with custom status names maps correctly without config.
+    _api GET "/rest/api/3/issue/${number}?fields=summary,description,status" \
       | jq -r "$ADF_JQ"'
-          ([.key, (.fields.summary // "")] | @tsv), "",
+          ([.key, (.fields.summary // ""),
+            (if .fields.status.statusCategory.key == "done" then "closed" else "open" end)]
+           | @tsv), "",
           ((.fields.description // "") | if type=="string" then . else adf_to_text end)'
     ;;
 

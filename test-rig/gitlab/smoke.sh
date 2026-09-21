@@ -46,6 +46,10 @@ cols="$(head -1 <<<"$OUT" | awk -F'\t' '{print NF}')"
 GET="$(lsp issues get --number "$N")"
 grep -q "\[rig\] smoke $TS" <<<"$GET" && ok "get returns title line" || no "get returns title line"
 grep -q "hello body" <<<"$GET" && ok "get returns body" || no "get returns body"
+# GitLab's wire value is ; the adapter must normalize it (#205).
+# GitLab's wire value for an open issue is `opened`; the adapter normalizes it (#205).
+ST="$(cut -f3 < <(head -1 <<<"$GET"))"
+[ "$ST" = open ] && ok "get normalizes GitLab's 'opened' to open" || no "get normalizes 'opened'" "got '$ST'"
 
 echo "── labels resolve ──"
 id="$(lsp labels resolve --name "status/to test" | awk -F'\t' '{print $2}')"

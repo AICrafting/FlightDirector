@@ -44,7 +44,11 @@ cols="$(head -1 <<<"$OUT" | awk -F'\t' '{print NF}')"
 [ "$cols" = 3 ] && ok "list rows are 3-col TSV" || no "list rows are 3-col TSV" "got $cols cols"
 
 GET="$(lsp issues get --number "$K")"
-grep -q "\[rig\] smoke $TS" <<<"$GET" && ok "get returns key⇥summary line" || no "get returns key⇥summary line" "$GET"
+grep -q "\[rig\] smoke $TS" <<<"$GET" && ok "get returns key⇥summary⇥state line" || no "get returns key⇥summary⇥state line" "$GET"
+# Jira has no state field: the status CATEGORY decides (#205).
+# Jira has no state field: `.fields.status.statusCategory.key` decides (#205).
+ST="$(cut -f3 < <(head -1 <<<"$GET"))"
+[ "$ST" = open ] && ok "get maps a non-done status category to open" || no "get maps status category to open" "got '$ST'"
 grep -q "hello body" <<<"$GET" && ok "get returns body (ADF→text)" || no "get returns body" "$GET"
 grep -q -- "- item one" <<<"$GET" && ok "get renders a bullet list from ADF" || no "get renders a bullet list" "$GET"
 
