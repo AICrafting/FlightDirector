@@ -160,10 +160,19 @@ for each branch in the group:
       || { git -C "$SCRATCH/int-<zone>" merge --abort; record SKIPPED(<N>, conflict); }
 # Repo gate on the assembled group, in the integration worktree, before the push: the branches
 # are merged here but nothing is on origin yet, so a red gate costs a re-run, not a revert.
+# The verdict must GUARD the push — a comment saying "stop" stops nothing, and an unguarded
+# push here is the red-reaches-a-reviewer outcome this gate exists to prevent.
 if [ -n "$PREFLIGHT" ]; then
     ( cd "$SCRATCH/int-<zone>" && sh -c "$PREFLIGHT" ) >"$SCRATCH/preflight-<zone>.log" 2>&1 \
-      || { tail -40 "$SCRATCH/preflight-<zone>.log"; record FAILED(<zone>, preflight); }
-      # STOP this group — do not push, do not open the PR. Other groups continue.
+      || { tail -40 "$SCRATCH/preflight-<zone>.log"; record FAILED(<zone>, preflight)
+           # Take the branch as well as the worktree. $INT was never pushed, so there is no
+           # PR for cleaning-up-branches to collect it behind — a bare `worktree remove`
+           # strands a local batch/* ref forever. It also frees the name: if <short> derives
+           # from the zone rather than the run, the re-promote after the group is fixed would
+           # otherwise hit `worktree add -b "$INT"` with "branch already exists" and halt.
+           git -C "$MAIN" worktree remove --force "$SCRATCH/int-<zone>"
+           git -C "$MAIN" branch -D "$INT"
+           continue; }   # next GROUP: no push, no PR. Red gate = skipped, same as a conflict.
 fi
 git -C "$SCRATCH/int-<zone>" push -u origin "$INT"
 # Assemble the PR body: Summary + a per-issue test plan — read each issue's body AND comments first

@@ -36,9 +36,20 @@ Record the baseline test status for {base_branch}. The repo's check command is:
 {preflight}
 ```
 
-Run **exactly that** — not a subset you pick from memory — and run it in the **foreground**.
-Your shell does not outlive your return, so a backgrounded run has nothing left to write its
-verdict into. You'll report deltas at the end.
+Run **exactly that** — not a subset you pick from memory — from `{repo_root}` (no issue worktree
+exists yet), and run it in the **foreground**:
+
+```bash
+( cd "{repo_root}" && sh -c '<the command above>' )
+```
+
+Never rely on where your shell happens to be sitting. Your shell also does not outlive your
+return, so a backgrounded run has nothing left to write its verdict into. You'll report deltas at
+the end.
+
+Sibling zone agents run this same baseline against `{repo_root}` at roughly the same moment. If
+the command writes build artifacts into that tree, say so in your report rather than trusting the
+numbers — you may be reading another zone's output.
 
 If that block reads `None configured.`, this repo names no gate: run its own test command if one
 is discoverable, and say in your final report which command you used.

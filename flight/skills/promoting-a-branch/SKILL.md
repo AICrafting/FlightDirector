@@ -73,6 +73,10 @@ WT="$(cd "$(git rev-parse --show-toplevel)" && pwd)"
 MAIN="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 
 BRANCH="$(git -C "$WT" branch --show-current)"
+# Any FILENAME built from a branch name needs the slash flattened first. `feature/12-foo`
+# in a redirect target or a --status-file path names a *directory* that does not exist, so
+# the write fails and whatever depended on it reports a failure that never happened.
+SAFE_BRANCH="$(printf '%s' "$BRANCH" | tr '/' '-')"
 STAGES="$(flight config '.code.stages')"
 ```
 
@@ -213,31 +217,59 @@ run that a STOP was going to discard. Skip this block entirely when the key is a
 every repo that has not opted in, and their promotions are unchanged.
 
 ```
+GATE_OK=yes                    # no gate configured == nothing to fail; stays yes
 PREFLIGHT="$(flight config '.code.preflight // empty')"
 if [ -n "$PREFLIGHT" ]; then
+    # $SAFE_BRANCH, not $BRANCH — Step 1 flattened the slash. A raw `feature/<N>-<slug>`
+    # here names a directory that does not exist, so the redirection fails *before* the
+    # gate runs and a PASSING gate is reported red with no output to explain it.
+    PFLOG="$SCRATCH/preflight-$SAFE_BRANCH.log"
     # Run in the branch's own worktree, by path — never rely on the shell's cwd.
-    ( cd "$WT" && sh -c "$PREFLIGHT" ) >"$SCRATCH/preflight-$BRANCH.log" 2>&1 || {
-        tail -40 "$SCRATCH/preflight-$BRANCH.log"
-        echo "preflight failed — full output: $SCRATCH/preflight-$BRANCH.log" >&2
-        # STOP. Do not merge, do not push.
-    }
+    if ( cd "$WT" && sh -c "$PREFLIGHT" ) >"$PFLOG" 2>&1; then
+        echo "preflight: passed ($PREFLIGHT)"
+    else
+        tail -40 "$PFLOG"
+        echo "preflight failed — full output: $PFLOG" >&2
+        GATE_OK=no             # every merge and push below is guarded on this
+    fi
 fi
 ```
+
+`$GATE_OK` is a variable rather than a `# STOP` comment on purpose, and for the same reason
+`promoting-branches` uses a `continue`: a comment stops nothing. The risk here is milder — the
+merge lives in a *later* fenced block, so nothing falls through within one shell the way an
+unguarded `push` on the next line would — but the two skills should not apply opposite reasoning
+to the same construct.
+
+**There are three sites, and the `pr` one is the site that matters.** Case 1 and Case 2 below are
+both `direct`-hop merges; `pr` is the commoner configuration, so a gate honoured only in the
+`direct` cases is a gate most repos never actually have. All three guard on `${GATE_OK:-no}` —
+defaulting to `no`, so an unset variable fails closed — and all three **say** why they stopped.
+A guard that declines in silence is indistinguishable from a promotion that quietly did nothing,
+which is how a red gate gets mistaken for an idle run.
 
 On a failure, show the tail and the log path, **stop**, and leave the branch unmerged — the fix
 belongs on the feature branch. On a pass, say so in one line (*"preflight `<cmd>`: passed"*) so
 the promotion report records that the gate ran; when the key is unset, say nothing.
 
-A `direct` hop runs this before the merge below. A `pr` hop runs it before `$BRANCH` is pushed
-and before `pr open` (see the source guard in the `pr` block), so a red gate never reaches CI or
-a reviewer. It does not replace CI on a `pr` hop; it front-runs it.
+A `direct` hop runs this before the merge below. A `pr` hop runs it before `pr open` — that hop
+does not push `$BRANCH` at all, it requires the branch to be on origin already (see the source
+guard in the `pr` block, which tells you to push first rather than pushing for you) — so a red
+gate never reaches CI or a reviewer. It does not replace CI on a `pr` hop; it front-runs it.
 
 **Case 1 — `<target>` is checked out in a worktree** (the usual case for `feature → stages[0]`,
 where the main checkout sits on `develop`): merge in that worktree's path (usually `$MAIN`).
 
 ```
 # Merge and push without touching your current (feature) worktree.
-git -C "$MAIN" merge --no-ff "$BRANCH" && git -C "$MAIN" push
+# $GATE_OK is Step 4b's verdict (always `yes` when no gate is configured). The
+# default is `no`, so an *unset* GATE_OK fails closed — but it must still say so:
+# a guard that declines silently looks identical to a promotion that did nothing.
+if [ "${GATE_OK:-no}" = yes ]; then
+    git -C "$MAIN" merge --no-ff "$BRANCH" && git -C "$MAIN" push
+else
+    echo "preflight gate is not green — not merging, not pushing" >&2
+fi
 ```
 
 **Case 2 — `<target>` is NOT checked out in any worktree** (e.g. promoting to a `main` stage
@@ -250,8 +282,12 @@ Fork the throwaway worktree from **`origin/<target>`**, not from the local ref, 
 ```
 git -C "$MAIN" fetch -q origin "<target>"
 git -C "$MAIN" worktree add --detach "$SCRATCH/promote-<target>-$$" "origin/<target>"
-git -C "$SCRATCH/promote-<target>-$$" merge --no-ff "$BRANCH" && \
-    git -C "$SCRATCH/promote-<target>-$$" push origin "HEAD:<target>"
+if [ "${GATE_OK:-no}" = yes ]; then
+    git -C "$SCRATCH/promote-<target>-$$" merge --no-ff "$BRANCH" && \
+        git -C "$SCRATCH/promote-<target>-$$" push origin "HEAD:<target>"
+else
+    echo "preflight gate is not green — not merging, not pushing" >&2
+fi
 git -C "$MAIN" worktree remove "$SCRATCH/promote-<target>-$$"
 # Bring the (unchecked-out) local ref back in line with what you just pushed:
 git -C "$MAIN" fetch -q origin "<target>:<target>"
@@ -282,9 +318,13 @@ KEYWORD=Ready; [ "$CLOSES" = true ] && KEYWORD=Closes
 ```
 
 The PR is built from the **pushed** branch tip, not your local working copy — so **run the Step
-4b preflight gate here**, before that push and before `pr open`. A red gate stops the promotion
-with the branch unpushed; there is no point spending a CI queue on a failure a local command
-just named.
+4b preflight gate here**, before `pr open`. A red gate stops the promotion with no PR opened;
+there is no point spending a CI queue, or a reviewer, on a failure a local command just named.
+
+Note what this hop does *not* do: it never pushes `$BRANCH`. The only pushes in this skill are
+the two `direct`-hop sites above. A `pr` hop requires the branch to be on origin already — the
+source guard below says "push first" rather than pushing for you — so on a red gate the branch
+stays on origin exactly as it was, and what the gate prevents is the **PR**, not the push.
 
 Before opening the PR, verify local `$BRANCH` isn't ahead of the remote — otherwise the PR (and
 the CI you'd watch) silently omits your latest commit:
@@ -299,10 +339,18 @@ fi
 ```
 
 ```
-PR="$(flight pr open --head "$BRANCH" --base <target> \
-        --title "…" --body-file "$SCRATCH/pr-body.md" \
-        --model <your-model-id>)"                          # → number⇥url; body gets signed
-PR_NUM="$(printf '%s' "$PR" | cut -f1)"
+# Same guard as the direct-hop merge sites, and on this hop it is the one that fires:
+# `pr` is the common configuration, so a gate honoured only in the `direct` cases is a
+# gate most repos never actually have. The `pr open` must sit INSIDE the guard — a bare
+# `if … fi` with a "# STOP" comment in it is the defect this skill already fixed twice.
+if [ "${GATE_OK:-no}" != yes ]; then
+    echo "preflight gate is not green — not opening the PR" >&2
+else
+    PR="$(flight pr open --head "$BRANCH" --base <target> \
+            --title "…" --body-file "$SCRATCH/pr-body.md" \
+            --model <your-model-id>)"                      # → number⇥url; body gets signed
+    PR_NUM="$(printf '%s' "$PR" | cut -f1)"
+fi
 ```
 
 A typo or a late test-plan edit does **not** need the web UI: correct an already-open PR with
@@ -316,7 +364,7 @@ a `--timeout` (default 900s) rather than polling forever:
 
 ```
 flight ci watch --pr "$PR_NUM" \
-   --status-file "$SCRATCH/ls-ci-$BRANCH.json"
+   --status-file "$SCRATCH/ls-ci-$SAFE_BRANCH.json"   # flattened: a raw $BRANCH has a slash in it
 ```
 
 Read the verdict off the `status=` field of the last line, **not** off the exit code — `ci watch`
