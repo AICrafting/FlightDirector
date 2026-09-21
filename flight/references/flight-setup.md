@@ -155,6 +155,8 @@ Backend, coordinates, and preferences, across two independent axes:
 
 The repo's own check command, run before work is merged or pushed. Nothing changes for a repo
 that leaves it out — this is the one key whose absence is the whole of its unset behaviour.
+`setting-up-a-repo` offers it; a declined offer is recorded as `"preflight": false`, which every
+reader treats exactly like an absent key.
 
 ```jsonc
 "code": {

@@ -28,6 +28,9 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   worktree, because a returned agent's shell is gone and cannot report a backgrounded result.
   **Absent by default**: with no `code.preflight` in the config every one of those steps is
   skipped and behaviour is exactly what it was, which is every repo configured before this.
+  `setting-up-a-repo` offers it (#229): it suggests the check command the repo already uses and
+  records a declined offer as `"preflight": false`, which behaves exactly like leaving it out, so
+  an existing repo picks the question up on its next setup re-run.
 
 - **A repo can nominate a starting status for newly filed issues** (#193). `setting-up-a-repo`
   now offers it: a freshly filed issue gets a `status/*` label so a board can tell "nobody has

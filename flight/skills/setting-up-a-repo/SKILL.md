@@ -75,6 +75,7 @@ explicit `false` rather than left out.
 | Worker model for `queue-batches` | `code.queueBatches.defaultModel` | Step 4 |
 | Prompt ledger | `code.promptLog.enabled` | Step 4 |
 | Starting status for new issues | `labels.status.new` (a label name, or `false` if declined) | Step 4 |
+| Repo check command (preflight gate) | `code.preflight` (a command string, or `false` if declined) | Step 4 |
 
 A question added to this skill later gets a row here and follows the same rule; the rule is the
 contract, not this list. Run the gap check **before** Step 5 (labels) so the config is complete
@@ -283,6 +284,23 @@ If yes, add `"new": "<their name>"` to `labels.status` so Steps 6–8 create the
 rule is that a declined option is recorded, not left out, so the next re-run doesn't ask again;
 everything that reads `labels.status` ignores non-string values. Either way nothing else changes:
 it is a status like any other, so the first `set-status` (normally `in-progress`) removes it.
+
+**Offer a repo check command — the preflight gate (opt-in).** Skip this if `code.preflight` is
+already present (gap check, Step 0). Otherwise look for the command the repo already uses to check
+itself — a `scripts/run-checks.sh` or `scripts/test.sh`, a `test` script in `package.json`, a
+`check`/`test` target in a `Makefile`, what the CI workflow runs — and ask: *"Should flight run a
+check command before it merges work? Without one, a `direct` hop (usually `feature → develop`) has
+no gate but you saying 'promote'. Suggested: `<the command you found>`."* Offer a suggestion only
+when you actually found one; otherwise ask what they run, and make clear "none" is a fine answer.
+
+If yes, write `"preflight": "<command>"` under `code`. Before recording it, check the two things
+the gate depends on: the command runs **from a worktree root, not just the main checkout** (no
+hard-coded absolute paths), and its **exit code is the verdict** (zero passes, anything else
+stops the merge — nothing parses its output). `promoting-a-branch`, `promoting-branches` and
+`queue-batches` then run it before merging; a `pr` hop still watches CI afterwards. **If no,
+write `"preflight": false`** — recorded like every other declined option; every reader uses
+`.code.preflight // empty`, so `false` behaves exactly like leaving it out. Full semantics:
+[flight-setup.md](../../references/flight-setup.md) → *Repo preflight gate*.
 
 **Leave the user's other hooks alone.** Flight's hooks are plugin-bundled and write only their
 own file, so any prompt-related hook the user already runs (in `.claude/settings.local.json`,
