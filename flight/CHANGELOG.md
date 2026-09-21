@@ -33,12 +33,14 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   the repo: the old issue settings, inherited code coordinates and the complete label map
   (including a `new` starting status as a string, `false`, or absent) become one default
   tracker; a legacy `config.local.json` override and the gitignored `secrets.json` are converted
-  on each machine, without local values reaching the committed file and without printing a
-  token; pre-schema-3 `feature/<N>-…` branches and batch manifests are recorded in
+  on each machine — onto the tracker the repo migrated from (`legacyIssueTracker`), even if the
+  default has changed since — without local values reaching the committed file and without
+  printing a token; pre-schema-3 `feature/<N>-…` branches and batch manifests are recorded in
   `.flightdirector/batches/work-items/identities.json` (already gitignored by setup) as belonging
   to the tracker that was the default at migration, so changing the default later never
-  re-points old work. The migration validates everything before writing, writes the committed
-  config last, and is safe to re-run or resume; a repeat run changes nothing.
+  re-points old work. The migration runs every check before its first write (a refusal leaves
+  every file untouched), writes the committed config last, and is safe to re-run; a repeat run
+  changes nothing.
 
   **Compatibility:**
   - **Update every clone and harness together.** Commit the migrated `config.json` only once
@@ -46,12 +48,21 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
     migration leaves an `issues.backend: "requires-newer-flight"` stub so they stop with a
     "no 'issues' adapter" error instead of acting on the code repository, but they cannot use
     the trackers. This Flight in turn refuses any config newer than schema 3.
-  - **Issues on the code repository keep sharing the code token**, including `LS_TOKEN` /
-    `FLIGHT_TOKEN` / `FORGEJO_TOKEN` environment overrides, so CI and env-token setups work
-    unchanged (the tracker gets `credentialRef: "code"`). A tracker in a different repository
-    or backend, or one that had its own issue token, gets its own credential under
-    `secrets.issueTrackers.<REF>`, which environment tokens never override. On a different host
-    with no issue token, nothing is copied and reconcile says the tracker needs one.
+  - **Issues on the code host keep sharing the code token** — the code repository or a sibling
+    repository on the same backend and api host — including `LS_TOKEN` / `FLIGHT_TOKEN` /
+    `FORGEJO_TOKEN` environment overrides, so CI and env-token setups work unchanged (the
+    tracker gets `credentialRef: "code"`). A tracker that had its own issue token, or one on
+    another host, gets its own credential under `secrets.issueTrackers.<REF>`, which environment
+    tokens never override; the issue token is moved there, and the code token is never copied.
+    On another host with no issue token, reconcile says the tracker needs one.
+  - **A `config.local.json` that only overrides `code` coordinates no longer steers the issue
+    tracker.** Before, the issues axis followed a local code `api`/`owner` override; now the
+    tracker keeps its committed coordinates and reconcile says so once. To point a tracker at a
+    local route, put a complete `issueTrackers` array in `config.local.json` (arrays replace
+    wholesale — a local array missing a tracker hides it, and every tracker-routed command warns).
+  - A clone whose legacy local override or issue credential cannot be attached safely — the
+    config has no `legacyIssueTracker`, it names no configured tracker, or the credential was
+    used with another host — is refused with a repairable error, nothing changed.
   - `issues list` without `--all-trackers`, and every existing unqualified command, keep their
     exact output and act on the default tracker. `auth check --axis issues` checks the default
     tracker.
