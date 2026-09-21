@@ -87,4 +87,21 @@ says "$QB/references/dispatch-claude.md" 'ticket=all'
 if says "$QB/SKILL.md" run_in_background; then exit 1; fi
 says "$QB/references/dispatch-claude.md" 'dies with'
 
+# #228: promoting-a-branch's merge and `pr open` sites guard on ${GATE_OK:-no}, which fails
+# closed, so the `yes` default must be bound where every promotion passes through it: Step 1.
+# It once lived inside Step 4b, a block the same skill said to skip when `code.preflight` is
+# absent, and an agent that skipped it as told was refused a merge by a gate its repo never
+# configured. The property is ORDER, not wording, so it is checked structurally: exactly one
+# `GATE_OK=yes` assignment, and it sits above the Step 4b heading.
+PAB="$REPO_ROOT/flight/skills/promoting-a-branch/SKILL.md"
+awk '
+    { sub(/\r$/, "") }
+    /^#### Step 4b/ { in4b = 1 }
+    /^GATE_OK=yes/  { if (in4b) late++; else early++ }
+    END { exit !(early == 1 && late == 0) }
+' "$PAB"
+# And 4b may never again be described as the thing to skip while it owns the default.
+if says "$PAB" 'Skip this block entirely'; then exit 1; fi
+says "$PAB" 'GATE_OK. already reads .yes. from Step 1'
+
 printf 'Codex compatibility contract tests passed\n'

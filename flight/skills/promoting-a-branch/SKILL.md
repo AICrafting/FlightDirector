@@ -77,6 +77,10 @@ BRANCH="$(git -C "$WT" branch --show-current)"
 # in a redirect target or a --status-file path names a *directory* that does not exist, so
 # the write fails and whatever depended on it reports a failure that never happened.
 SAFE_BRANCH="$(printf '%s' "$BRANCH" | tr '/' '-')"
+# Step 4b's verdict, bound HERE and not in 4b: a repo with no `code.preflight` has nothing to
+# run there, and a default that lives inside a block nobody runs is no default at all. Every
+# merge and `pr open` below guards on this; 4b can only ever turn it to `no`.
+GATE_OK=yes
 STAGES="$(flight config '.code.stages')"
 ```
 
@@ -84,6 +88,13 @@ STAGES="$(flight config '.code.stages')"
   already the last stage).
 - Otherwise `BRANCH` is a feature branch → target is `stages[0]`.
 - An explicit `--to <stage>` from the user overrides inference (must be the immediate next stage).
+
+**These bindings have to reach every later block.** If your harness starts a fresh shell for each
+tool call, restate them at the top of each block you run; nothing persists them for you. Take
+care with `GATE_OK`: carry it at the value Step 4b left it, never back at this default. A lost
+`$MAIN` fails with an obvious git error, but a lost `GATE_OK` fails closed as *"preflight gate is
+not green"*, which reads like a real red gate on a repo that may not even configure one. If you
+see that message and Step 4b never printed a failure, the variable was dropped, not the gate.
 
 Read the target hop's `merge` (`direct`|`pr`), `gate` (`pre-merge`|`post-merge-qa`, default
 `pre-merge`) and `strategy` (`merge`|`squash`|`rebase`, **default `merge`**) from that stage
@@ -213,11 +224,13 @@ thing to discover any drift.
 
 If the repo configures `code.preflight`, run it now. It goes **after** Step 4a deliberately: a
 diverged target stops the promotion in seconds, and there is no sense spending minutes on a test
-run that a STOP was going to discard. Skip this block entirely when the key is absent — that is
-every repo that has not opted in, and their promotions are unchanged.
+run that a STOP was going to discard. When the key is absent the block below does nothing, and
+skipping it outright is just as safe: `GATE_OK` already reads `yes` from Step 1, so no part of
+this step has to run for an ungated repo to merge. That is every repo that has not opted in, and
+their promotions are unchanged.
 
 ```
-GATE_OK=yes                    # no gate configured == nothing to fail; stays yes
+# GATE_OK is already `yes` (Step 1). Nothing here sets it green; a red gate sets it to `no`.
 PREFLIGHT="$(flight config '.code.preflight // empty')"
 if [ -n "$PREFLIGHT" ]; then
     # $SAFE_BRANCH, not $BRANCH — Step 1 flattened the slash. A raw `feature/<N>-<slug>`
@@ -262,9 +275,10 @@ where the main checkout sits on `develop`): merge in that worktree's path (usual
 
 ```
 # Merge and push without touching your current (feature) worktree.
-# $GATE_OK is Step 4b's verdict (always `yes` when no gate is configured). The
-# default is `no`, so an *unset* GATE_OK fails closed — but it must still say so:
-# a guard that declines silently looks identical to a promotion that did nothing.
+# $GATE_OK is `yes` from Step 1 unless Step 4b's gate turned it `no`. The `:-no`
+# default means a GATE_OK that got *lost* on the way here fails closed — but it must
+# still say so: a guard that declines silently looks identical to a promotion that
+# did nothing.
 if [ "${GATE_OK:-no}" = yes ]; then
     git -C "$MAIN" merge --no-ff "$BRANCH" && git -C "$MAIN" push
 else
