@@ -199,6 +199,10 @@ Per tracker entry:
   - `"code"`: **share the code credential**, resolved exactly as the code axis resolves it
     (`LS_TOKEN`/`FLIGHT_TOKEN`/`FORGEJO_TOKEN`, then `secrets.code`). Allowed only when the
     tracker's `backend` and `api` host equal `code`'s — a token is never sent to another system.
+    Owner and repo may differ (a sibling repository on the code host). When a
+    `config.local.json` moves `code` to another route on one machine (a tunnel, a LAN address),
+    a tracker on the committed code host stays valid; it keeps using the committed host unless
+    that machine adds a complete local `issueTrackers` array.
 - **`labels`** — this tracker's role → label-name map (the old top-level `labels`, now per
   tracker): status roles including `new` (a string = configured, `false` = declined, absent =
   never asked — #193), model labels, and any role of your own. An adapter only ever sees the
@@ -234,27 +238,38 @@ suggestions and the configured list — flight never guesses a target. See
 1. **`config.json`** (tracked): the old effective issue axis — `issues` fields over the code
    coordinates they inherited — becomes one default tracker; the whole `labels` map moves into
    it (unknown roles, `new` as string/`false`/absent, explicit `false`/`null` values all kept);
-   code settings stay on `code`. It gets `credentialRef: "code"` when the issues lived on the code
-   repository and there was no separate issue token, so env-token and CI setups keep working;
-   otherwise its own credential. `schemaVersion` becomes 3 and only the running harness's stamp
-   changes. Commit it — together with a Flight update for every clone and harness.
-2. **`config.local.json`** (per machine): a legacy local `issues`/`labels` override — or a local
-   code-coordinate override the default tracker used to inherit — becomes a complete local
-   `issueTrackers` array (arrays replace wholesale, so a partial entry would erase the tracked
-   trackers). An override that changes nothing about the trackers gets no array and is left
-   byte-identical. Local values never reach the tracked file.
-3. **`secrets.json`** (per machine): the legacy `issues` credential moves to
-   `issueTrackers.<REF>` of the default tracker. With no legacy issue token, a default tracker
-   with its own credential on the **same host** as code gets a copy of the code token (what the
-   old fallback sent there); on another host nothing is copied and reconcile says the tracker
-   needs one. `code` is never touched and no token is ever printed.
+   code settings stay on `code`. It gets `credentialRef: "code"` when it is on the code host
+   (same `backend` and `api`; owner/repo may differ) and there was no separate issue token (none,
+   or one equal to the code token) — exactly what the old issues axis used, so env-token and CI
+   setups keep working. A separate issue token, or another host, gives it its own credential.
+   `schemaVersion` becomes 3, `legacyIssueTracker` records the tracker's ref, and only the
+   running harness's stamp changes. Commit it — together with a Flight update for every clone
+   and harness.
+2. **`config.local.json`** (per machine): a legacy local `issues`/`labels` override becomes a
+   complete local `issueTrackers` array (arrays replace wholesale, so a partial entry would
+   erase the tracked trackers), with the override applied to the **`legacyIssueTracker`**
+   tracker — the one those settings belonged to, even if the default has changed since. A local
+   file that only overrides `code` coordinates is left byte-identical; trackers no longer follow
+   it, and reconcile says so once (add a complete local `issueTrackers` array if a tracker should
+   use the local route). Local values never reach the tracked file.
+3. **`secrets.json`** (per machine): the legacy `issues` credential **moves** (never copies) to
+   `issueTrackers.<REF>` of the `legacyIssueTracker` tracker — only if that tracker is on the
+   backend and api host the credential was used with; otherwise reconcile refuses, naming both
+   hosts. An issue token equal to the code token is dropped (the tracker shares the code
+   credential). The code token is never copied into `issueTrackers`; a tracker with its own
+   credential and no token yet gets a notice, also when there is no secrets file at all. `code`
+   is never touched and no token is ever printed.
 4. **Legacy work**: see below.
 
-Each step is validated before anything is written, the tracked config is written last, and a
-repeat run changes nothing — so an interrupted run simply resumes. A clone that later pulls the
-migrated config converts its own `config.local.json`, `secrets.json` and bindings on its next
-reconcile. A file holding both the legacy and the named form is refused untouched, and a config
-from a newer schema is refused by every command (except the silent prompt-log hooks).
+Every check that can fail — validation of every result, the legacy-tracker checks, a bindings
+file bound to another tracker, the bindings lock — runs before the first write; then secrets,
+the local override, the bindings and, last, the tracked config are written. A refusal leaves
+every file untouched, and a repeat run changes nothing. A clone that later pulls the migrated
+config converts its own `config.local.json`, `secrets.json` and bindings on its next reconcile;
+if its legacy state cannot be attached — the config has no `legacyIssueTracker`, or it names no
+configured tracker — reconcile refuses with a repairable error instead of guessing. A file
+holding both the legacy and the named form is refused untouched, and a config from a newer
+schema is refused by every command (except the silent prompt-log hooks).
 
 **Legacy work.** Reconcile records every pre-schema-3 unqualified issue branch (local and
 remote-tracking, e.g. `feature/12-x`) and batch manifest in
@@ -524,6 +539,12 @@ adapters). The rules are jq's:
 - **Scalars and arrays replace wholesale.** A local `code.stages` replaces the *whole* pipeline;
   it does not patch one entry.
 - A `null` in the local file overrides too; there is no "delete this key" spelling.
+
+**Issue trackers (schema 3).** `issueTrackers` is an array, so a local one replaces the tracked
+list wholesale: it must be the **complete** array — every tracker, exactly one default — or the
+trackers it leaves out disappear on this machine (every tracker-routed command warns, naming the
+missing refs). Trackers do not follow a local `code` override; to point a tracker at a local
+route, copy the whole `issueTrackers` array into the local file and edit it there.
 
 `flight reconcile` is the one writer and always writes the **tracked** `config.json` — local
 values are never baked into the committed file. An invalid local file is a hard error (not a

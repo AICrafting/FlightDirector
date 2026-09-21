@@ -51,8 +51,12 @@ check "reconcile stamps the tracked config.json" \
 	"$([ -n "$(jq -r '.harnesses.claude.plugins.flight.reconciledWith // empty' "$R/.flightdirector/config.json")" ] && echo 1 || echo 0)"
 check "reconcile does not copy local overrides into the tracked file" \
 	"$([ "$(jq -r '.code.owner' "$R/.flightdirector/config.json")" = acme ] && echo 1 || echo 0)"
-check "schema migration keeps local overrides in config.local.json" \
-	"$(jq -e '.code.owner == "me" and .issueTrackers[0].owner == "me" and (.issues | not)' "$R/.flightdirector/config.local.json" >/dev/null && echo 1 || echo 0)"
+# A code-only override is left exactly as written: no tracker array is frozen into it
+# (#197 review), so the tracker keeps its committed coordinates.
+check "schema migration leaves a code-only local override as written" \
+	"$(jq -e '. == {code: {owner: "me"}}' "$R/.flightdirector/config.local.json" >/dev/null && echo 1 || echo 0)" "$(cat "$R/.flightdirector/config.local.json")"
+out="$(cd "$R" && "$DISP" issues tracker 2>/dev/null | jq -r '.owner')"
+check "the migrated tracker keeps the committed owner" "$([ "$out" = acme ] && echo 1 || echo 0)" "$out"
 out="$(cd "$R" && "$DISP" config '.code.owner' 2>/dev/null)"
 check "after reconcile the merged view still applies" "$([ "$out" = me ] && echo 1 || echo 0)" "$out"
 

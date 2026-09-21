@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Named issue tracker configuration helper (schema 3) — internal to the dispatcher.
 #
-#   tracker-config.sh validate        --config FILE
+#   tracker-config.sh validate        --config FILE [--tracked FILE]
 #   tracker-config.sh select          --config FILE [--tracker SEL]
 #   tracker-config.sh resolve         --config FILE --number INPUT [--tracker SEL]
 #   tracker-config.sh legacy-ref      --config FILE
 #   tracker-config.sh migrate-config  --in FILE --out FILE --ref REF --credential code|own
-#   tracker-config.sh overlay-local   --tracked FILE --local FILE --out FILE
-#   tracker-config.sh migrate-secrets --config FILE --secrets FILE --out FILE
+#   tracker-config.sh overlay-local   --tracked FILE --local FILE --out FILE --ref REF
+#   tracker-config.sh migrate-secrets --config FILE --secrets FILE --out FILE [--ref REF]
 #   tracker-config.sh bind-legacy     --config FILE --metadata FILE --repo-root DIR
-#                                     --batches DIR --tracker REF
+#                                     --batches DIR --tracker REF [--out FILE]
 #
 # `validate`, `select` and `resolve` read an already merged (tracked + local) config;
 # the dispatcher owns which files are merged and written. This script never prints a
@@ -43,7 +43,6 @@ JQ_DEFS='
 	def host: {b: ((.backend // "") | tostring | lc), a: (.api | normapi)};
 	def target: host + {o: (.owner // null), r: (.repo // null), p: (.project // null)};
 	def tombstone: type == "object" and .backend == "'"$TOMBSTONE_BACKEND"'";
-	def owncred: (has("credentialRef") | not) or .credentialRef != "code";
 '
 
 cmd="${1:-}"; [ $# -gt 0 ] && shift
@@ -73,8 +72,15 @@ need_file() { [ -n "$2" ] && [ -f "$2" ] || die "tracker-config $cmd: $1 file re
 
 # ── validation ────────────────────────────────────────────────────────────────
 # Prints every problem (one per line) so a user can repair the config in one pass.
+# With --tracked (the committed config, when a config.local.json is merged over it),
+# credentialRef "code" is also accepted when the tracker is on the TRACKED code host:
+# the committed config is where "same host as code" is declared, and a local code
+# host override is this machine's route to that same system (a tracker that should
+# follow it needs a complete local issueTrackers array).
 validation_errors() {
-	jq -r "$JQ_DEFS"'
+	local tracked_code='null'
+	if [ -n "$tracked" ]; then tracked_code="$(jq -c '.code // {}' "$tracked")"; fi
+	jq -r --argjson trackedCode "$tracked_code" "$JQ_DEFS"'
 		. as $root
 		| if (.issueTrackers | type) != "array" or (.issueTrackers | length) == 0 then
 			"issueTrackers must be a non-empty array of tracker objects"
@@ -94,7 +100,7 @@ validation_errors() {
 				(if ($t | has("credentialRef")) then
 					if ($t.credentialRef | type) != "string" then "\($at): credentialRef must be a string"
 					elif $t.credentialRef == "code" then
-						if ($t | host) != ($root.code // {} | host)
+						if ($t | host) != ($root.code // {} | host) and ($trackedCode == null or ($t | host) != ($trackedCode | host))
 						then "\($at): credentialRef \"code\" reuses the code token only for a tracker on the same backend and api host as code; give this tracker its own credential (omit credentialRef) instead"
 						else empty end
 					elif $t.credentialRef != $t.ref then "\($at): credentialRef must be omitted, the tracker'"'"'s own ref (\($t.ref)), or \"code\""
@@ -314,80 +320,89 @@ migrate_config() {
 	' "$in_file" >"$out_file"
 }
 
-# A machine-local override that still speaks the legacy form (or that changes code
-# coordinates the default tracker used to inherit) becomes a complete local
-# `issueTrackers` array — config.local.json arrays replace wholesale, so a partial
-# entry would erase the tracked trackers. The tracked ref is kept, so branch names
-# stay the same on every clone. When the override changes nothing about the
-# trackers, no array is written and future tracked edits keep flowing through.
+# A machine-local override that still speaks the legacy form (`issues` / `labels`)
+# becomes a complete local `issueTrackers` array — config.local.json arrays replace
+# wholesale, so a partial entry would erase the tracked trackers. The legacy values
+# land on the tracker named by --ref: the one the legacy settings belonged to
+# (`legacyIssueTracker`), never simply the current default. A local code-coordinate
+# override is carried onto that tracker only when it inherited the code coordinates
+# and the file has legacy keys to carry anyway. A file with no legacy keys is
+# returned unchanged, so later tracked edits keep flowing through (the dispatcher
+# prints a notice when a code-only override stops reaching the trackers).
 overlay_local() {
-	jq -s --arg tomb "$TOMBSTONE_BACKEND" "$JQ_DEFS"'
+	jq -s --arg tomb "$TOMBSTONE_BACKEND" --arg ref "$ref" "$JQ_DEFS"'
 		.[0] as $tracked | .[1] as $local
 		| ["backend","api","owner","repo","project","email"] as $coords
 		| (($tracked.code // {}) * ($local.code // {})) as $mergedCode
 		| (($local.code // {}) | with_entries(select(.key as $k | $coords | index($k)))) as $localCoords
 		| (($local.issues // {}) | if type == "object" and (tombstone | not) then . else {} end) as $localIssues
+		| ($local | has("labels") or (has("issues") and ((.issues | tombstone) | not))) as $legacy
 		| ($tracked.issueTrackers
 			| map(
-				if .default == true then
+				if (.ref | lc) == ($ref | lc) then
 					. as $t
 					| (if ($t | target) == ($tracked.code // {} | target) then $t * $localCoords else $t end)
 					| . * ($localIssues | del(.labels))
 					| .labels = (($t.labels // {}) * ($local.labels // {}) * ($localIssues.labels // {}))
 					| (if .credentialRef == "code" and ((host) != ($mergedCode | host)) then .credentialRef = .ref else . end)
 				else . end)) as $effective
-		| $local | del(.labels)
-		| (if has("issues") and ((.issues | tombstone) | not) then del(.issues) else . end)
-		| if has("issueTrackers") then .
-		  elif $effective != $tracked.issueTrackers then .issueTrackers = $effective
-		  else . end
+		| if ($legacy | not) then $local
+		  else
+			$local | del(.labels)
+			| (if has("issues") and ((.issues | tombstone) | not) then del(.issues) else . end)
+			| if has("issueTrackers") then .
+			  elif $effective != $tracked.issueTrackers then .issueTrackers = $effective
+			  else . end
+		  end
 	' "$tracked" "$local_file" >"$out_file"
 }
 
 # Legacy secrets (a top-level `issues` object, or no `issueTrackers` map yet) →
-# credentials keyed by tracker ref. Code credentials are never moved. The legacy
-# issue credential goes to the default tracker; the code token is copied only for a
-# default tracker with its own credential on the SAME host as code (exactly what the
-# old code→issues fallback sent there). Everything else is left for the user.
+# credentials keyed by tracker ref. The legacy issue credential MOVES to the tracker
+# named by --ref (the one it belonged to; the dispatcher has already checked that
+# tracker's host). The code token is never copied: a legacy issue token equal to it
+# is dropped (the tracker shares the code credential), and with no legacy issue
+# credential nothing is added beyond the empty `issueTrackers` marker. `code` is
+# never touched.
 migrate_secrets() {
-	jq -s "$JQ_DEFS"'
+	jq -s --arg t "$ref" '
 		.[0] as $cfg | .[1] as $sec
-		| ($cfg.issueTrackers | map(select(.default == true)) | .[0]) as $d
+		| ([$cfg.issueTrackers[] | select((.ref | ascii_downcase) == ($t | ascii_downcase))] | .[0]) as $d
 		| ($sec.issueTrackers // {}) as $have
+		| ($sec.code.token // "") as $codeToken
 		| $sec
 		| .issueTrackers = $have
 		| if ($sec.issues | type) == "object" then
-			(if $have[$d.ref] == null then .issueTrackers[$d.ref] = $sec.issues else . end)
-		  elif ($d | owncred) and $have[$d.ref] == null and (($sec.code.token // "") != "")
-			and (($d | host) == ($cfg.code // {} | host)) then
-			.issueTrackers[$d.ref] = $sec.code
+			($sec.issues | if (.token // "") == "" or .token == $codeToken then del(.token) else . end) as $moved
+			| if ($moved | length) == 0 or $have[$d.ref] != null then .
+			  elif $d == null then error("no tracker \($t) to move the issue credential to")
+			  else .issueTrackers[$d.ref] = $moved end
 		  else . end
 		| del(.issues)
 	' "$config" "$secrets" >"$out_file"
-	if jq -e -s '.[0] as $cfg | .[1] as $sec
-		| ($cfg.issueTrackers | map(select(.default == true)) | .[0]) as $d
-		| (($d | has("credentialRef") | not) or $d.credentialRef != "code") and (($sec.issueTrackers[$d.ref].token // "") == "")' \
-		"$config" "$out_file" >/dev/null; then
-		note "notice — tracker $(jq -r '.issueTrackers[] | select(.default == true) | .ref' "$config") uses its own credential but secrets has no .issueTrackers[\"$(jq -r '.issueTrackers[] | select(.default == true) | .ref' "$config")\"].token yet; add one (then flight auth check --tracker REF)."
-	fi
 }
 
 # Durable local bindings for pre-schema-3 work: every unqualified issue branch
 # (local heads and remote-tracking refs) and every existing batch manifest belongs to
 # the tracker that was the default at migration. Written once, merged on retry, and
 # never re-pointed: a conflicting legacyDefaultTracker is a repairable error.
+# With --out the result is written there instead and no lock is taken: the caller
+# (reconcile) already holds the lock and moves the file into place itself, after
+# every other check has passed.
 bind_legacy() {
 	local lock="$metadata.lock" tries=0 branches manifests tmp existing_ref
 	[ -n "$metadata" ] && [ -n "$repo_root" ] && [ -n "$ref" ] || die "bind-legacy: --metadata, --repo-root and --tracker are required"
 	[[ "$ref" =~ ^[A-Za-z][A-Za-z0-9]*$ ]] || die "bind-legacy: invalid tracker ref '$ref'"
-	mkdir -p "$(dirname "$metadata")"
-	while ! mkdir "$lock" 2>/dev/null; do
-		tries=$((tries + 1))
-		[ "$tries" -lt 200 ] || die "timed out waiting for the work-items lock ($lock); remove it if no other flight process is running"
-		sleep 0.05
-	done
-	# shellcheck disable=SC2064  # expand now: the lock path is fixed for this process
-	trap "rmdir '$lock' 2>/dev/null || true" EXIT
+	if [ -z "$out_file" ]; then
+		mkdir -p "$(dirname "$metadata")"
+		while ! mkdir "$lock" 2>/dev/null; do
+			tries=$((tries + 1))
+			[ "$tries" -lt 200 ] || die "timed out waiting for the work-items lock ($lock); remove it if no other flight process is running"
+			sleep 0.05
+		done
+		# shellcheck disable=SC2064  # expand now: the lock path is fixed for this process
+		trap "rmdir '$lock' 2>/dev/null || true" EXIT
+	fi
 
 	if [ -f "$metadata" ]; then
 		jq -e 'type == "object"' "$metadata" >/dev/null 2>&1 || die "$metadata is not a JSON object; repair or remove it and re-run flight reconcile"
@@ -406,7 +421,7 @@ bind_legacy() {
 			| sed -e 's#.*/##' -e 's#\.json$##' | sort -u || true)"
 	fi
 
-	tmp="$(mktemp "$metadata.tmp.XXXXXX")"
+	if [ -n "$out_file" ]; then tmp="$out_file"; else tmp="$(mktemp "$metadata.tmp.XXXXXX")"; fi
 	{ [ -f "$metadata" ] && cat "$metadata" || echo '{}'; } | jq \
 		--arg t "$ref" --arg branches "$branches" --arg manifests "$manifests" --slurpfile cfg "$config" '
 		($cfg[0].issueTrackers[] | select((.ref | ascii_downcase) == ($t | ascii_downcase))) as $tr
@@ -424,13 +439,14 @@ bind_legacy() {
 		| reduce ($manifests | split("\n")[] | select(length > 0)) as $m (.;
 			if .manifests[$m] then . else .manifests[$m] = {tracker: $tr.ref, legacy: true} end)
 	' >"$tmp" || { rm -f "$tmp"; die "could not write legacy work bindings to $metadata"; }
+	[ -z "$out_file" ] || return 0
 	mv "$tmp" "$metadata"
 	rmdir "$lock" 2>/dev/null || true
 	trap - EXIT
 }
 
 case "$cmd" in
-	validate)        need_file --config "$config"; validate "$config" ;;
+	validate)        need_file --config "$config"; [ -z "$tracked" ] || need_file --tracked "$tracked"; validate "$config" ;;
 	select)          need_file --config "$config"; select_json ;;
 	resolve)         need_file --config "$config"; resolve ;;
 	legacy-ref)      need_file --config "$config"; legacy_ref ;;
@@ -441,6 +457,7 @@ case "$cmd" in
 		migrate_config ;;
 	overlay-local)
 		need_file --tracked "$tracked"; need_file --local "$local_file"; [ -n "$out_file" ] || die "overlay-local: --out required"
+		[[ "$ref" =~ ^[A-Za-z][A-Za-z0-9]*$ ]] || die "overlay-local: invalid --ref '$ref'"
 		overlay_local ;;
 	migrate-secrets)
 		need_file --config "$config"; need_file --secrets "$secrets"; [ -n "$out_file" ] || die "migrate-secrets: --out required"
