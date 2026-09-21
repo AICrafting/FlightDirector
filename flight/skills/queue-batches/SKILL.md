@@ -161,7 +161,9 @@ On every worker or log update, parse the line and re-render the board. If the ac
 task-board primitive, update the matching issue task (`queued` → pending; `starting`/`working` →
 in progress; `complete` → completed; `blocked` → in progress with the note; `preflight-fail` →
 back to **in progress** with the failing log path, since that issue is not shippable and was
-already marked completed; `preflight-pass` and `preflight-skip` → leave the task as it is). When a zone's
+already marked completed; `preflight-skip` → **also** back to in progress with the note, because a
+gate that never ran has verified nothing and leaving the task `completed` recreates exactly the
+two-boards-disagree problem; `preflight-pass` → leave the task as it is). When a zone's
 final line is `status=done`, render that zone's header with `⇥` (done, awaiting promotion); a final
 `status=safety-valved` means the zone did not finish its queue — render its header with `✗` and
 surface its unfinished issues as deferred. When a zone emits its terminal line, start that zone's
@@ -184,26 +186,41 @@ and let `Monitor` wake you on the log.
 **One sweep runs at a time, across all zones.** Zones finish within minutes of each other, so
 backgrounding *per zone* would still put N suites in flight at once — and a check command that
 binds a port or a shared fixture then fails in the second zone for reasons that have nothing to do
-with the code, recording false reds on green branches. Keep a single sweep queue: if a sweep is
-already running when another zone lands, queue that zone behind it and start it when the first
-finishes. Nothing is waiting on these, so serial costs only wall clock.
+with the code, recording false reds on green branches. The lock below is what makes that a
+mechanism rather than an intention: sweeps are launched from separate `Monitor` wakeups with no
+shared state, so "remember to serialize" is precisely the kind of instruction that gets dropped.
+Nothing is waiting on a sweep, so serial costs only wall clock.
 
 ```bash
 # ZONE and ZONE_LOG are this sweep's own, not whatever Section 3's loop left bound.
 ZONE=<zone>
 ZONE_LOG="$SCRATCH/queue-status/$ZONE.log"
+LOCK="$SCRATCH/queue-status/.sweep.lock"
+
+# mkdir is atomic on every platform flight supports, so it is the portable mutex:
+# it succeeds for exactly one caller and fails for the rest. Wait, don't skip —
+# this zone still needs its gate run.
+until mkdir "$LOCK" 2>/dev/null; do sleep 20; done
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
 
 for ISSUE_NUM in <that zone's issues with status=complete>; do
   PFLOG="$SCRATCH/queue-status/$ZONE-preflight-$ISSUE_NUM.log"
-  # Resolve the worktree by glob — the loop knows the number, not the slug. A missing
-  # worktree is NOT a gate failure: recording it as one says "your code is broken" when
-  # the truth is "I could not find your code".
-  WTP="$(echo "$ROOT/.worktrees/$ISSUE_NUM"-*)"
-  if [ ! -d "$WTP" ]; then
+  # Resolve the worktree by glob — the loop knows the number, not the slug. Use the
+  # positional params rather than a variable: a two-match glob collapses into one
+  # space-joined string that fails `[ -d ]`, and "no worktree" would be a lie when the
+  # truth is "more than one". No arrays — the BSD and MSYS legs run bash 3.2.
+  set -- "$ROOT/.worktrees/$ISSUE_NUM"-*
+  # A missing worktree is NOT a gate failure: recording it as one says "your code is
+  # broken" when the truth is "I could not find your code".
+  if [ "$#" -gt 1 ]; then
+    echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-skip note=\"$# worktrees match\"" >> "$ZONE_LOG"
+    continue
+  fi
+  if [ ! -d "$1" ]; then
     echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-skip note=\"no worktree\"" >> "$ZONE_LOG"
     continue
   fi
-  if ( cd "$WTP" && sh -c "$PREFLIGHT" ) >"$PFLOG" 2>&1; then
+  if ( cd "$1" && sh -c "$PREFLIGHT" ) >"$PFLOG" 2>&1; then
     echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-pass" >> "$ZONE_LOG"
   else
     echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-fail note=\"$PFLOG\"" >> "$ZONE_LOG"
@@ -276,7 +293,10 @@ When all agents return: summarize each zone (commits with SHA + title, test delt
 calls, deferrals). Surface any skipped/deferred issue with a follow-up suggestion. Report each
 `preflight-fail` issue by number with its log path and a tail of the failure, and say plainly
 that it should not be promoted until the gate is green — `promoting-branches` will skip it
-anyway, but the user deserves to know before they say "ship the batch". Continuing that zone's
+anyway, but the user deserves to know before they say "ship the batch". Report every
+`preflight-skip` too, with its `note=` reason: the gate never ran on that issue, so it is
+**unverified**, not clean. Silence here would let an ungated issue read as a passing one, which is
+the failure the sweep exists to prevent. Continuing that zone's
 agent with the failing output (via the question-routing primitive) is a reasonable option to
 offer; it is not automatic. Then hand back for shipping — the orchestrator never auto-promotes:
 

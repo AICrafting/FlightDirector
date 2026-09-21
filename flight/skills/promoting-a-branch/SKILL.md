@@ -217,6 +217,7 @@ run that a STOP was going to discard. Skip this block entirely when the key is a
 every repo that has not opted in, and their promotions are unchanged.
 
 ```
+GATE_OK=yes                    # no gate configured == nothing to fail; stays yes
 PREFLIGHT="$(flight config '.code.preflight // empty')"
 if [ -n "$PREFLIGHT" ]; then
     # $SAFE_BRANCH, not $BRANCH — Step 1 flattened the slash. A raw `feature/<N>-<slug>`
@@ -229,10 +230,16 @@ if [ -n "$PREFLIGHT" ]; then
     else
         tail -40 "$PFLOG"
         echo "preflight failed — full output: $PFLOG" >&2
-        # STOP. Do not merge, do not push. Report and hand back to the user.
+        GATE_OK=no             # every merge and push below is guarded on this
     fi
 fi
 ```
+
+`$GATE_OK` is a variable rather than a `# STOP` comment on purpose, and for the same reason
+`promoting-branches` uses a `continue`: a comment stops nothing. The risk here is milder — the
+merge lives in a *later* fenced block, so nothing falls through within one shell the way an
+unguarded `push` on the next line would — but the two skills should not apply opposite reasoning
+to the same construct, and the guard costs one word at each use site.
 
 On a failure, show the tail and the log path, **stop**, and leave the branch unmerged — the fix
 belongs on the feature branch. On a pass, say so in one line (*"preflight `<cmd>`: passed"*) so
@@ -247,7 +254,8 @@ where the main checkout sits on `develop`): merge in that worktree's path (usual
 
 ```
 # Merge and push without touching your current (feature) worktree.
-git -C "$MAIN" merge --no-ff "$BRANCH" && git -C "$MAIN" push
+# $GATE_OK is Step 4b's verdict (always `yes` when no gate is configured).
+[ "$GATE_OK" = yes ] && git -C "$MAIN" merge --no-ff "$BRANCH" && git -C "$MAIN" push
 ```
 
 **Case 2 — `<target>` is NOT checked out in any worktree** (e.g. promoting to a `main` stage
@@ -260,7 +268,8 @@ Fork the throwaway worktree from **`origin/<target>`**, not from the local ref, 
 ```
 git -C "$MAIN" fetch -q origin "<target>"
 git -C "$MAIN" worktree add --detach "$SCRATCH/promote-<target>-$$" "origin/<target>"
-git -C "$SCRATCH/promote-<target>-$$" merge --no-ff "$BRANCH" && \
+[ "$GATE_OK" = yes ] && \
+    git -C "$SCRATCH/promote-<target>-$$" merge --no-ff "$BRANCH" && \
     git -C "$SCRATCH/promote-<target>-$$" push origin "HEAD:<target>"
 git -C "$MAIN" worktree remove "$SCRATCH/promote-<target>-$$"
 # Bring the (unchecked-out) local ref back in line with what you just pushed:
