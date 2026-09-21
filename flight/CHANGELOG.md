@@ -13,7 +13,11 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- **Docs: why GitHub uses a repo-scoped token, not your `gh` login** (#243). `backends.md` now
+  explains that `gh` picks credentials per host rather than per repo, that its login token is
+  user-wide, and why that matters when an agent reading untrusted issue text holds it.
 
 ## [0.16.0] - 2026-09-21
 
