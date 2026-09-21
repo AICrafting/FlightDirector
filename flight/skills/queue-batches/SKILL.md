@@ -199,8 +199,24 @@ LOCK="$SCRATCH/queue-status/.sweep.lock"
 
 # mkdir is atomic on every platform flight supports, so it is the portable mutex:
 # it succeeds for exactly one caller and fails for the rest. Wait, don't skip —
-# this zone still needs its gate run.
-until mkdir "$LOCK" 2>/dev/null; do sleep 20; done
+# this zone still needs its gate run. But BOUND the wait: the trap below covers
+# EXIT/INT/TERM and cannot cover SIGKILL, so one hard kill leaves the directory
+# standing and every later zone would spin here forever, emitting nothing. A wedged
+# lock must surface as unverified issues, not as silence.
+T=0
+until mkdir "$LOCK" 2>/dev/null; do
+  T=$((T + 20))
+  if [ "$T" -ge 1800 ]; then
+    # 30 minutes on a lock nobody released: assume a killed sweep, and say so per issue.
+    for ISSUE_NUM in <that zone's issues with status=complete>; do
+      echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-skip note=\"lock timeout; stale $LOCK?\"" >> "$ZONE_LOG"
+    done
+    exit 0          # this zone reports unverified; it does NOT run ungated behind the lock
+  fi
+  sleep 20
+done
+# Set the trap only AFTER acquiring, or a caller that never got in would remove the
+# holder's lock on its way out.
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
 
 for ISSUE_NUM in <that zone's issues with status=complete>; do
@@ -255,9 +271,11 @@ Agents append one line per state change to `$SCRATCH/queue-status/<zone>.log`:
 `queued` is pre-seeded by the orchestrator before dispatch; workers emit `starting`/`working`/`complete`/`blocked`.
 The three `preflight-*` statuses are written by the **orchestrator** after the zone's terminal
 line (Section 4a) and appear only when `code.preflight` is configured: `preflight-fail` carries
-the failing log's path in `note=`, and `preflight-skip` means the gate could not be **run** (no
-worktree) rather than that it failed — never conflate the two, since one is a problem with the
-code and the other is a problem with the workspace. Final per-zone line: `<ts> <zone> ticket=all status=<done|safety-valved> note="…"`.
+the failing log's path in `note=`, and `preflight-skip` means the gate could not be **run** at all
+rather than that it failed — never conflate the two, since one is a problem with the code and the
+other is a problem with the workspace. Its `note=` says which: no worktree, several worktrees
+matching the issue number, or a lock timeout. All three mean *unverified*, so all three are
+reported. Final per-zone line: `<ts> <zone> ticket=all status=<done|safety-valved> note="…"`.
 
 ## Display format (stacked, phone-legible)
 
@@ -274,7 +292,8 @@ code and the other is a problem with the workspace. Final per-zone line: `<ts> <
 ```
 
 Legend: `✓` complete · `◐` working (also shown for `starting`) · `?` blocked · `○` queued ·
-`!` preflight failed · `~` preflight skipped (no worktree) · `✗` zone safety-valved · `⇥` done,
+`!` preflight failed · `~` preflight skipped, i.e. never ran (see its `note=`) · `✗` zone
+safety-valved · `⇥` done,
 awaiting promotion. One line per issue. A `preflight-pass` line leaves the issue's `✓` alone —
 the gate is only worth pixels when it doesn't pass.
 
