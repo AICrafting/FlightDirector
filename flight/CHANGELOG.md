@@ -129,14 +129,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   records a declined offer as `"preflight": false`, which behaves exactly like leaving it out, so
   an existing repo picks the question up on its next setup re-run.
 
-- **A repo can nominate a starting status for newly filed issues** (#193). `setting-up-a-repo`
-  now offers it: a freshly filed issue gets a `status/*` label so a board can tell "nobody has
+- **A repo can nominate a starting status for newly filed issues** (#193). Setup offers it — per
+  tracker, from `add-an-issue-tracker` (#199), which `setting-up-a-repo` runs for the first one: a
+  freshly filed issue gets a `status/*` label so a board can tell "nobody has
   looked at this yet" apart from "someone forgot the label", and "what is untriaged?" becomes a
   label query. The suggested name is `status/new`, but like every other status role it is
   **mappable** — point the role at whatever you already call that state (`status/triage`,
   `status/open`, `status/backlog`), and an equivalent label you already have is adopted rather
-  than duplicated. **Opt-in and off unless asked for**: with no `labels.status.new` in the config
-  nothing changes, which is every repo configured before this. When it is on, `flight issues
+  than duplicated. **Opt-in and off unless asked for**: with no `labels.status.new` on a tracker
+  nothing changes for it, which is every repo configured before this. When it is on, `flight issues
   create` applies the label; passing a `status/*` label of your own leaves it alone, and
   `--no-status` skips it for one issue. It is an ordinary status, so the first `set-status` —
   normally when `working-an-issue` starts — removes it, and `triaging-issues` deliberately does
