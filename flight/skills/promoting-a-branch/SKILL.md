@@ -40,6 +40,11 @@ See [flight-setup.md](../../references/flight-setup.md) and
   failure a promotion must never have. Bind both paths in Step 1 and anchor everything after.
   Paths passed to an anchored command resolve relative to that `-C` directory, not to your
   current one — always pass repo-relative paths.
+- **Never skip a configured `code.preflight`, and never "interpret" its exit code.** When the
+  repo sets one, it *is* the gate for a `direct` hop — the hop has no CI to fall back on. Run it
+  (Step 4b) and halt on non-zero; a red gate is not merged around, not re-run until it is green
+  by luck, and not waved through because the failure "looks unrelated". If the user overrides it,
+  that is their call and it is said out loud in the promotion report.
 - **Never merge into a target branch you haven't just fetched.** A promotion merges into a
   *local* copy of `<target>` and then pushes; if `origin/<target>` has moved (another agent,
   another machine, a batch promote, a hotfix) the merge is computed against a stale base and the
@@ -200,6 +205,33 @@ If there is no `origin`, or the fetch fails (offline), **warn and continue** fro
 — but state plainly that the target was **unverified**, and remember the push will be the first
 thing to discover any drift.
 
+#### Step 4b: Repo preflight gate — after the freshness check, before the merge
+
+If the repo configures `code.preflight`, run it now. It goes **after** Step 4a deliberately: a
+diverged target stops the promotion in seconds, and there is no sense spending minutes on a test
+run that a STOP was going to discard. Skip this block entirely when the key is absent — that is
+every repo that has not opted in, and their promotions are unchanged.
+
+```
+PREFLIGHT="$(flight config '.code.preflight // empty')"
+if [ -n "$PREFLIGHT" ]; then
+    # Run in the branch's own worktree, by path — never rely on the shell's cwd.
+    ( cd "$WT" && sh -c "$PREFLIGHT" ) >"$SCRATCH/preflight-$BRANCH.log" 2>&1 || {
+        tail -40 "$SCRATCH/preflight-$BRANCH.log"
+        echo "preflight failed — full output: $SCRATCH/preflight-$BRANCH.log" >&2
+        # STOP. Do not merge, do not push.
+    }
+fi
+```
+
+On a failure, show the tail and the log path, **stop**, and leave the branch unmerged — the fix
+belongs on the feature branch. On a pass, say so in one line (*"preflight `<cmd>`: passed"*) so
+the promotion report records that the gate ran; when the key is unset, say nothing.
+
+A `direct` hop runs this before the merge below. A `pr` hop runs it before `$BRANCH` is pushed
+and before `pr open` (see the source guard in the `pr` block), so a red gate never reaches CI or
+a reviewer. It does not replace CI on a `pr` hop; it front-runs it.
+
 **Case 1 — `<target>` is checked out in a worktree** (the usual case for `feature → stages[0]`,
 where the main checkout sits on `develop`): merge in that worktree's path (usually `$MAIN`).
 
@@ -249,9 +281,13 @@ ISSUE_STATUS="$(flight config ".code.stages[<i>].issueStatus // empty")"
 KEYWORD=Ready; [ "$CLOSES" = true ] && KEYWORD=Closes
 ```
 
-The PR is built from the **pushed** branch tip, not your local working copy. Before opening it,
-verify local `$BRANCH` isn't ahead of the remote — otherwise the PR (and the CI you'd watch)
-silently omits your latest commit:
+The PR is built from the **pushed** branch tip, not your local working copy — so **run the Step
+4b preflight gate here**, before that push and before `pr open`. A red gate stops the promotion
+with the branch unpushed; there is no point spending a CI queue on a failure a local command
+just named.
+
+Before opening the PR, verify local `$BRANCH` isn't ahead of the remote — otherwise the PR (and
+the CI you'd watch) silently omits your latest commit:
 
 ```
 git -C "$WT" fetch -q origin "$BRANCH"
@@ -378,6 +414,12 @@ you would for a diverged target in Step 4a.
 - Reaching for `git pull` when the push is rejected. That invents a merge or a rebase nobody
   reviewed, at exactly the moment the user has said "promote" and stopped watching. Stop and
   report; only *behind* is safe to fix, and only with `--ff-only`.
+- Merging a `direct` hop without running a configured `code.preflight`. On that hop there is no
+  CI behind you: the gate you skipped was the only one, and what it would have caught lands on
+  the stage instead. (Running it and then merging anyway is the same mistake, louder.)
+- Running the preflight *before* the Step 4a freshness check, so a diverged target discards a
+  test run you just paid for — or running it from whatever directory the shell is in rather than
+  from `$WT`, which gates the wrong tree.
 - Hard-coding `--strategy squash` (or any strategy) instead of reading the target stage's
   `strategy` field. The default is `merge`, and a repo that wants otherwise says so in config.
 - Skipping Step 6 after a stage → stage hop, or running it after a feature hop. Only a stage

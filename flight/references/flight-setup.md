@@ -151,6 +151,42 @@ Backend, coordinates, and preferences, across two independent axes:
   For backwards compatibility a legacy `trunkBranch` is still read
   **first** if present; otherwise `stages[0].name` is used.
 
+### Repo preflight gate (optional)
+
+The repo's own check command, run before work is merged or pushed. Nothing changes for a repo
+that leaves it out — this is the one key whose absence is the whole of its unset behaviour.
+
+```jsonc
+"code": {
+  // …existing keys (backend, owner, repo, api, stages)…
+  "preflight": "./scripts/run-checks.sh"
+}
+```
+
+- `code.preflight` — a **shell command string**, run with `sh -c`. Read it with:
+  ```
+  PREFLIGHT="$(flight config '.code.preflight // empty')"
+  [ -n "$PREFLIGHT" ] || echo "no preflight configured"   # absent and null both land here
+  ```
+  **Working directory:** always the checkout that holds the code being gated, passed explicitly
+  (`sh -c "$PREFLIGHT"` run from that path, never from whatever directory the shell has wandered
+  into). That is the feature worktree `$WT` in `promoting-a-branch`, each feature worktree in
+  `promoting-branches`, the integration worktree on a `pr` group, and each `.worktrees/<N>-<slug>`
+  in `queue-batches`. Write the command so it works from a repo root that is not the main
+  checkout — a hard-coded absolute path defeats the point.
+  **Exit code is the verdict:** zero passes, non-zero halts the operation and the failing output
+  is shown. Nothing parses stdout.
+  **Where it runs:** `promoting-a-branch` before the merge on a `direct` hop and before the
+  source branch is pushed on a `pr` hop; `promoting-branches` before each branch's merge (a
+  failure skips that branch and the group continues) or before the integration branch is pushed;
+  `queue-batches` from the **orchestrator** once a zone finishes, per issue worktree.
+  The command is the repo's problem, so a repo on Windows writes one that works there. It is a
+  local gate, not a CI replacement — a `pr` hop still watches CI afterwards.
+
+> Not to be confused with the **runtime preflight** every skill performs before its first
+> dispatcher call ([runtime.md](runtime.md)) — that resolves the dispatcher path and reconciles
+> plugin metadata. `code.preflight` is the *repo's* check command and is unrelated to it.
+
 ### Branch cleanup config (optional)
 
 Consumed by the `cleaning-up-branches` skill and the `branches` dispatcher group.

@@ -115,6 +115,9 @@ BASE="$("$DISP" config '.code.stages[0].name')"
 MODEL="$("$DISP" config '.code.queueBatches.defaultModel // "sonnet"')"   # unless user overrode
 RULES_FILE="$("$DISP" config '.code.queueBatches.agentRulesFile // ".flightdirector/agent-rules.md"')"
 REPO_RULES="$( [ -s "$ROOT/$RULES_FILE" ] && cat "$ROOT/$RULES_FILE" || echo 'None configured.' )"
+# The repo's own check command (flight-setup.md → Repo preflight gate). Empty = not configured,
+# and the gate sweep in Section 4a is then skipped entirely.
+PREFLIGHT="$("$DISP" config '.code.preflight // empty')"
 mkdir -p "$SCRATCH/queue-status"
 # A run id for this batch; also names the manifest that records issue→zone
 # grouping so batch promotion can honor "promote each zone" later.
@@ -135,7 +138,9 @@ Per zone:
   ```
 - Render `templates/agent-prompt.md`, filling `{zone} {model} {dispatcher}=$DISP
   {base_branch}=$BASE {repo_root}=$ROOT {log_path}=$LOG {scratch}=$SCRATCH {issues_ordered}
-  {repo_rules}=$REPO_RULES {pre_made_decisions}`.
+  {repo_rules}=$REPO_RULES {preflight}=${PREFLIGHT:-None configured.} {pre_made_decisions}`
+  (`{preflight}` follows `{repo_rules}`' convention: the literal `None configured.` when the repo
+  sets no gate, so the rendered prompt never contains a blank command).
 - Select and follow exactly one dispatch reference for the active harness:
   [Claude Code](references/dispatch-claude.md) or [Codex](references/dispatch-codex.md).
   Use the approved per-zone model override when present; otherwise use `$MODEL`.
@@ -157,18 +162,60 @@ task-board primitive, update the matching issue task (`queued` → pending; `sta
 in progress; `complete` → completed; `blocked` → in progress with the note). When a zone's
 final line is `status=done`, render that zone's header with `⇥` (done, awaiting promotion); a final
 `status=safety-valved` means the zone did not finish its queue — render its header with `✗` and
-surface its unfinished issues as deferred. Once every zone has emitted a terminal line (`done` or
-`safety-valved`), proceed to Section 5. Match tasks by the `[<zone>] #<N>` subject prefix.
+surface its unfinished issues as deferred. When a zone emits its terminal line, start that zone's
+repo gate sweep (4a) before rendering it as `⇥`. Once every zone has emitted a terminal line
+**and** its sweep has finished, proceed to Section 5. Match tasks by the `[<zone>] #<N>` subject
+prefix.
+
+### 4a. Repo gate sweep — the orchestrator runs it, not the agents
+
+(The repo's `code.preflight` command. Not to be confused with Section 0's "I'm workin' here!"
+preflight, which guards against a prior run, or the runtime preflight in
+[runtime.md](../../references/runtime.md).)
+
+Skip this entirely when `$PREFLIGHT` is empty; nothing below changes for a repo without the key.
+
+When a zone logs its terminal line, run `$PREFLIGHT` once **per completed issue in that zone**,
+in that issue's own worktree. Background the loop as a **whole** — one backgrounded run per zone,
+sequential inside it — so the orchestrator stays responsive without putting M test suites in
+sibling worktrees in competition for the same cores and ports. Then let `Monitor` wake you on the
+log:
+
+```bash
+for ISSUE_NUM in <that zone's issues with status=complete>; do
+  PFLOG="$SCRATCH/queue-status/<zone>-preflight-$ISSUE_NUM.log"
+  if ( cd "$ROOT/.worktrees/$ISSUE_NUM-<slug>" && sh -c "$PREFLIGHT" ) >"$PFLOG" 2>&1; then
+    echo "$(date -u +%FT%TZ) <zone> ticket=#$ISSUE_NUM status=preflight-pass" >> "$LOG"
+  else
+    echo "$(date -u +%FT%TZ) <zone> ticket=#$ISSUE_NUM status=preflight-fail note=\"$PFLOG\"" >> "$LOG"
+  fi
+done
+```
+
+**Per worktree, not once per zone.** Each worktree holds exactly one issue's change on top of
+`$BASE`, so a red gate names the issue that broke it. A single run over the merged result would
+only tell you the zone is red.
+
+**From the orchestrator, not from the agent** — this is mechanism, not preference. A returned
+sub-agent's shell is gone with it, so a command backgrounded inside an agent has nothing left to
+write its result into, and the gate would be recorded as neither pass nor fail. The
+orchestrator's session survives the whole run and its `Monitor` wakes it when the log moves, so
+it is the only place a multi-minute gate can be both backgrounded and believed. The agents still
+get the command (they run it in the *foreground*, for the baseline and before each `to-test`) —
+that is what "tests green after every commit" means in a repo that configures one. The
+orchestrator's sweep is the authoritative record.
 
 ## Status log format (contract)
 
 Agents append one line per state change to `$SCRATCH/queue-status/<zone>.log`:
 
 ```
-<ISO-timestamp> <zone> ticket=<#N> status=<queued|starting|working|complete|blocked> [commit=<sha7>] [note="…"]
+<ISO-timestamp> <zone> ticket=<#N> status=<queued|starting|working|complete|blocked|preflight-pass|preflight-fail> [commit=<sha7>] [note="…"]
 ```
 `queued` is pre-seeded by the orchestrator before dispatch; workers emit `starting`/`working`/`complete`/`blocked`.
-Final per-zone line: `<ts> <zone> ticket=all status=<done|safety-valved> note="…"`.
+`preflight-pass`/`preflight-fail` are written by the **orchestrator** after the zone's terminal
+line (Section 4a), `note=` carrying the failing log's path; they appear only when `code.preflight`
+is configured. Final per-zone line: `<ts> <zone> ticket=all status=<done|safety-valved> note="…"`.
 
 ## Display format (stacked, phone-legible)
 
@@ -180,10 +227,14 @@ Final per-zone line: `<ts> <zone> ticket=all status=<done|safety-valved> note="�
 
 ━━━ core ━━━
   ? #112 blocked — "which migration tool?"
-  ○ #64 #65 queued
+  ! #64 preflight failed — <log path>
+  ○ #65 queued
 ```
 
-Legend: `✓` complete · `◐` working (also shown for `starting`) · `?` blocked · `○` queued · `✗` zone safety-valved · `⇥` done, awaiting promotion. One line per issue.
+Legend: `✓` complete · `◐` working (also shown for `starting`) · `?` blocked · `○` queued ·
+`!` preflight failed · `✗` zone safety-valved · `⇥` done, awaiting promotion. One line per issue.
+A `preflight-pass` line leaves the issue's `✓` alone — the gate is only worth pixels when it
+fails.
 
 ## Question routing protocol
 
@@ -197,8 +248,12 @@ Wait for the user's answer, then use the active harness's agent-messaging primit
 ## 5. Completion & ship
 
 When all agents return: summarize each zone (commits with SHA + title, test deltas, judgment
-calls, deferrals). Surface any skipped/deferred issue with a follow-up suggestion. Then hand back
-for shipping — the orchestrator never auto-promotes:
+calls, deferrals). Surface any skipped/deferred issue with a follow-up suggestion. Report each
+`preflight-fail` issue by number with its log path and a tail of the failure, and say plainly
+that it should not be promoted until the gate is green — `promoting-branches` will skip it
+anyway, but the user deserves to know before they say "ship the batch". Continuing that zone's
+agent with the failing output (via the question-routing primitive) is a reasonable option to
+offer; it is not automatic. Then hand back for shipping — the orchestrator never auto-promotes:
 
 > Ship the batch with `promoting-branches`: say "promote each zone" (one PR per zone on a pr hop, or
 > all branches merged on a direct hop), "promote the first zone", or "promote issues <…>". It honors
@@ -213,4 +268,8 @@ for shipping — the orchestrator never auto-promotes:
 - **Skipping plan approval.** The user must OK the triage before dispatch.
 - **Forgetting `tail -f` + `Monitor`.** Without them you're blind between completions.
 - **Letting an agent push or promote.** Both are banned in the prompt — keep it that way.
+- **Delegating the preflight sweep to the agents.** Their shells die when they return, so a
+  backgrounded gate inside one reports nothing and a foreground one blocks the zone for minutes.
+  The orchestrator owns the sweep; the agents run the same command in the foreground as they
+  work, which is a different job.
 - **Auto-promoting at the end.** Hand back for serial, user-gated `promoting-a-branch`.

@@ -8,3 +8,6 @@
   not busy-poll. When otherwise idle, wait in bounded five-to-ten-minute stretches.
 - Route a user's answer to a blocked worker by sending or following up with that zone's agent.
 - Codex has no required task-board equivalent; the status-log board is the source of truth.
+- Run the Section 4a preflight sweep from the orchestrator session, one worktree at a time, and
+  read the verdict off the zone log rather than busy-polling the command. A returned subagent
+  cannot run it: its shell is gone.
