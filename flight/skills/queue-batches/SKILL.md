@@ -160,6 +160,19 @@ final line is `status=done`, render that zone's header with `⇥` (done, awaitin
 surface its unfinished issues as deferred. Once every zone has emitted a terminal line (`done` or
 `safety-valved`), proceed to Section 5. Match tasks by the `[<zone>] #<N>` subject prefix.
 
+**An agent returning is not that signal — the log's final line is.** When a zone's agent returns,
+read its log's last line. Anything other than `status=done` or `status=safety-valved` means the zone
+is **unfinished, regardless of what the agent said**: a returned agent's account of its own state is
+the one piece of evidence that cannot be trusted here (one mechanism:
+[Claude Code](references/dispatch-claude.md)). A final `status=blocked` is a question still to route
+(below). Otherwise the agent has most likely parked — it reports "waiting on" a job that no longer
+exists — so establish what is actually still running before doing anything. Footgun: the
+orchestrator's own log watcher appears in a `ps` listing matched on the log path or worktree, so a
+match is not proof the worker's job is alive — look for the worker's own command. If nothing is,
+resume the agent through the harness's agent-messaging primitive (nothing is running; redo the step
+in the foreground and carry on); if it cannot be resumed, surface its unfinished issues as deferred,
+as for `safety-valved`.
+
 ## Status log format (contract)
 
 Agents append one line per state change to `$SCRATCH/queue-status/<zone>.log`:
@@ -196,9 +209,10 @@ Wait for the user's answer, then use the active harness's agent-messaging primit
 
 ## 5. Completion & ship
 
-When all agents return: summarize each zone (commits with SHA + title, test deltas, judgment
-calls, deferrals). Surface any skipped/deferred issue with a follow-up suggestion. Then hand back
-for shipping — the orchestrator never auto-promotes:
+Once every zone's log ends in a terminal line (`status=done` or `status=safety-valved`) — the
+Section 4 condition, not merely every agent having returned: summarize each zone (commits with
+SHA + title, test deltas, judgment calls, deferrals). Surface any skipped/deferred issue with a
+follow-up suggestion. Then hand back for shipping — the orchestrator never auto-promotes:
 
 > Ship the batch with `promoting-branches`: say "promote each zone" (one PR per zone on a pr hop, or
 > all branches merged on a direct hop), "promote the first zone", or "promote issues <…>". It honors
@@ -211,6 +225,8 @@ for shipping — the orchestrator never auto-promotes:
   context ceiling.
 - **Zoning by label alone.** Labels lie — read the issue body before placing.
 - **Skipping plan approval.** The user must OK the triage before dispatch.
+- **Taking a returned agent's word for its zone's state.** Read the log's last line; no terminal
+  line means unfinished, whatever the report said.
 - **Forgetting `tail -f` + `Monitor`.** Without them you're blind between completions.
 - **Letting an agent push or promote.** Both are banned in the prompt — keep it that way.
 - **Auto-promoting at the end.** Hand back for serial, user-gated `promoting-a-branch`.
