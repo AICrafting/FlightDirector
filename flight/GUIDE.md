@@ -341,8 +341,11 @@ deleted until you say go, and deleting on **origin** is a separate yes from dele
   It is layered over the committed file on every read, the way Claude Code layers
   `settings.local.json` over `settings.json`. Only list the keys you change — nested objects
   merge key by key, while scalars **and arrays** replace wholesale (a local `code.stages`
-  replaces the whole pipeline, a local `issueTrackers` the whole tracker list). `reconcile` never writes local values into `config.json`, an
-  invalid local file is an error, and a tracked one warns on every run. Merge rules in full:
+  replaces the whole pipeline, a local `issueTrackers` the whole tracker list). Issue trackers
+  carry their own coordinates, so a local `code.api` or `code.owner` override moves the code
+  axis only — to repoint a tracker on this machine, give a complete local `issueTrackers` array.
+  `reconcile` never writes local values into `config.json`, an invalid local file is an error,
+  and a tracked one warns on every run. Merge rules in full:
   [flight-setup.md](references/flight-setup.md#flightdirectorconfiglocaljson--optional-gitignored).
 
 - **`code.signature.enabled`** (optional, default `true`) — the tracker signature described in
