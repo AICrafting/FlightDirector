@@ -39,11 +39,19 @@ if says "$QB/SKILL.md" "last line"; then exit 1; fi
 if says "$QB/SKILL.md" "final line"; then exit 1; fi
 if says "$QB/SKILL.md" "ends in a terminal line"; then exit 1; fi
 says "$QB/SKILL.md" 'never on position'
-# Positives pin the three gates to the marker form, since a positional rewrite can always be
-# phrased in words the negatives above do not carry ("ends in", "closes with", …).
+# INVARIANT: one positive per site that decides whether a zone is finished, because the negatives
+# above are class-level and a positional rewrite can always be phrased in words no blocklist
+# carries ("ends in a terminal line", "the entry the log closes with"). A site without a positive
+# is unguarded no matter how many negatives exist, so a seventh site added below with no line
+# here is a visible omission. Each pattern is the shortest distinctive fragment, not the
+# sentence: `says` flattens, but every positive is still a hostage to rewording.
+says "$QB/SKILL.md" 'classify from its .ticket=all. line'      # 0's resume classification
 says "$QB/SKILL.md" 'ticket=all. line reads .status=done'      # 4's render trigger
 says "$QB/SKILL.md" 'look for that zone.s .ticket=all. line'   # 4's terminal-line check
+says "$QB/SKILL.md" 'match on .ticket=all'                     # the status-log contract block
 says "$QB/SKILL.md" 'zone has a .ticket=all. line reading'     # 5's opening condition
+says "$QB/SKILL.md" 'Look for the zone.s .ticket=all. line'    # the Common-mistakes bullet
+says "$QB/references/dispatch-claude.md" 'ticket=all'          # the pointer back to Section 4
 
 if says "$QB/SKILL.md" run_in_background; then exit 1; fi
 says "$QB/references/dispatch-claude.md" 'dies with'
