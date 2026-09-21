@@ -26,7 +26,7 @@ a new session afterwards — bundled skills load at session start.
 ## Plugins
 
 These are the **Flight Director** family of plugins (`flight` is the first; `launchpad`,
-`preflight`, `mission-control`, `telemetry` and friends will follow). `flight` was previously
+`mission-control`, `telemetry` and friends will follow). `flight` was previously
 called `lightspeed` during initial development/testing.
 
 | Plugin | What it does |
@@ -51,7 +51,9 @@ a worked example, is in the **[Flight User Guide](flight/GUIDE.md)**; here is wh
   → [Work it](flight/GUIDE.md#3-work-it)
 - **A human merge gate.** Work stops at *ready to test*; nothing merges until you say "promote".
   When you do, a work-ledger comment (summary, token cost, model) lands on the issue first.
-  → [Work it](flight/GUIDE.md#3-work-it)
+  Name your repo's check command in `code.preflight` and every promotion runs it before merging,
+  so a red suite stops the merge even on a hop with no CI.
+  → [Work it](flight/GUIDE.md#3-work-it) · [The preflight gate](flight/GUIDE.md#4-promote-toward-release)
 - **A promotion pipeline that matches how you ship.** Declare your stages once —
   `feature → develop → qa → main` or just `main` — and the same "promote" advances a branch one
   hop: direct-merge where you want speed, PR + test plan + CI watch where you want a gate. Issue
