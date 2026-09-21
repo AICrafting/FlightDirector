@@ -56,6 +56,7 @@ jobs:
         run: |
           command -v bash
           bash --version | head -1
+          printf 'nproc -> %s\n' "$(nproc 2>/dev/null || echo MISSING)"
 
       - name: Run script tests
         run: |
@@ -103,6 +104,7 @@ jobs:
           sw_vers
           command -v bash
           bash --version | head -1
+          printf 'cores -> %s\n' "$(sysctl -n hw.ncpu 2>/dev/null || echo MISSING)"
 
       - name: Run script tests
         run: |
@@ -165,6 +167,9 @@ jobs:
           export PATH="/usr/bin:$HOME/bin:$PATH"
           uname -a
           bash --version | head -1
+          # run-tests.sh sizes its worker pool from this (#212), so a timing
+          # change on this leg is only readable next to the width it ran at.
+          printf 'nproc -> %s\n' "$(nproc 2>/dev/null || echo MISSING)"
           for t in sort jq git python3; do
             printf '%s -> %s\n' "$t" "$(command -v "$t" || echo MISSING)"
           done

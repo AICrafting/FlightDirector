@@ -82,6 +82,17 @@ export FAKE_RESP="$RESP"
 export LS_API="http://fake" LS_OWNER="o" LS_REPO="r" LS_TOKEN="t"
 export LS_CI_POLL_SECONDS=1          # keep the loop snappy under test
 
+# Which backends this process covers. The file is the slowest in the suite and
+# sets the floor for the whole parallel run (#212) — its timeout cases wait on a
+# real `date +%s` clock, so they cannot be sped up, only run side by side.
+# run-tests.sh therefore invokes this file once per backend; unset (running it by
+# hand) still covers all three, exactly as before.
+CI_WATCH_BACKENDS="${CI_WATCH_BACKENDS:-forgejo github gitlab}"
+
+# covers <backend> — true when this shard is responsible for <backend>. Needed by
+# the blocks below that test ONE backend's quirk outside the per-backend loops.
+covers() { case " $CI_WATCH_BACKENDS " in *" $1 "*) return 0 ;; esac; return 1; }
+
 # run_watch <backend> <timeout-secs> -- <extra args…>  → prints "<rc>\n<output>"
 # $QTMO bounds the queue allowance (#171); it defaults to the execution timeout
 # so a case that says nothing about queueing is bounded exactly as it was before
@@ -135,7 +146,7 @@ set_runs() {
 	esac
 }
 
-for backend in forgejo github gitlab; do
+for backend in $CI_WATCH_BACKENDS; do
 	printf '\033[1m── %s ──\033[0m\n' "$backend"
 
 	# A finished, successful run exists ONLY for the pushed (remote) SHA.
@@ -193,36 +204,38 @@ for backend in forgejo github gitlab; do
 		"$([ "$rc" != 0 ] && grep -q "sha or --pr" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 done
 
-# 9. Forgejo blind spot (#53): a run still in `waiting` state has no task yet, so
-#    the old /actions/tasks poll saw nothing and reported "no CI run found". The
-#    /actions/runs endpoint lists it immediately — the watcher must report it as
-#    pending, not missing. (Times out non-zero since the run never completes.)
-printf '\033[1m── forgejo: waiting runs (#53) ──\033[0m\n'
-set_runs forgejo "$(run_obj forgejo wait 44 "$REMOTE_SHA")"
-out="$(run_watch forgejo 2 --sha "$REMOTE_SHA")"; rc=$?
-check "forgejo: a waiting run is seen as pending, not 'no CI run found'" \
-	"$(grep -q "pending=1 failed=0 skipped=0 status=pending" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
-check "forgejo: waiting-run timeout message is not the missing-run one" \
-	"$(grep -q "no CI run found" <<<"$out" && echo 0 || echo 1)" "out=$out"
-# …and with the two clocks (#171) it is specifically the QUEUE message: a run
-# that never leaves `waiting` never executed, so --timeout was never the cap.
-check "forgejo: a never-started run fails on the queue allowance, not --timeout" \
-	"$(grep -q "never started executing" <<<"$out" && echo 1 || echo 0)" "out=$out"
+if covers forgejo; then
+	# 9. Forgejo blind spot (#53): a run still in `waiting` state has no task yet, so
+	#    the old /actions/tasks poll saw nothing and reported "no CI run found". The
+	#    /actions/runs endpoint lists it immediately — the watcher must report it as
+	#    pending, not missing. (Times out non-zero since the run never completes.)
+	printf '\033[1m── forgejo: waiting runs (#53) ──\033[0m\n'
+	set_runs forgejo "$(run_obj forgejo wait 44 "$REMOTE_SHA")"
+	out="$(run_watch forgejo 2 --sha "$REMOTE_SHA")"; rc=$?
+	check "forgejo: a waiting run is seen as pending, not 'no CI run found'" \
+		"$(grep -q "pending=1 failed=0 skipped=0 status=pending" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+	check "forgejo: waiting-run timeout message is not the missing-run one" \
+		"$(grep -q "no CI run found" <<<"$out" && echo 0 || echo 1)" "out=$out"
+	# …and with the two clocks (#171) it is specifically the QUEUE message: a run
+	# that never leaves `waiting` never executed, so --timeout was never the cap.
+	check "forgejo: a never-started run fails on the queue allowance, not --timeout" \
+		"$(grep -q "never started executing" <<<"$out" && echo 1 || echo 0)" "out=$out"
 
-# 10. A short SHA prefix must still match: ?head_sha= is an exact server-side
-#     filter, so the adapter may only send it for a full 40-char SHA and must
-#     fall back to the client-side startswith match otherwise.
-set_runs forgejo "$(run_obj forgejo ok 45 "$REMOTE_SHA")"
-out="$(run_watch forgejo 10 --sha "${REMOTE_SHA:0:12}")"; rc=$?
-check "forgejo: short --sha prefix still finds the run" \
-	"$([ "$rc" = 0 ] && grep -q "status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+	# 10. A short SHA prefix must still match: ?head_sha= is an exact server-side
+	#     filter, so the adapter may only send it for a full 40-char SHA and must
+	#     fall back to the client-side startswith match otherwise.
+	set_runs forgejo "$(run_obj forgejo ok 45 "$REMOTE_SHA")"
+	out="$(run_watch forgejo 10 --sha "${REMOTE_SHA:0:12}")"; rc=$?
+	check "forgejo: short --sha prefix still finds the run" \
+		"$([ "$rc" = 0 ] && grep -q "status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+fi
 
 # 11. Superseded runs (#43): a failed attempt replaced by a newer run of the
 #     SAME identity (workflow/trigger — GitLab: pipeline source) must not
 #     poison the verdict; only the latest attempt per group counts. Mirrors
 #     how the providers' own UIs show a re-run job as green.
 printf '\033[1m── superseded runs (#43) ──\033[0m\n'
-for backend in forgejo github gitlab; do
+for backend in $CI_WATCH_BACKENDS; do
 	set_runs "$backend" "$(run_obj "$backend" fail 42 "$REMOTE_SHA" lint.yml)" "$(run_obj "$backend" ok 43 "$REMOTE_SHA" lint.yml)"
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
 	check "$backend: superseded failed run is ignored (latest attempt wins)" \
@@ -274,7 +287,7 @@ done
 #     through the merge gate. Skipped is now counted on its own axis: all-skipped
 #     is its own verdict, a partial skip still passes but says how many.
 printf '\033[1m── skipped runs (#150) ──\033[0m\n'
-for backend in forgejo github gitlab; do
+for backend in $CI_WATCH_BACKENDS; do
 	# Every run skipped → NOT a pass; its own status so the human sees nothing ran.
 	set_runs "$backend" "$(run_obj "$backend" skip 42 "$REMOTE_SHA" lint.yml)"
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
@@ -352,7 +365,7 @@ set_runs_after() {
 	mv "$RESP/runs.json" "$RESP/runs-after.json"
 }
 
-for backend in forgejo github gitlab; do
+for backend in $CI_WATCH_BACKENDS; do
 	# (a) Queued past --timeout, then runs and succeeds → exit 0. Without the
 	#     job-list check the run reads as executing from the first poll and this
 	#     dies at 1s with the execution message.

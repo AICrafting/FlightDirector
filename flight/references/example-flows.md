@@ -111,6 +111,25 @@ where an issue sits, and issues stay open until the terminal stage.
 > release cut, set `"closesIssues": true` on the `qa` stage; the issue then closes on entry to `qa` and the
 > `main` promotion is purely a branch move.
 
+> **Tip — when the last branch isn't the last step.** Plenty of pipelines ship *past* their final branch:
+> merging `main` deploys to dev, and preprod and prod are deployment approvals — GitHub Environments, a
+> manual gate, a change window — that happen on the same workflow run, days later, with no branch of their
+> own. Left alone, the issue closes when the last **branch** merges, which is before it has really shipped.
+>
+> Set `"closesIssues": false` on the terminal stage and give it an `issueStatus`:
+>
+> ```jsonc
+> { "name": "main", "merge": "pr", "strategy": "merge",
+>   "issueStatus": "qa",      // where it rests after the merge/dev deploy
+>   "closesIssues": false }   // the real release is still ahead, so nothing auto-closes
+> ```
+>
+> The issue then sits open at `status/qa` until someone closes it — by hand, or by asking the agent to
+> close what shipped once prod is approved. flight has no visibility into a deployment, so this is the
+> honest arrangement: it tracks the issue up to the last thing it can actually observe, and stops. If you
+> want the close to be precise rather than "everything still open", ask for the issues referenced between
+> the previously released commit and the one just deployed — `git log <prev>..<deployed>` names them.
+
 ---
 
 ## 4 hops — long pipeline, all three merge strategies side by side

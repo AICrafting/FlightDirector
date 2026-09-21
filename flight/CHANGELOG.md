@@ -47,6 +47,32 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   The contract row now names the possible values, and the rig smokes assert the live post-merge
   value, which is the case a fake curl can only approximate.
 
+- **The repo's own test suite runs in parallel** (#212). `scripts/run-tests.sh` ran its
+  `scripts/tests/*.test.sh` one at a time, which made the Windows CI leg ~78% of the test
+  workflow's wall clock: a median 488s against 112s for macOS and ~72s for the two Linux legs,
+  and the slowest leg in 38 of 46 runs. The cause was not the setup (checkout, `setup-python`
+  and the `jq` download together came to 7s of a 618s run) and not slow hardware: 28 unrelated
+  test files were each 19-29x their Linux time, which is per-process cost. MSYS has no `fork()`,
+  so every spawn is a `CreateProcess` plus an address-space copy, and these tests spawn
+  constantly. Width is the one lever that helps every leg at once, so files now run concurrently,
+  each output buffered and flushed whole on completion. Locally the suite went from 171s to 51s.
+  `ci-watch.test.sh` is additionally split into one job per backend, because its timeout cases
+  wait on a real clock and it would otherwise set the floor for the whole run; running that file
+  directly still covers all three backends. `TEST_JOBS=1` restores the serial path for debugging,
+  and `TEST_JOBS=N` picks a width (default: cores, capped at 8). Nothing a consumer of the plugin
+  calls changes; this is the repo's own CI.
+
+- **Documented that the terminal stage doesn't have to close the issue** (#154, user-submitted).
+  Plenty of pipelines ship *past* their last branch: merging `main` deploys to dev, while preprod
+  and prod are deployment approvals on the same workflow run, days later, with no branch of their
+  own — so the issue closed when the last branch merged, before it had really shipped. Setting
+  `"closesIssues": false` on the terminal stage has always supported this and the config reference
+  always said so, but nothing showed it: `example-flows.md` demonstrated only the opposite move
+  (closing *early*), and the guide's narrative implied closing at the last branch was inevitable.
+  Both now cover it, with the honest caveat that flight cannot see a deployment, so the final
+  close is yours to make — precisely, if you want, by asking for the issues referenced between the
+  previously released commit and the one just deployed.
+
 - **`issues get` now reports the issue's state** (#205). The first line becomes
   `number⇥title⇥state`, with `state` normalized to exactly `open` or `closed` on every backend.
   Previously it emitted `number⇥title` and exited 0 whether the issue was open or closed, so
