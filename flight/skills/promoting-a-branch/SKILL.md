@@ -317,9 +317,13 @@ KEYWORD=Ready; [ "$CLOSES" = true ] && KEYWORD=Closes
 ```
 
 The PR is built from the **pushed** branch tip, not your local working copy — so **run the Step
-4b preflight gate here**, before that push and before `pr open`. A red gate stops the promotion
-with the branch unpushed; there is no point spending a CI queue on a failure a local command
-just named.
+4b preflight gate here**, before `pr open`. A red gate stops the promotion with no PR opened;
+there is no point spending a CI queue, or a reviewer, on a failure a local command just named.
+
+Note what this hop does *not* do: it never pushes `$BRANCH`. The only pushes in this skill are
+the two `direct`-hop sites above. A `pr` hop requires the branch to be on origin already — the
+source guard below says "push first" rather than pushing for you — so on a red gate the branch
+stays on origin exactly as it was, and what the gate prevents is the **PR**, not the push.
 
 Before opening the PR, verify local `$BRANCH` isn't ahead of the remote — otherwise the PR (and
 the CI you'd watch) silently omits your latest commit:
@@ -339,7 +343,7 @@ fi
 # gate most repos never actually have. The `pr open` must sit INSIDE the guard — a bare
 # `if … fi` with a "# STOP" comment in it is the defect this skill already fixed twice.
 if [ "${GATE_OK:-no}" != yes ]; then
-    echo "preflight gate is not green — not pushing, not opening the PR" >&2
+    echo "preflight gate is not green — not opening the PR" >&2
 else
     PR="$(flight pr open --head "$BRANCH" --base <target> \
             --title "…" --body-file "$SCRATCH/pr-body.md" \

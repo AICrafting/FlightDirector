@@ -48,7 +48,7 @@ says "$QB/SKILL.md" 'never on position'
 #   ticket=all status=safety-valved  -> NOT finished; render ✗, issues surfaced as deferred
 #   status=blocked                   -> NOT finished; the question gets routed
 #   no ticket=all line at all        -> NOT finished, whatever the agent reported (two sites)
-#   preflight-pass / preflight-fail  -> the orchestrator's own lines, never the verdict
+#   preflight-pass / -fail / -skip   -> the orchestrator's own lines, never the verdict
 #
 # Each pattern spans a WHOLE condition, antecedent through consequent, and includes the
 # connective. Three failure modes are behind that, all found by mutation rather than reasoning:
