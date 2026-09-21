@@ -45,7 +45,6 @@ cols="$(head -1 <<<"$OUT" | awk -F'\t' '{print NF}')"
 
 GET="$(lsp issues get --number "$K")"
 grep -q "\[rig\] smoke $TS" <<<"$GET" && ok "get returns key⇥summary⇥state line" || no "get returns key⇥summary⇥state line" "$GET"
-# Jira has no state field: the status CATEGORY decides (#205).
 # Jira has no state field: `.fields.status.statusCategory.key` decides (#205).
 ST="$(cut -f3 < <(head -1 <<<"$GET"))"
 [ "$ST" = open ] && ok "get maps a non-done status category to open" || no "get maps status category to open" "got '$ST'"

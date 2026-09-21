@@ -143,7 +143,7 @@ file right then. `issues get` reports state as field 3, normalized to `open`/`cl
 backend (#205):
 
 ```
-IFS=$'	' read -r _ _ STATE <<<"$(flight issues get --number "<N>")"
+IFS=$'\t' read -r _ _ STATE <<<"$(flight issues get --number "<N>")"
 [ "$STATE" = open ]              # true → open, deferral is tracked; false → HALT
 ```
 

@@ -87,6 +87,19 @@ check "jira: a done-category status is closed"          "$(state jira "$(jira_js
 check "jira: a new-category status is open"             "$(state jira "$(jira_json "new")")" open
 check "jira: an indeterminate-category status is open"  "$(state jira "$(jira_json "indeterminate")")" open
 
+# A response with no status must FAIL, not default to open. Jira is the only
+# backend that derives state rather than reading it, so a missing field would
+# otherwise report `open` for what may be a done issue — the one direction that
+# lets a stale tracker slip past a deferral guard. The other three emit an empty
+# field 3 and halt on their own.
+: >"$CURL_LOG"
+if ISSUE_JSON='{"key":"ACME-1","fields":{"summary":"t","description":"b"}}' \
+	"$ADAPTERS/jira/issues" get --number 1 >/dev/null 2>&1; then
+	check "jira: a response with no status fails instead of reporting open" exited-0 non-zero
+else
+	check "jira: a response with no status fails instead of reporting open" non-zero non-zero
+fi
+
 printf '\033[1m── the line shape stays pinned ──\033[0m\n'
 
 # Field 3 is APPENDED: number and title keep their positions, so `cut -f1`/`-f2`

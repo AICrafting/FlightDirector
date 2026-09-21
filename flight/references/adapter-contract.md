@@ -281,7 +281,8 @@ Safety is in the verb, not in the caller:
   Issues are addressed by their per-project **`iid`** (what the contract calls `--number`), and
   the body lives in `description`, not `body`. GitLab reports an open issue's state as
   **`opened`**, not `open`, so `issues get` normalizes it — a caller comparing the raw wire value
-  against `open` would read every open GitLab issue as not-open. Labels are applied **by name** (like GitHub) via
+  against `open` would read every open GitLab issue as not-open. Labels are applied **by name**
+  (like GitHub) via
   `add_labels`/`remove_labels`; `set-status` does the single-status swap in one `PUT`. Auth is a
   `PRIVATE-TOKEN` header (personal/project access token). `issues comments` drops GitLab **system
   notes** (label/state-change activity) so only real comments come back. `issues attach` uploads

@@ -154,7 +154,7 @@ git -C "$SCRATCH/int-<zone>" push -u origin "$INT"
 #   - scan the assembled body for deferrals. The test is SEMANTIC, not textual: anything the body
 #     records as deliberately not done ("known gaps", "out of scope", "TODO", "future work", "punted",
 #     "follow-up", ...) counts, however phrased — those are examples, not a list to grep for. Each
-#     needs an #N verified open (IFS=$'	' read -r _ _ STATE <<<"$("$DISP" issues get --number <N>)"
+#     needs an #N verified open (IFS=$'\t' read -r _ _ STATE <<<"$("$DISP" issues get --number <N>)"
 #     then [ "$STATE" = open ] — state is field 3, normalized across backends, #205), filed right
 #     then if absent. An issue this PR resolves does NOT count as the tracker, even on a Ready #N
 #     hop where it stays open for now. Halt the group otherwise.
