@@ -51,7 +51,10 @@ the whole lifecycle into the session:
   GitLab (gitlab.com or self-managed). Issues can optionally live in Jira instead.
 - A **per-repo, least-privilege API token** for that backend. Scope it to the one repository and
   to just what the skills call — never an all-orgs admin token. (Why per-repo? A misfire then
-  fails with a hard `403` instead of writing to the wrong place.) Where to create it and the
+  fails with a hard `403` instead of writing to the wrong place, and an agent steered by a
+  prompt injection in an issue or comment can't reach your other repos. That's also why GitHub
+  uses its own token rather than your `gh` CLI login; see
+  [backends.md](references/backends.md#github-full-parity).) Where to create it and the
   minimum scopes, per backend:
 
   | Backend | Create the token at | Minimum |

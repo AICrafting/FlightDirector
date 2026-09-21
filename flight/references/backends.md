@@ -109,6 +109,26 @@ Drop **Actions** and **Workflows** if you don't use the `ci` group.
 read; add `workflow` only if promoted branches edit workflow files. `repo` is broader than the
 fine-grained set above — prefer fine-grained when you can.
 
+**Why a token, and not your `gh` CLI login?** The adapter could make every one of its calls
+through `gh`, but it deliberately authenticates with its own repo-scoped token instead:
+
+- **`gh` picks credentials per host, not per repo.** It uses `GH_TOKEN`/`GITHUB_TOKEN` (or
+  `GH_ENTERPRISE_TOKEN`) if set, otherwise the stored login of the host's one *active* account.
+  `gh auth switch` changes that account for every repo at once, so nothing ties a repo to the
+  identity that should act on it.
+- **A `gh auth login` token is user-wide.** It carries classic `repo`, `workflow`, `read:org`,
+  and `gist` scopes across every repository and organization you can reach. The fine-grained PAT
+  above limits the same mistake to one repo and a handful of permissions.
+- **An agent is driving it.** Flight runs inside an agent that reads untrusted text: issue
+  bodies, comments, PR descriptions, CI logs. If a prompt injection ever steers that agent, a
+  user-wide token lets it push to, delete, or rewrite workflows in *any* of your repos. A
+  repo-scoped token keeps the damage to this repo and only the permissions you granted.
+- **Revocation and audit.** A dedicated token can be revoked on its own, shows up under its own
+  name in the audit log, and can expire without logging you out of anything else.
+
+If `gh` is ever used as a transport, feed it this same fine-grained token through `GH_TOKEN`
+so the permissions don't change.
+
 ---
 
 ## GitLab (full parity)
