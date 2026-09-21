@@ -62,10 +62,16 @@ says "$QB/SKILL.md" 'never on position'
 # Section 4 condition", so Section 4's sentence IS the condition and Section 5's is a restatement
 # — guarding only the restatement is this issue's own defect one level up.
 #
-# NOT pinned, deliberately: the rationale prose in dispatch-claude.md ("its report is wrong by
-# construction"). It argues FOR the rule rather than being a condition anything branches on, and
-# SKILL.md carries the instruction. Pinning rationale is where a contract test stops guarding a
-# property and starts transcribing the skill.
+# NOT pinned, deliberately, and both of these were checked rather than assumed:
+#  - The rationale prose in dispatch-claude.md ("its report is wrong by construction"). It argues
+#    FOR the rule rather than being a condition anything branches on, and SKILL.md carries the
+#    instruction. Pinning rationale is where a contract test stops guarding a property and starts
+#    transcribing the skill.
+#  - Text appended AFTER a satisfied gate, e.g. "proceed to Section 5 without waiting". The
+#    condition in front of it is untouched, so nothing about the gate changes and there is no
+#    behaviour to guard. Do not read that as a hole and pin a fourth fragment of the sentence: a
+#    mutation that genuinely weakens the same gate ("Without waiting for the sweep, proceed")
+#    does trip, which is what tells the two cases apart.
 says "$QB/SKILL.md" 'classify from its .ticket=all. line, wherever it sits: no .ticket=all status=done. → ..agent still working..'
 says "$QB/SKILL.md" 'ticket=all. line reads .status=done., render that zone.s header'
 says "$QB/SKILL.md" 'ticket=all status=safety-valved. means the zone did not finish its queue'
