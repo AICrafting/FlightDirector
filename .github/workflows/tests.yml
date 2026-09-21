@@ -119,6 +119,13 @@ jobs:
   #   PATH  C:\Windows\System32\sort.exe shadows the POSIX sort. It has no -u,
   #         and reports the flag as a missing file, so `branches` fails with
   #         "out=-uThe system cannot find the file specified." Put /usr/bin first.
+  #         /mingw64/bin comes next, ahead of the inherited PATH, so `git` is the
+  #         real /mingw64/bin/git.exe rather than /cmd/git.exe — the launcher,
+  #         which spawns the real binary as a SECOND process. On a leg where every
+  #         spawn is a CreateProcess plus an address-space copy, halving the
+  #         process count of the most-called tool is the cheapest win left (#214).
+  #         Deliberately AFTER /usr/bin, not before it: /mingw64/bin must not be
+  #         allowed to win a tool that /usr/bin is here to provide, `sort` above all.
   #   jq    absent on the runner. Installed below; the CRLF its native build
   #         writes is handled in flight/scripts/_portable.sh, not here, because a
   #         user installing jq from winget or scoop gets exactly the same build.
@@ -164,7 +171,7 @@ jobs:
       - name: Show the environment under test
         shell: bash
         run: |
-          export PATH="/usr/bin:$HOME/bin:$PATH"
+          export PATH="/usr/bin:/mingw64/bin:$HOME/bin:$PATH"
           uname -a
           bash --version | head -1
           # run-tests.sh sizes its worker pool from this (#212), so a timing
@@ -173,9 +180,32 @@ jobs:
           for t in sort jq git python3; do
             printf '%s -> %s\n' "$t" "$(command -v "$t" || echo MISSING)"
           done
+          git --version
+          # #214: git must resolve to /mingw64/bin, the real binary, NOT /cmd, the
+          # Git for Windows launcher that starts it as a second process. `sort` must
+          # still come from /usr/bin — that precedence is why /usr/bin leads (#130),
+          # and /mingw64/bin sits after it precisely so this cannot regress.
+          #
+          # Reported rather than asserted: if this runner has no /mingw64/bin the PATH
+          # change is a harmless no-op, and a timing that then fails to move should
+          # read as "the change did not apply here", not as "the idea was wrong".
+          if [ -d /mingw64/bin ]; then
+            printf '#214 /mingw64/bin: present\n'
+          else
+            printf '#214 /mingw64/bin: ABSENT — the git PATH change is a no-op here\n'
+          fi
+          case "$(command -v git)" in
+            /mingw64/*) printf '#214 git: real binary (launcher bypassed)\n' ;;
+            /cmd/*)     printf '#214 git: STILL the /cmd launcher — two processes per call\n' ;;
+            *)          printf '#214 git: unexpected location, see above\n' ;;
+          esac
+          case "$(command -v sort)" in
+            /usr/bin/*) printf '#214 sort: still /usr/bin (no regression)\n' ;;
+            *)          printf '#214 sort: MOVED off /usr/bin — check for a -u failure\n' ;;
+          esac
 
       - name: Run script tests
         shell: bash
         run: |
-          export PATH="/usr/bin:$HOME/bin:$PATH"
+          export PATH="/usr/bin:/mingw64/bin:$HOME/bin:$PATH"
           bash scripts/run-tests.sh
