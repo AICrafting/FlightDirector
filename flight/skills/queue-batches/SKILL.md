@@ -160,12 +160,26 @@ batch-manifest write --run-id "$RUN_ID" \
 On every worker or log update, parse the line and re-render the board. If the active harness has a
 task-board primitive, update the matching issue task (`queued` → pending; `starting`/`working` →
 in progress; `complete` → completed; `blocked` → in progress with the note). When a zone's
-final line is `status=done`, render that zone's header with `⇥` (done, awaiting promotion); a final
-`status=safety-valved` means the zone did not finish its queue — render its header with `✗` and
+`ticket=all` line reads `status=done`, render that zone's header with `⇥` (done, awaiting
+promotion); `ticket=all status=safety-valved` means the zone did not finish its queue — render its header with `✗` and
 surface its unfinished issues as deferred. When a zone emits its terminal line, start that zone's
 repo gate sweep (4a) before rendering it as `⇥`. Once every zone has emitted a terminal line
 **and** its sweep has finished, proceed to Section 5. Match tasks by the `[<zone>] #<N>` subject
 prefix.
+
+**An agent returning is not that signal — its `ticket=all` line is.** When a zone's agent returns,
+look for that zone's `ticket=all` line. No such line means the zone is **unfinished, regardless of
+what the agent said**: a returned agent's account of its own state is the one piece of evidence
+that cannot be trusted here (4a's "From the orchestrator, not from the agent" carries the
+argument; the harness-specific mechanism is in [Claude Code](references/dispatch-claude.md)). Key
+on `ticket=all`, never on the log's last line — with `code.preflight` configured, 4a's own lines
+land after it. If the agent's latest line is `status=blocked`, that is a question still to route
+(below). Otherwise it has most likely parked, so establish what is actually still running before
+doing anything. Footgun: the orchestrator's own log watcher appears in a `ps` listing matched on
+the log path or worktree, so a match is not proof the worker's job is alive — look for the
+worker's own command. If nothing is, resume the agent through the harness's agent-messaging
+primitive (nothing is running; redo the step in the foreground and carry on); if it cannot be
+resumed, surface its unfinished issues as deferred, as for `safety-valved`.
 
 ### 4a. Repo gate sweep — the orchestrator runs it, not the agents
 
@@ -205,19 +219,6 @@ get the command (they run it in the *foreground*, for the baseline and before ea
 that is what "tests green after every commit" means in a repo that configures one. The
 orchestrator's sweep is the authoritative record.
 
-**An agent returning is not that signal — the log's final line is.** When a zone's agent returns,
-read its log's last line. Anything other than `status=done` or `status=safety-valved` means the zone
-is **unfinished, regardless of what the agent said**: a returned agent's account of its own state is
-the one piece of evidence that cannot be trusted here (one mechanism:
-[Claude Code](references/dispatch-claude.md)). A final `status=blocked` is a question still to route
-(below). Otherwise the agent has most likely parked — it reports "waiting on" a job that no longer
-exists — so establish what is actually still running before doing anything. Footgun: the
-orchestrator's own log watcher appears in a `ps` listing matched on the log path or worktree, so a
-match is not proof the worker's job is alive — look for the worker's own command. If nothing is,
-resume the agent through the harness's agent-messaging primitive (nothing is running; redo the step
-in the foreground and carry on); if it cannot be resumed, surface its unfinished issues as deferred,
-as for `safety-valved`.
-
 ## Status log format (contract)
 
 Agents append one line per state change to `$SCRATCH/queue-status/<zone>.log`:
@@ -228,7 +229,8 @@ Agents append one line per state change to `$SCRATCH/queue-status/<zone>.log`:
 `queued` is pre-seeded by the orchestrator before dispatch; workers emit `starting`/`working`/`complete`/`blocked`.
 `preflight-pass`/`preflight-fail` are written by the **orchestrator** after the zone's terminal
 line (Section 4a), `note=` carrying the failing log's path; they appear only when `code.preflight`
-is configured. Final per-zone line: `<ts> <zone> ticket=all status=<done|safety-valved> note="…"`.
+is configured. Terminal line, the agent's last (4a's may follow it, so match on `ticket=all`,
+not on position): `<ts> <zone> ticket=all status=<done|safety-valved> note="…"`.
 
 ## Display format (stacked, phone-legible)
 
@@ -260,8 +262,9 @@ Wait for the user's answer, then use the active harness's agent-messaging primit
 
 ## 5. Completion & ship
 
-Once every zone's log ends in a terminal line (`status=done` or `status=safety-valved`) — the
-Section 4 condition, not merely every agent having returned: summarize each zone (commits with
+Once every zone has a `ticket=all` line reading `status=done` or `status=safety-valved` **and**
+its 4a sweep (when one is configured) has finished — the Section 4 condition, not merely every
+agent having returned: summarize each zone (commits with
 SHA + title, test deltas, judgment calls, deferrals). Surface any skipped/deferred issue with a
 follow-up suggestion. Report each `preflight-fail` issue by number with its log path and a tail
 of the failure, and say plainly that it should not be promoted until the gate is green —

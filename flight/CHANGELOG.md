@@ -137,15 +137,20 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 ### Fixed
 
 - **`queue-batches` no longer reads a parked zone as finished** (#207). The skill gave the
-  orchestrator two triggers for "this zone is done": Section 4 waited for every zone's log to end
-  in a terminal line, Section 5 started "when all agents return". An agent that returned *without*
-  a terminal line fell between them, and the convenient reading summarized the batch and handed it
-  to `promoting-branches` with work still owed. Section 5 now opens on the Section 4 condition, and
-  Section 4 says what to do when an agent returns early: read the log's last line, treat anything
-  but `done`/`safety-valved` as unfinished regardless of what the agent reported, and check what is
+  orchestrator two triggers for "this zone is done": Section 4 waited for every zone to emit its
+  terminal line, Section 5 started "when all agents return". An agent that returned *without* a
+  terminal line fell between them, and the convenient reading summarized the batch and handed it
+  to `promoting-branches` with work still owed. Section 5 now opens on the Section 4 condition,
+  and Section 4 says what to do when an agent returns early: look for the zone's `ticket=all`
+  line, treat its absence as unfinished regardless of what the agent reported, and check what is
   really running (the orchestrator's own log watcher shows up in that `ps` listing, so a match is
   not proof). The Claude Code mechanism (a job the worker backgrounded dies with the worker's
   shell, so the worker comes back "waiting" on nothing) is in `references/dispatch-claude.md`.
+  Every one of these tests is keyed on the `ticket=all` marker rather than on the line being
+  last, including the two that predate #207: with a `code.preflight` gate configured (#209) the
+  orchestrator appends its own `preflight-pass` lines *after* the terminal line, so a positional
+  reading would have called every finished zone unfinished and stalled the batch. The status-log
+  contract now labels that line "the agent's last" and says to match on the marker.
 - **`ci log` can now show why a PR's CI is red** (#138). Two faults meant the documented failure
   path of every `pr` hop — `ci log --failed "$BRANCH"` — found nothing on a repo whose workflows run
   on pull requests. (1) The branch lookup asked for runs under `refs/heads/<branch>`, but a run

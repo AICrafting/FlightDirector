@@ -14,11 +14,21 @@ grep -q 'dispatch-claude.md' "$REPO_ROOT/flight/skills/queue-batches/SKILL.md"
 # #207: a zone is finished when its log says so, not when its agent returns. The rule is
 # harness-agnostic (SKILL.md); why a parked agent happens is Claude Code specific (the reference).
 QB="$REPO_ROOT/flight/skills/queue-batches"
+
+# Phrase checks flatten newlines first: markdown rewraps at will, the property does not move.
+says() { tr '\n' ' ' < "$1" | tr -s ' ' | grep -q "$2"; }
+
 # (`! grep` is exempt from `set -e`, so the negative checks are spelled out.)
-if grep -q 'When all agents return' "$QB/SKILL.md"; then exit 1; fi
-grep -q 'regardless of what the agent' "$QB/SKILL.md"
-grep -q 'own log watcher' "$QB/SKILL.md"
-if grep -q 'run_in_background' "$QB/SKILL.md"; then exit 1; fi
-grep -q 'dies with' "$QB/references/dispatch-claude.md"
+if says "$QB/SKILL.md" 'When all agents return'; then exit 1; fi
+says "$QB/SKILL.md" 'regardless of what the agent said'
+says "$QB/SKILL.md" "own log watcher"
+# The terminal line is found by its ticket=all marker, never by being last: with code.preflight
+# configured the orchestrator appends 4a lines after it (see the status log contract).
+if says "$QB/SKILL.md" "log ends in a terminal line"; then exit 1; fi
+if says "$QB/SKILL.md" "read its log's last line"; then exit 1; fi
+says "$QB/SKILL.md" 'ticket=all. line reads .status=done'   # . stands in for a backtick
+says "$QB/SKILL.md" 'never on the log.s last line'
+if says "$QB/SKILL.md" run_in_background; then exit 1; fi
+says "$QB/references/dispatch-claude.md" 'dies with'
 
 printf 'Codex compatibility contract tests passed\n'
