@@ -36,15 +36,21 @@ flight <group> <verb> [--flag value …]
 
 The dispatcher:
 
-1. Reads `.flightdirector/config.json` (config) and `.flightdirector/secrets.json` (token), from repo root.
-2. Picks the **axis** for the group — `issues`/`labels` → `issues.*`, `pr`/`ci`/`auth`/`branches` → `code.*`
-   (`auth check --axis issues` overrides that one) — applying `code → issues` inheritance when the
-   `issues` block is omitted.
+1. Reads `.flightdirector/config.json` (config) and `.flightdirector/secrets.json` (token), from repo
+   root, and refuses a `schemaVersion` newer than it understands (currently 3).
+2. Picks the **axis** for the group — `issues`/`labels` → the issue side, `pr`/`ci`/`auth`/`branches` →
+   `code.*` (`auth check --axis issues` or `--tracker` overrides that one). On a schema-2 config the
+   issue side is `issues.*` with `code → issues` inheritance. On schema 3 it is **one named
+   tracker** from `issueTrackers` — see **Named tracker routing** below — and the config is
+   validated first, so an invalid tracker list never reaches an adapter.
 3. Exports the resolved coordinates + token into the adapter's environment: `LS_API`,
-   `LS_OWNER`, `LS_REPO`, `LS_TOKEN`, `LS_TOKEN_SOURCE`, `LS_TRUNK` (code's trunk branch),
-   `LS_LABELS_JSON` (the `labels` map, for role→name resolution), and `LS_BACKEND`. Token
-   precedence: `LS_TOKEN` / `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a
-   legacy name), else the secrets file (axis, `code → issues`). `LS_TOKEN_SOURCE` names which
+   `LS_OWNER`, `LS_REPO`, `LS_PROJECT`, `LS_EMAIL`, `LS_TOKEN`, `LS_TOKEN_SOURCE`, `LS_TRUNK` (code's
+   trunk branch), `LS_LABELS_JSON` (the selected tracker's `labels` map — schema 2: the top-level
+   one — for role→name resolution), and `LS_BACKEND`. Token precedence: `LS_TOKEN` /
+   `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a legacy name), else the
+   secrets file (axis, `code → issues`; for a schema-3 tracker with `credentialRef: "code"`,
+   `secrets.code`). A schema-3 tracker with **its own credential** skips the env override
+   entirely and reads only `secrets.issueTrackers.<REF>`. `LS_TOKEN_SOURCE` names which
    of those won — the env var as `$FLIGHT_TOKEN` (leading `$`), or the secrets file's path in a
    form that resolves from wherever the caller ran: absolute for the repo's own (gitignored,
    main-checkout-only) file, or exactly the argument when `auth check --secrets` supplied a
@@ -60,7 +66,35 @@ The dispatcher:
 5. Execs `adapters/<backend>/<group> <verb> [args…]`.
 
 So adapters are pure: they read coordinates/token from `LS_*` env, never parse config, never
-know which axis they serve. Swapping `forgejo` for `github` changes nothing above the adapter.
+know which axis — or which named tracker — they serve. Swapping `forgejo` for `github` changes
+nothing above the adapter.
+
+## Named tracker routing (schema 3, dispatcher-owned)
+
+Config and credential rules are in [flight-setup.md](flight-setup.md#named-issue-trackers-config-schema-3).
+On a schema-3 config the dispatcher, not the adapter, chooses the tracker for every `issues` and
+`labels` verb and for `auth check --tracker REF` / `--axis issues`:
+
+- **`--tracker REF`** (any `issues`/`labels` verb, `auth check`) — select by `ref` or alias,
+  case-insensitively. Stripped before the adapter runs. Given twice → error. Unknown → error
+  naming near matches and every configured tracker; no network call is made. `pr`/`ci` do not
+  take it: they always use `code`. `auth check --tracker REF --axis code` is a conflict.
+- **`--number INPUT`** on any `issues` verb is resolved first: a bare `12`/`#12` means the default
+  tracker (or the `--tracker` one); `GH12`, `GH-12`, `GH#12` or a Jira key `PROJ-7` names its
+  tracker. The adapter receives the **native** id (`12`, or `PROJ-7` for Jira). A qualified id
+  naming a different tracker than `--tracker` is an error.
+- Without `--tracker` or a qualified id, the default tracker is used — so every existing
+  unqualified call keeps working, with unchanged output.
+- On a schema-2 config, `--tracker`, `--all-trackers`, `issues resolve` and `issues tracker`
+  fail with "run flight reconcile" rather than falling back to the single-tracker path.
+
+Dispatcher-owned verbs:
+
+| Verb | Args | stdout |
+|------|------|--------|
+| `issues resolve` | `--number INPUT` `[--tracker REF]` | one line of JSON: `{"tracker":"FJ","number":"12","qualified":"FJ-12","branchPrefix":"fj-12"}`. `tracker` is the canonical ref; `number` the native id as a string (`"PROJ-7"` for Jira, leading zeros stripped otherwise); `qualified` is `REF-<digits>`; `branchPrefix` is `qualified` lowercased. No coordinates, URLs or secrets. No network call. Ambiguous input (`A12` with refs `A` and `A1`) fails listing the candidates unless `--tracker` picks one |
+| `issues tracker` | `[--tracker REF]` | the selected tracker's config entry as one line of JSON (config only — never secrets), e.g. to read its label map: `flight issues tracker --tracker GH \| jq -r '.labels.status["to-test"]'` |
+| `issues list` | `--all-trackers` plus the ordinary `list` flags | every tracker in config order, each dispatched with its own coordinates, credential and label map. Each row is that tracker's ordinary `list` row with the qualified id prepended: `qualified⇥number⇥title⇥labels` (Jira: `JIR-1⇥PROJ-1⇥…`). A tracker that fails is reported on stderr as `flight: tracker REF unavailable: <reason>` and makes the exit status non-zero; the other trackers' rows are still printed — a failure is never an empty backlog. Cannot be combined with `--tracker`; only `issues list` accepts it |
 
 ## Output & exit conventions (every verb)
 
@@ -172,7 +206,7 @@ GitLab comment endpoints do cap, and are paged.
 
 | Verb    | Args                                          | stdout |
 |---------|-----------------------------------------------|--------|
-| `check` | `[--secrets PATH]` `[--axis code\|issues]`     | one `✓`/`✗`/`-` line per check: `<mark> <label>  <detail>`. Exit non-zero if any check failed |
+| `check` | `[--secrets PATH]` `[--axis code\|issues]` `[--tracker REF]` | one `✓`/`✗`/`-` line per check: `<mark> <label>  <detail>`. Exit non-zero if any check failed |
 
 `auth check` verifies a token **before** anything relies on it: the identity the backend reports,
 whether the repo/project named in `config.json` is reachable, one probe per capability group the
@@ -187,8 +221,9 @@ skills exercise, and the token's expiry where the backend exposes it. Rules:
 - Failures carry the **backend's own wording**, which is what actually names the fix — GitLab's
   `insufficient_granular_scope … [Work Item: Read]`, GitHub's per-resource 403.
 - The **token is never printed** beyond its first 8 characters.
-- Both flags are dispatcher-owned. `--axis` selects which axis's coordinates and token to check
-  (default `code`). `--secrets PATH` points the token lookup at a **candidate** file so a new
+- All three flags are dispatcher-owned. `--axis` selects which axis's coordinates and token to
+  check (default `code`; on schema 3 `issues` means the default tracker). `--tracker REF`
+  (schema 3) checks that tracker with its own credential selection. `--secrets PATH` points the token lookup at a **candidate** file so a new
   token is verified before it replaces the live one; precedence is `--secrets` > `LS_SECRETS_FILE`
   > the normal resolution (`LS_TOKEN`/`FLIGHT_TOKEN` env, then the repo's secrets file) — an
   explicit candidate file deliberately beats an ambient env token.

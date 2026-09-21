@@ -15,6 +15,50 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- **A repo can have several named issue trackers** (#197; ships together with #198's
+  tracker-aware work lifecycle and #199's tracker setup). Config schema 3 replaces the single
+  `issues` object and top-level `labels` map with an `issueTrackers` array: each tracker has a
+  stable `ref` (`GH`, `FJ`, or a Jira project key), optional aliases, its own coordinates, its
+  own credential and its own label map, and exactly one is the default. `code` still owns code,
+  PRs, CI and the stage pipeline. Several trackers may share a backend. The dispatcher routes
+  every issue and label verb to one tracker: a bare number means the default; `GH-12`, `GH12`,
+  `GH#12` or a Jira key such as `PROJ-7` name their tracker; `--tracker REF` selects explicitly.
+  Ambiguous or unknown refs fail with suggestions — flight never guesses where to write. New
+  dispatcher verbs: `issues resolve` (the canonical `{tracker, number, qualified, branchPrefix}`
+  identity), `issues tracker` (the selected entry), `issues list --all-trackers` (every tracker,
+  each row prefixed with its qualified id; a tracker that cannot be reached is reported and fails
+  the listing instead of looking empty), and `auth check --tracker REF`.
+
+  **Migration is automatic.** The next `flight reconcile` (every skill runs it first) converts
+  the repo: the old issue settings, inherited code coordinates and the complete label map
+  (including a `new` starting status as a string, `false`, or absent) become one default
+  tracker; a legacy `config.local.json` override and the gitignored `secrets.json` are converted
+  on each machine, without local values reaching the committed file and without printing a
+  token; pre-schema-3 `feature/<N>-…` branches and batch manifests are recorded in
+  `.flightdirector/batches/work-items/identities.json` (already gitignored by setup) as belonging
+  to the tracker that was the default at migration, so changing the default later never
+  re-points old work. The migration validates everything before writing, writes the committed
+  config last, and is safe to re-run or resume; a repeat run changes nothing.
+
+  **Compatibility:**
+  - **Update every clone and harness together.** Commit the migrated `config.json` only once
+    everyone uses a Flight with schema-3 support. Older Flight versions do not know schema 3;
+    migration leaves an `issues.backend: "requires-newer-flight"` stub so they stop with a
+    "no 'issues' adapter" error instead of acting on the code repository, but they cannot use
+    the trackers. This Flight in turn refuses any config newer than schema 3.
+  - **Issues on the code repository keep sharing the code token**, including `LS_TOKEN` /
+    `FLIGHT_TOKEN` / `FORGEJO_TOKEN` environment overrides, so CI and env-token setups work
+    unchanged (the tracker gets `credentialRef: "code"`). A tracker in a different repository
+    or backend, or one that had its own issue token, gets its own credential under
+    `secrets.issueTrackers.<REF>`, which environment tokens never override. On a different host
+    with no issue token, nothing is copied and reconcile says the tracker needs one.
+  - `issues list` without `--all-trackers`, and every existing unqualified command, keep their
+    exact output and act on the default tracker. `auth check --axis issues` checks the default
+    tracker.
+  - Anything that read `.labels` or `.issues` through `flight config` must read the tracker
+    instead, e.g. `flight issues tracker | jq -r '.labels.status["to-test"]'`; the bundled
+    skills are updated by #198/#199.
+
 - **A repo can name its own check command, and promotion runs it** (#209). New optional
   `code.preflight`: a shell command string that flight runs, from the checkout holding the code
   being gated, before work is merged or pushed. A non-zero exit halts the operation and the

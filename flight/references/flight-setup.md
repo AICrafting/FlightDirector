@@ -50,6 +50,10 @@ Backend, coordinates, and preferences, across two independent axes:
   omitted. Override it for split setups (issues tracked in a different repo or backend), or
   drop it entirely if you don't track issues.
 
+> **Schema 3 (named issue trackers).** The `issues` object and top-level `labels` map shown
+> below are the schema-2 form. `flight reconcile` migrates them into an `issueTrackers` array —
+> see [Named issue trackers](#named-issue-trackers-config-schema-3).
+
 ```jsonc
 {
   "schemaVersion": 2,
@@ -150,6 +154,114 @@ Backend, coordinates, and preferences, across two independent axes:
   superseded by `stages` — the per-stage `strategy` field replaces a top-level `mergeStrategy`.
   For backwards compatibility a legacy `trunkBranch` is still read
   **first** if present; otherwise `stages[0].name` is used.
+
+### Named issue trackers (config schema 3)
+
+Schema 3 replaces the singular `issues` object and the top-level `labels` map with an
+**`issueTrackers` array**: any number of named trackers, exactly one of them the default. `code`
+keeps owning code, PRs, CI and the stage pipeline. `flight reconcile` migrates an older config
+for you (see **Migration** below) — nobody needs to hand-convert one.
+
+```jsonc
+{
+  "schemaVersion": 3,
+  "code": { "backend": "forgejo", "api": "https://git.example.com/api/v1", "owner": "acme", "repo": "widget", "stages": [ … ] },
+  "issues": { "backend": "requires-newer-flight", "note": "…" },  // written by migration; see below
+  "legacyIssueTracker": "FJ",                                        // written by migration; see below
+  "issueTrackers": [
+    { "ref": "FJ", "name": "Working backlog", "default": true,
+      "backend": "forgejo", "api": "https://git.example.com/api/v1", "owner": "acme", "repo": "widget",
+      "credentialRef": "code",
+      "labels": { "status": { "in-progress": "status/in progress", "new": false }, "model": { "sol": "model/sol" } } },
+    { "ref": "GH", "aliases": ["Public"], "name": "Public intake",
+      "backend": "github", "api": "https://api.github.com", "owner": "acme", "repo": "widget",
+      "labels": { "status": { "in-progress": "status/in-progress" } } }
+  ]
+}
+```
+
+Per tracker entry:
+
+- **`ref`** (required) — the stable identity used in qualified issue ids (`FJ-12`) and in branch
+  names. A letter followed by letters and digits only — no `-`, `_` or `#`, so `GH1`, `GH-1` and
+  `GH#1` split without guessing. Unique across every `ref` **and** alias, compared
+  case-insensitively; `code` is reserved. Prefer the Jira project key for a Jira tracker,
+  otherwise the backend shorthand (`GH`, `FJ`, `GL`). Never rename a ref once branches use it.
+- **`name`** (required) — display name only; changing it is harmless.
+- **`default`** — `true` on exactly one tracker; `false` or absent on the rest.
+- **`aliases`** (optional) — more refs that select this tracker (exact, case-insensitive).
+- **`backend`**, **`api`**, **`owner`**, **`repo`**, **`project`**, **`email`** — this tracker's
+  own coordinates, exactly as the `code` block spells them for the same backend. Several trackers
+  may share a backend (two Forgejo repos, two Jira projects on one site).
+- **`credentialRef`** (optional) — which credential the tracker uses:
+  - omitted, or the tracker's own `ref`: **its own credential**, `secrets.issueTrackers.<REF>`
+    and nothing else. Environment tokens are code credentials and never shadow it.
+  - `"code"`: **share the code credential**, resolved exactly as the code axis resolves it
+    (`LS_TOKEN`/`FLIGHT_TOKEN`/`FORGEJO_TOKEN`, then `secrets.code`). Allowed only when the
+    tracker's `backend` and `api` host equal `code`'s — a token is never sent to another system.
+- **`labels`** — this tracker's role → label-name map (the old top-level `labels`, now per
+  tracker): status roles including `new` (a string = configured, `false` = declined, absent =
+  never asked — #193), model labels, and any role of your own. An adapter only ever sees the
+  selected tracker's map.
+- Unknown keys are preserved.
+
+Two top-level keys are written by migration and should be left alone:
+
+- **`issues: { "backend": "requires-newer-flight", … }`** — a stub for **older Flight
+  versions**, which route issue verbs through `issues.backend`: they now stop with *no 'issues'
+  adapter for backend 'requires-newer-flight'* instead of silently acting on the code repository.
+  Schema-3 Flight ignores it (any other `issues` object beside `issueTrackers` is an error).
+- **`legacyIssueTracker`** — the tracker that was the default when the repo migrated. Branches
+  and batch manifests created before schema 3 carry bare issue numbers; they belong to this
+  tracker however the default changes later (see **Legacy work** below).
+
+Validation runs before every tracker-routed operation (issue and label verbs, `auth check
+--tracker`/`--axis issues`) and before reconcile writes anything, and reports every problem at
+once. Plain `flight config` reads are not blocked by an invalid tracker list, so it can still
+be inspected and repaired.
+
+**Selecting a tracker.** A bare number (`12`, `#12`) means the default tracker. `FJ12`, `FJ-12`
+and `FJ#12` — ref or alias, any case — mean that tracker; a Jira key (`PROJ-7`) selects the Jira
+tracker whose `project` it names and stays the native id the adapter receives. `--tracker REF`
+selects explicitly; it may pick between ambiguous splits (`A12` with refs `A` and `A1`) but a
+qualified id naming a different tracker is an error. An unknown or near-miss ref fails with
+suggestions and the configured list — flight never guesses a target. See
+[adapter-contract.md](adapter-contract.md) for `issues resolve`, `issues tracker` and
+`issues list --all-trackers`.
+
+**Migration.** `flight reconcile` converts a schema-1/2 repo once, file by file:
+
+1. **`config.json`** (tracked): the old effective issue axis — `issues` fields over the code
+   coordinates they inherited — becomes one default tracker; the whole `labels` map moves into
+   it (unknown roles, `new` as string/`false`/absent, explicit `false`/`null` values all kept);
+   code settings stay on `code`. It gets `credentialRef: "code"` when the issues lived on the code
+   repository and there was no separate issue token, so env-token and CI setups keep working;
+   otherwise its own credential. `schemaVersion` becomes 3 and only the running harness's stamp
+   changes. Commit it — together with a Flight update for every clone and harness.
+2. **`config.local.json`** (per machine): a legacy local `issues`/`labels` override — or a local
+   code-coordinate override the default tracker used to inherit — becomes a complete local
+   `issueTrackers` array (arrays replace wholesale, so a partial entry would erase the tracked
+   trackers). An override that changes nothing about the trackers gets no array and is left
+   byte-identical. Local values never reach the tracked file.
+3. **`secrets.json`** (per machine): the legacy `issues` credential moves to
+   `issueTrackers.<REF>` of the default tracker. With no legacy issue token, a default tracker
+   with its own credential on the **same host** as code gets a copy of the code token (what the
+   old fallback sent there); on another host nothing is copied and reconcile says the tracker
+   needs one. `code` is never touched and no token is ever printed.
+4. **Legacy work**: see below.
+
+Each step is validated before anything is written, the tracked config is written last, and a
+repeat run changes nothing — so an interrupted run simply resumes. A clone that later pulls the
+migrated config converts its own `config.local.json`, `secrets.json` and bindings on its next
+reconcile. A file holding both the legacy and the named form is refused untouched, and a config
+from a newer schema is refused by every command (except the silent prompt-log hooks).
+
+**Legacy work.** Reconcile records every pre-schema-3 unqualified issue branch (local and
+remote-tracking, e.g. `feature/12-x`) and batch manifest in
+`.flightdirector/batches/work-items/identities.json`, bound to `legacyIssueTracker`. It lives
+under `.flightdirector/batches/`, which setup already gitignores; it is local, merged (never
+re-pointed) on repeat runs, and a file bound to a different tracker stops the migration with a
+repairable error.
 
 ### Repo preflight gate (optional)
 
@@ -362,11 +474,16 @@ not yet offer Jira — configure it by hand-editing `.flightdirector/config.json
 
 ### `.flightdirector/secrets.json` — gitignored
 
-Just the token(s), one per axis, with the same `code → issues` inheritance:
+Just the token(s). Schema 3 keys tracker credentials by tracker `ref`:
 
 ```jsonc
-{ "code": { "token": "…" }, "issues": { "token": "…" } }  // omit issues to share code's token
+{ "code": { "token": "…" }, "issueTrackers": { "GH": { "token": "…" }, "PROJ": { "token": "…", "email": "…" } } }
 ```
+
+`code` is the code credential (also used by any tracker with `"credentialRef": "code"`);
+`issueTrackers.<REF>` belongs to the tracker with that exact `ref` and to nothing else. A
+schema-2 file (`{ "code": …, "issues": … }`, with `issues` inheriting `code`) is migrated by
+`flight reconcile` — see [Named issue trackers](#named-issue-trackers-config-schema-3).
 
 **This file must be gitignored** — it holds a credential. If flight finds it tracked by
 git, it warns loudly on every run (it does not refuse). Add the `.flightdirector/secrets*` glob to
@@ -375,7 +492,8 @@ your `.gitignore` — ignoring the whole family (`secrets.local.json`, `secrets.
 
 Token precedence: `LS_TOKEN` or `FLIGHT_TOKEN` in the environment override everything
 (`FORGEJO_TOKEN` is still honoured as the legacy name); otherwise the secrets file (the axis's
-token, inheriting `code`'s).
+token, inheriting `code`'s). **Exception (schema 3):** a tracker with its own credential reads
+only `issueTrackers.<REF>` — environment tokens are code credentials and never reach it.
 
 **Not sure which token is in play? Run `flight auth check`** — it names the source it used
 beside the masked token, either the env var (`(from $FLIGHT_TOKEN)`) or the secrets file's full
@@ -432,8 +550,10 @@ Where to create each token and the reasoning behind each minimum is in
 
 The dispatcher picks the **axis** from the group — `issues`/`labels` → `issues.*`,
 `pr`/`ci`/`branches` → `code.*` — resolves that axis's backend, coordinates, and token (inheriting `code`),
-exports them as `LS_*`, and execs `adapters/<backend>/<group>`. Skills therefore never pass
-owner/repo/token; they just name the verb. `setting-up-a-repo` autodetects and writes the
+exports them as `LS_*`, and execs `adapters/<backend>/<group>`. On schema 3 the issue side is
+one selected tracker (the default, `--tracker REF`, or the tracker a qualified id names) and the
+adapter receives only that tracker's coordinates, credential and labels. Skills therefore never
+pass owner/repo/token; they just name the verb. `setting-up-a-repo` autodetects and writes the
 coordinates from the git remote on first run, so in the normal case you set nothing by hand.
 
 ## Context note
