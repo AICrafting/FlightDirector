@@ -109,5 +109,11 @@ Working on the tools in this repo? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 
-- **[Aaron Wood](https://aaronwood.dev/)** — *The original ideast* 🤣
-- **[Dave Wood](https://davewood.com/)** — *AI wrangler*
+FlightDirector generalizes the agent toolchain Aaron built and ran against
+[Darkwatch](https://github.com/SilicaGel/darkwatch-toolchain) over five months, with the
+project-specific wiring taken out and the design kept. It's being built out here by both
+of us.
+
+- **[Aaron Wood](https://aaronwood.dev/)** — original toolchain and design
+- **[Dave Wood](https://davewood.com/)** — turned it into a plugin: backends, pipeline, and
+  the release machinery
