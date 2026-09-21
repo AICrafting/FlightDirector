@@ -233,6 +233,12 @@ on the linked issues and closes them only when they reach a stage that closes �
 visible (e.g. `status/to test`, then `status/qa`) as it climbs the pipeline, and closes when it
 lands in the final stage.
 
+Closing there isn't compulsory. If your real release happens somewhere flight can't see — a
+deployment approval, an environment promotion, a change window after the last branch merges —
+set `"closesIssues": false` on that final stage and give it an `issueStatus`. The issue then
+stays open in its last status until you (or the agent, once you say it shipped) close it. See
+[example-flows.md](references/example-flows.md) → *"when the last branch isn't the last step"*.
+
 **Choosing how a PR merges.** On a `pr` hop you can pick the merge strategy — tell Claude
 "promote to main, squash" (or pass `--strategy`):
 

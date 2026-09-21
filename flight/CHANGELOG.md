@@ -30,6 +30,17 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
+- **Documented that the terminal stage doesn't have to close the issue** (#154, user-submitted).
+  Plenty of pipelines ship *past* their last branch: merging `main` deploys to dev, while preprod
+  and prod are deployment approvals on the same workflow run, days later, with no branch of their
+  own — so the issue closed when the last branch merged, before it had really shipped. Setting
+  `"closesIssues": false` on the terminal stage has always supported this and the config reference
+  always said so, but nothing showed it: `example-flows.md` demonstrated only the opposite move
+  (closing *early*), and the guide's narrative implied closing at the last branch was inevitable.
+  Both now cover it, with the honest caveat that flight cannot see a deployment, so the final
+  close is yours to make — precisely, if you want, by asking for the issues referenced between the
+  previously released commit and the one just deployed.
+
 - **`issues get` now reports the issue's state** (#205). The first line becomes
   `number⇥title⇥state`, with `state` normalized to exactly `open` or `closed` on every backend.
   Previously it emitted `number⇥title` and exited 0 whether the issue was open or closed, so
