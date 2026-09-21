@@ -2,7 +2,8 @@
 
 The boundary between skills and backends, per [ADR 0001](../../docs/adr/0001-curl-over-mcp-and-adapter-architecture.md).
 Skills never embed a backend's endpoints — they invoke **verbs** through a single dispatcher,
-which resolves the right backend for the axis and execs that backend's adapter.
+which resolves the right target — `code`, or one named issue tracker — and execs that
+backend's adapter.
 
 ## Layout
 
@@ -337,15 +338,18 @@ Safety is in the verb, not in the caller:
   pass through rather than mapping.
   MR **mergeability is computed asynchronously**, so an immediate `pr merge` right after `pr open`
   can transiently 405 until GitLab finishes its merge check — retry briefly (the rig smoke does).
-- **Jira backend specifics:** Jira is an **issues-axis-only** backend (an issue tracker, not a git
-  host) — it implements **only `issues` + `labels`**; `pr`/`ci` keep resolving to the `code`
+- **Jira backend specifics:** Jira is an **issue-tracker-only** backend (not a git host) — it
+  implements **only `issues` + `labels`**; `pr`/`ci` keep resolving to the `code`
   backend. Pair it with a git `code` backend. There is no `jira/pr` adapter file at all, so every
-  `pr` verb — `list` included — is unreachable through a Jira axis (the dispatcher's "no `pr`
+  `pr` verb — `list` included — is unreachable through a Jira tracker (the dispatcher's "no `pr`
   adapter for backend 'jira'"). `branches` treats a `pr list` it cannot get an answer from as
   "no PR evidence" and falls back to the ancestry test alone rather than failing. It targets Jira **Cloud REST v3** with HTTP **Basic**
   `email:api_token` auth (a classic Atlassian API token, not OAuth). The dispatcher threads two
-  generic passthroughs for it — `LS_PROJECT` (the project key, config `issues.project`) and
-  `LS_EMAIL` (config `issues.email`, or `LS_EMAIL` in the env). Decisions:
+  generic passthroughs for it — `LS_PROJECT` (the selected tracker's `project` key) and
+  `LS_EMAIL` (own credential: the tracker's `email`, else `secrets.issueTrackers.<REF>.email`;
+  a tracker on `credentialRef: "code"`: `LS_EMAIL` in the env, the tracker's `email`, then
+  `secrets.code.email`; a schema-1/2 config: `issues.project` / `issues.email` or `LS_EMAIL`).
+  Decisions:
   - **Identifier = key.** The `--number` value is a Jira **key** (`KAN-123`), treated as an opaque
     id; skills print `#<key>` unchanged. `issues create` returns the key.
   - **`set-status` → Jira labels.** Maps a role → a `status/*` **label** (atomic add-target /

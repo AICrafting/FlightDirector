@@ -1,38 +1,47 @@
 # Supported backends
 
 flight talks to a backend through an **adapter** — skills call verbs on the dispatcher, the
-dispatcher resolves the axis (`issues`/`labels` → `issues.*`, `pr`/`ci`/`auth`/`branches` →
-`code.*`; `auth check --axis issues` overrides that one) and execs the
-right backend's adapter (see [adapter-contract.md](adapter-contract.md)). Four backends ship today:
+dispatcher picks the target (`pr`/`ci`/`auth`/`branches` → `code`; `issues`/`labels` → one named
+issue tracker — the default, or the one `--tracker REF` or a qualified id such as `GH-12` names;
+`auth check --tracker REF` checks a tracker) and execs the right backend's adapter (see
+[adapter-contract.md](adapter-contract.md)). Four backends ship today:
 
-| Backend   | `backend` value | Axes it can serve        | Parity                                   |
-|-----------|-----------------|--------------------------|------------------------------------------|
-| Forgejo   | `forgejo`       | `code` + `issues`        | Full: issues, labels, PRs, CI (reference backend) |
-| GitHub    | `github`        | `code` + `issues`        | Full: issues, labels, PRs, Actions CI    |
-| GitLab    | `gitlab`        | `code` + `issues`        | Full: issues, labels, MRs, pipeline CI   |
-| Jira      | `jira`          | `issues` **only**        | Issues + labels; pair with a git `code` backend |
+| Backend   | `backend` value | Can serve                    | Parity                                   |
+|-----------|-----------------|------------------------------|------------------------------------------|
+| Forgejo   | `forgejo`       | `code` + issue trackers      | Full: issues, labels, PRs, CI (reference backend) |
+| GitHub    | `github`        | `code` + issue trackers      | Full: issues, labels, PRs, Actions CI    |
+| GitLab    | `gitlab`        | `code` + issue trackers      | Full: issues, labels, MRs, pipeline CI   |
+| Jira      | `jira`          | issue trackers **only**      | Issues + labels; pair with a git `code` backend |
+
+A repo has one `code` backend and any number of issue trackers (`issueTrackers` in the config),
+which may share a backend — two Forgejo repos, a Forgejo backlog plus a GitHub intake, two Jira
+projects.
 
 Each backend below gives you: a worked `.flightdirector/config.json` fragment, where to create the
 token, and the **minimum** scopes/permissions the adapter actually needs — not the provider's
-broadest default. Tokens always live in the gitignored `.flightdirector/secrets.json` (`code.token`
-and/or `issues.token`, with `code → issues` inheritance); see
-[flight-setup.md](flight-setup.md) for the two-file layout and axis inheritance.
+broadest default. Tokens always live in the gitignored `.flightdirector/secrets.json`: `code.token`
+for the code repository (also used by a tracker with `"credentialRef": "code"`, the usual choice
+for issues on the code repository), and `issueTrackers.<REF>.token` for each tracker with its
+own credential; see [flight-setup.md](flight-setup.md) for the two-file layout.
 
 > **Least privilege is the point.** A per-repo token scoped to exactly what the skills call keeps
 > the blast radius to one repo — a misfire returns `403` instead of writing to the wrong place.
 > Scope to a single repository/project wherever the provider allows it.
 
-`setting-up-a-repo` autodetects Forgejo and GitHub coordinates from the git remote; GitLab and Jira
-are configured by hand-editing `.flightdirector/config.json` (and `secrets.json`) for now.
+`setting-up-a-repo` autodetects the code backend and coordinates from the git remote (Forgejo,
+GitHub, GitLab — confirming a custom host) and hands the issue tracker to `add-an-issue-tracker`,
+which configures any of the four, including Jira, and can add more trackers later.
 
-**Verify a token instead of guessing.** `flight auth check` (add `--axis issues` for a split
-setup) probes exactly the read endpoints the adapters use and prints one `✓`/`✗` line per check —
-identity, the repo/project named in `config.json`, each capability group below, and the token's
-expiry where the backend exposes it — exiting non-zero if anything fails. It is strictly
-read-only, so write access is reported "not tested" rather than guessed at, and it never prints
-more than a token's first 8 characters. Point it at a candidate file with
-`flight auth check --secrets .flightdirector/secrets-new.json` to verify a replacement token
-*before* it goes live, which makes rotation: create token → check → move into place. The probe
+**Verify a token instead of guessing.** `flight auth check` (code), or
+`flight auth check --tracker <REF>` for one tracker (`--axis issues` checks the default), probes
+exactly the read endpoints the adapters use and prints one `✓`/`✗` line per check — identity,
+the repo/project named in `config.json`, each capability group below, and the token's expiry
+where the backend exposes it — exiting non-zero if anything fails. It is strictly read-only, so
+write access is reported "not tested" rather than guessed at, and it never prints more than a
+token's first 8 characters. Point it at a candidate file with
+`flight auth check --secrets .flightdirector/secrets-new.json` (with `--tracker <REF>` for a
+tracker's token) to verify a replacement token *before* it goes live, which makes rotation:
+create token → check → move into place. The probe
 lists below are the tables the verb executes — if you change one, change the other.
 
 ---
@@ -53,7 +62,8 @@ Full parity across all four verb groups. The `api` value is the **instance** API
     { "name": "main",    "merge": "pr",     "issueStatus": "done" }
   ]
 }
-// "issues": { … }   // omit to inherit code's backend/owner/repo/api/token
+// issues on this same repo: an issueTrackers entry with the same backend/api/owner/repo and
+// "credentialRef": "code" (add-an-issue-tracker proposes exactly that)
 ```
 
 **Create a token:** `https://<your-instance>/user/settings/applications` → *Generate New Token*.
@@ -167,9 +177,9 @@ role on the project; a bot with no membership reports `access_level: null` and g
 
 ---
 
-## Jira (issues-axis only)
+## Jira (issue tracker only)
 
-Jira is an issue tracker, not a git host, so it backs **only the `issues` axis** — implements
+Jira is an issue tracker, not a git host, so it backs **only issue trackers** — implements
 `issues` + `labels`. Pair it with a git `code` backend that keeps serving `pr`/`ci`. Targets Jira
 **Cloud REST v3** with HTTP **Basic** `email:api_token` auth (a classic Atlassian API token — **not
 OAuth**).
@@ -178,15 +188,20 @@ OAuth**).
 {
   "code":   { "backend": "github", "owner": "acme", "repo": "widget",
               "api": "https://api.github.com", "stages": [ { "name": "main", "merge": "pr" } ] },
-  "issues": { "backend": "jira",
-              "api": "https://your-site.atlassian.net",  // the site base, no /rest/api/3
-              "project": "KAN",                            // the Jira project key
-              "email": "you@example.com" }                 // for email:token Basic auth
+  "issueTrackers": [
+    { "ref": "KAN", "name": "Product planning", "default": true,  // ref = the project key
+      "backend": "jira",
+      "api": "https://your-site.atlassian.net",  // the site base, no /rest/api/3
+      "project": "KAN",                            // the Jira project key
+      "email": "you@example.com",                  // for email:token Basic auth
+      "labels": { "status": { "in-progress": "status/in-progress" } } }
+  ]
 }
 ```
 
-The token goes in `secrets.json` under `issues.token`; the account email is `issues.email` in config
-(or `LS_EMAIL` in the env). See the adapter contract's *Jira backend specifics* for the
+The token goes in `secrets.json` under `issueTrackers.KAN.token` (its own credential — Jira is
+never on the code host); the account email is the tracker's `email`, or
+`issueTrackers.KAN.email` in the secrets file for an address you'd rather not commit. See the adapter contract's *Jira backend specifics* for the
 key-as-identifier, status-as-labels (labels must be **space-free** single tokens),
 close/reopen-as-workflow-transitions, ADF body conversion, and thin-labels behaviours.
 
@@ -211,7 +226,7 @@ Grant those on the one project rather than making the account a site or project 
 
 ## See also
 
-- [flight-setup.md](flight-setup.md) — the two config files, axis inheritance, `stages`, and
+- [flight-setup.md](flight-setup.md) — the two config files, named issue trackers, `stages`, and
   least-privilege token notes.
 - [adapter-contract.md](adapter-contract.md) — the full verb set and each backend's specifics.
 - [example-flows.md](example-flows.md) — worked stage pipelines at 1–4 hops.

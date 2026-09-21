@@ -59,6 +59,32 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
     instead, e.g. `flight issues tracker | jq -r '.labels.status["to-test"]'`; the bundled
     skills are updated by #198/#199.
 
+- **New `add-an-issue-tracker` skill, and setup writes named trackers** (#199; ships with #197
+  and #198). Say "add an issue tracker", "connect Jira" or "track issues on GitHub too" to add a
+  second (or tenth) tracker beside the first: it collects the coordinates, proposes a stable
+  ref — the Jira project key for a Jira project, otherwise `FJ` / `GH` / `GL` — and asks for
+  another when that ref or an alias is already taken, instead of suffixing one silently. A
+  tracker on the code repository shares the code token (`credentialRef: "code"`, so env tokens
+  and CI keep working); any other gets its own token under `secrets.issueTrackers.<REF>`,
+  checked with `flight auth check --tracker <REF>`. It then reconciles **that tracker's** labels
+  on their own — adopting the names it already uses, creating only what is missing after one
+  preview, never renaming or deleting a label — and records the full role map in the tracker's
+  entry. Adding a tracker never moves the default; changing it is an explicit request.
+  `setting-up-a-repo` keeps the code coordinates, stage pipeline and repo preferences (worker
+  model, prompt ledger, preflight gate) and hands the first tracker to the new skill, which
+  makes it the default. A fresh setup now writes a schema-3 config (with the
+  `requires-newer-flight` stub, so an older Flight stops loudly rather than acting on the wrong
+  repository); an existing repo is converted by `flight reconcile`, never by hand.
+  - **The starting-status question moved into tracker setup and is asked per tracker** — one
+    tracker can use `status/new` while another declines. An existing answer carries over
+    unchanged through migration: a label name stays configured, `false` stays declined, and a
+    tracker that was never asked is asked on the next setup re-run.
+  - **Re-running setup preserves everything already answered** — trackers, refs, credentials,
+    label names and the default — and asks each tracker only the questions it has no answer for
+    yet (a migrated tracker is typically offered aliases).
+  - The breadcrumb setup writes into `AGENTS.md` now names the trackers and the
+    tracker-qualified branch form (`feature/fj-12-…`); re-run setup to refresh an existing one.
+
 - **A repo can name its own check command, and promotion runs it** (#209). New optional
   `code.preflight`: a shell command string that flight runs, from the checkout holding the code
   being gated, before work is merged or pushed. A non-zero exit halts the operation and the

@@ -37,29 +37,32 @@ macOS/BSD userland, Windows/MSYS legs on the `tests` workflow).
 
 ### `.flightdirector/config.json` — committable
 
-**Present means answered.** `setting-up-a-repo` treats every key it owns as the recorded answer
-to one setup question: on a re-run it asks only the questions whose key is *absent*, and writes
+**Present means answered.** The setup skills treat every key they own as the recorded answer
+to one setup question: on a re-run they ask only the questions whose key is *absent*, and write
 every answer back — including a "no" (e.g. `"promptLog": { "enabled": false }`). So a key set to
 `false` is not the same as a missing key: the first is a decision, the second is a question the
-repo has never been asked, and the next re-run will ask it.
+repo has never been asked, and the next re-run will ask it. `setting-up-a-repo` owns the
+repo-wide keys (`code.*`); `add-an-issue-tracker` owns each tracker entry's keys, including its
+starting status `labels.status.new` (string = configured, `false` = declined, absent = never
+asked — per tracker).
 
-Backend, coordinates, and preferences, across two independent axes:
+Two parts, with one owner each:
 
-- **`code`** — the required base: where code, change-requests (PRs), and CI live.
-- **`issues`** — optional; **inherits from `code`** (backend, owner, repo, api, token) when
-  omitted. Override it for split setups (issues tracked in a different repo or backend), or
-  drop it entirely if you don't track issues.
+- **`code`** — the required base: where code, change-requests (PRs), CI and the stage pipeline
+  live, plus the repo-wide preferences.
+- **`issueTrackers`** — one or more named issue trackers (this repo, another repo or backend, a
+  Jira project), each with its own coordinates, credential and label map; exactly one is the
+  default. See [Named issue trackers](#named-issue-trackers-config-schema-3).
 
-> **Schema 3 (named issue trackers).** The `issues` object and top-level `labels` map shown
-> below are the schema-2 form. `flight reconcile` migrates them into an `issueTrackers` array —
-> see [Named issue trackers](#named-issue-trackers-config-schema-3).
+A config as `setting-up-a-repo` writes it on a fresh repo (the stamp is added by the first
+`flight reconcile`):
 
 ```jsonc
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "harnesses": {
-    "claude": { "plugins": { "flight": { "reconciledWith": "0.11.0" } } },
-    "codex":  { "plugins": { "flight": { "reconciledWith": "0.11.0" } } }
+    "claude": { "plugins": { "flight": { "reconciledWith": "<installed version>" } } },
+    "codex":  { "plugins": { "flight": { "reconciledWith": "<installed version>" } } }
   },
   "code": {
     "backend": "forgejo", "owner": "acme", "repo": "widget",
@@ -70,25 +73,35 @@ Backend, coordinates, and preferences, across two independent axes:
       { "name": "main",    "merge": "pr",     "strategy": "merge", "issueStatus": "done" }
     ]
   },
-  "issues": { "backend": "forgejo", "owner": "acme", "repo": "planning" }, // omit to inherit code
-  "labels": {
-    "status": {
-      "new":         "status/new",
-      "in-progress": "status/in progress",
-      "to-test":     "status/to test",
-      "blocked":     "status/blocked",
-      "deferred":    "status/deferred"
-    },
-    "model": { "opus": "model/opus", "sonnet": "model/sonnet",
-               "haiku": "model/haiku", "fable": "model/fable",
-               "sol": "model/sol", "terra": "model/terra",
-               "luna": "model/luna", "astra": "model/astra" }
-  }
+  "issues": { "backend": "requires-newer-flight", "note": "…" },  // stops older Flight versions
+  "issueTrackers": [
+    { "ref": "FJ", "name": "Working backlog", "default": true, "aliases": [],
+      "backend": "forgejo", "owner": "acme", "repo": "widget",
+      "api": "https://git.example.com/api/v1", "credentialRef": "code",
+      "labels": {
+        "status": {
+          "new":         "status/new",
+          "in-progress": "status/in progress",
+          "to-test":     "status/to test",
+          "blocked":     "status/blocked",
+          "deferred":    "status/deferred"
+        },
+        "model": { "opus": "model/opus", "sonnet": "model/sonnet",
+                   "haiku": "model/haiku", "fable": "model/fable",
+                   "sol": "model/sol", "terra": "model/terra",
+                   "luna": "model/luna", "astra": "model/astra" }
+      } }
+  ]
 }
 ```
 
-- **`schemaVersion`** — version of the committable Flight config schema. Schema 2 nested the
-  reconcile stamp under `plugins` (see below); schema 1 configs migrate themselves on the next
+> **Older configs.** Schema 1 and 2 had a single `issues` object (inheriting `code` when
+> omitted) and a top-level `labels` map. `flight reconcile` — which every skill runs first —
+> migrates them to this form; see **Migration** below. Never convert one by hand.
+
+- **`schemaVersion`** — version of the committable Flight config schema. Schema 3 replaced the
+  single `issues` object and top-level `labels` with `issueTrackers`; schema 2 nested the
+  reconcile stamp under `plugins` (see below). Older configs migrate themselves on the next
   reconcile, so there is no manual step.
 - **`harnesses.<harness>.plugins.<plugin>.reconciledWith`** — installed version of that Flight
   Director plugin that last reconciled this config from that harness (`claude` or `codex`). The
@@ -105,8 +118,9 @@ Backend, coordinates, and preferences, across two independent axes:
   GitLab `https://<host>/api/v4`, Jira the site base. The example above is a Forgejo repo; the
   same file pointed at GitHub or GitLab differs **only** in `backend` and `api` — see the
   per-backend sections below and [backends.md](backends.md).
-- **`labels`** — maps each **role** to the **actual label name this repo uses**. Skills and
-  adapters speak roles and names; turning a name into its numeric id happens *inside* the
+- **`issueTrackers[].labels`** — maps each **role** to the **actual label name that tracker
+  uses** (two trackers may call the same role differently). Skills and adapters speak roles and
+  names; turning a name into its numeric id happens *inside* the
   adapter, so nothing above the adapter ever deals in label ids.
 - **`stages`** — ordered promotion pipeline. `stages[0]` is the first integration branch;
   feature branches fork from it. Each hop carries its own `merge` (`direct`|`pr`), optional
@@ -125,7 +139,8 @@ Backend, coordinates, and preferences, across two independent axes:
   flight config '.code.stages[<i>].strategy // "merge"'
   ```
   It applies to `pr` hops only — a `direct` hop always merges with `--no-ff`.
-- **`issueStatus`** (per stage, optional) — a **status role name** (a key in `labels.status`).
+- **`issueStatus`** (per stage, optional) — a **status role name** (a key in `labels.status` of
+  the tracker the issue belongs to, so each tracker applies its own label name).
   On *entering* this stage, `promoting-a-branch` runs the atomic `issues set-status --status
   <role>` (adds the new status, drops the others in one call — the board can never show two
   states). Omit to leave the issue's status untouched on entry to this stage. Setting it on the
@@ -205,13 +220,23 @@ Per tracker entry:
   selected tracker's map.
 - Unknown keys are preserved.
 
-Two top-level keys are written by migration and should be left alone:
+**Setting trackers up.** `setting-up-a-repo` hands the first tracker to the
+`add-an-issue-tracker` skill, which you can also run on its own to add more. The first tracker
+becomes the default; adding another never moves it unless you ask. The skill proposes the Jira
+project key as a Jira tracker's ref and `FJ`/`GH`/`GL` otherwise, and asks for another name
+when that one is already a ref or alias. A tracker on the code repository normally shares the
+code credential; any other gets its own token under `secrets.issueTrackers.<REF>`. It verifies
+the credential with `flight auth check --tracker <REF>` and reconciles that tracker's labels on
+their own.
 
-- **`issues: { "backend": "requires-newer-flight", … }`** — a stub for **older Flight
-  versions**, which route issue verbs through `issues.backend`: they now stop with *no 'issues'
+Two top-level keys should be left alone once present:
+
+- **`issues: { "backend": "requires-newer-flight", … }`** — written by migration and by
+  `setting-up-a-repo` on a fresh config: a stub for **older Flight versions**, which route issue verbs through `issues.backend`: they now stop with *no 'issues'
   adapter for backend 'requires-newer-flight'* instead of silently acting on the code repository.
   Schema-3 Flight ignores it (any other `issues` object beside `issueTrackers` is an error).
-- **`legacyIssueTracker`** — the tracker that was the default when the repo migrated. Branches
+- **`legacyIssueTracker`** — written by migration only (a fresh config never has one): the
+  tracker that was the default when the repo migrated. Branches
   and batch manifests created before schema 3 carry bare issue numbers; they belong to this
   tracker however the default changes later (see **Legacy work** below).
 
@@ -285,9 +310,9 @@ reader treats exactly like an absent key.
   **Working directory:** always the checkout that holds the code being gated, passed explicitly
   (`sh -c "$PREFLIGHT"` run from that path, never from whatever directory the shell has wandered
   into). That is the feature worktree `$WT` in `promoting-a-branch`, each feature worktree in
-  `promoting-branches`, the integration worktree on a `pr` group, and each `.worktrees/<N>-<slug>`
-  in `queue-batches`. Write the command so it works from a repo root that is not the main
-  checkout — a hard-coded absolute path defeats the point.
+  `promoting-branches`, the integration worktree on a `pr` group, and each issue worktree
+  (`.worktrees/<ref>-<N>-<slug>`) in `queue-batches`. Write the command so it works from a repo
+  root that is not the main checkout — a hard-coded absolute path defeats the point.
   **Exit code is the verdict:** zero passes, non-zero halts the operation and the failing output
   is shown. Nothing parses stdout.
   **Where it runs:** `promoting-a-branch` before the merge on a `direct` hop and before
@@ -315,11 +340,12 @@ Consumed by the `cleaning-up-branches` skill and the `branches` dispatcher group
 
 - `code.branches.patterns` — globs naming which branches are cleanup *candidates* at all.
   Defaults to `["feature/*", "bugfix/*", "release/*", "batch/*"]` when absent, which matches
-  flight's own `feature/<N>-<slug>` convention and the `batch/<group>-<short>` integration
-  branches `promoting-branches` opens on a `pr` hop, plus the usual bugfix and release-fold
-  names. Set it when your repo spells them differently (`feat/*`, `fix/*`) so you don't pass
-  `--pattern` every time — your list **replaces** the defaults outright rather than adding to
-  them, so repeat any built-in prefix you still want covered.
+  flight's own `feature/<ref>-<N>-<slug>` convention (and the older `feature/<N>-<slug>`), the
+  `batch/<group>-<short>` integration branches `promoting-branches` opens on a `pr` hop, plus
+  the usual bugfix and release-fold names. Set it when your repo spells them differently
+  (`feat/*`, `fix/*`) so you don't pass `--pattern` every time — your list **replaces** the
+  defaults outright rather than adding to them, so repeat any built-in prefix you still want
+  covered.
   Widening it is safe: stage branches, `archived/*`, and any branch checked out in the main
   checkout or in a worktree outside `.worktrees/` are protected regardless of what the patterns
   say. Read it with:
@@ -410,7 +436,8 @@ not a queue, and is still reported within `ciWatchTimeout`.
 
 ### GitHub backend
 
-Point an axis at GitHub by setting its `backend` + `api` in `.flightdirector/config.json`:
+Point `code` or a tracker entry at GitHub by setting its `backend` + `api` in
+`.flightdirector/config.json`:
 
 ```jsonc
 "code": {
@@ -422,7 +449,8 @@ Point an axis at GitHub by setting its `backend` + `api` in `.flightdirector/con
 }
 ```
 
-The token goes in the gitignored `.flightdirector/secrets.json` (`code.token`): a fine-grained PAT
+The code token goes in the gitignored `.flightdirector/secrets.json` (`code.token`; a tracker
+with its own credential uses `issueTrackers.<REF>.token`): a fine-grained PAT
 scoped to the repo with Contents, Issues, and Pull requests read/write (plus Actions read if you
 use `ci`), or a classic PAT with **repo** (+ **workflow**). `setting-up-a-repo` detects a
 `github.com` remote and proposes this config for you. Full permission table in
@@ -430,7 +458,7 @@ use `ci`), or a classic PAT with **repo** (+ **workflow**). `setting-up-a-repo` 
 
 ### GitLab backend
 
-Point an axis at GitLab by setting its `backend` + `api`. `owner`/`repo` together form the
+Point `code` or a tracker entry at GitLab by setting its `backend` + `api`. `owner`/`repo` together form the
 project path GitLab addresses by (subgroups belong in `owner`, e.g. `"group/sub"`):
 
 ```jsonc
@@ -443,34 +471,43 @@ project path GitLab addresses by (subgroups belong in `owner`, e.g. `"group/sub"
 }
 ```
 
-The token goes in the gitignored `.flightdirector/secrets.json` (`code.token`), a GitLab personal or
-project access token with the **api** scope. `pr` is a merge request and `ci` is pipelines (see
-the [adapter contract](adapter-contract.md) → GitLab specifics for the `--strategy` and pipeline
-nuances). Like GitHub, `setting-up-a-repo` does not yet offer GitLab as a backend choice —
-configure GitLab repos by hand-editing `.flightdirector/config.json` for now.
+The code token goes in the gitignored `.flightdirector/secrets.json` (`code.token`; a tracker with
+its own credential uses `issueTrackers.<REF>.token`), a GitLab personal or project access token
+with the **api** scope. `pr` is a merge request and `ci` is pipelines (see the
+[adapter contract](adapter-contract.md) → GitLab specifics for the `--strategy` and pipeline
+nuances). `setting-up-a-repo` detects a GitLab remote (corroborating a custom host before
+asserting it) and proposes this config.
 
-### Jira backend (issues-axis only)
+### Jira tracker (issue tracker only)
 
-Jira is an issue tracker, not a git host, so it backs **only the `issues` axis** — pair it with a
-git `code` backend (`pr`/`ci` keep resolving to `code`):
+Jira is an issue tracker, not a git host, so it appears **only as an `issueTrackers` entry** —
+pair it with a git `code` backend (`pr`/`ci` keep resolving to `code`). Its ref is normally the
+project key, so a Jira key (`KAN-12`) names its tracker directly:
 
 ```jsonc
 {
-  "code":   { "backend": "github", "owner": "acme", "repo": "widget",
-              "api": "https://api.github.com", "stages": [ { "name": "main", "merge": "pr" } ] },
-  "issues": { "backend": "jira",
-              "api": "https://your-site.atlassian.net",  // the site base, no /rest/api/3
-              "project": "KAN",                            // the Jira project key
-              "email": "you@example.com" }                 // for email:token Basic auth
+  "code": { "backend": "github", "owner": "acme", "repo": "widget",
+            "api": "https://api.github.com", "stages": [ { "name": "main", "merge": "pr" } ] },
+  "issues": { "backend": "requires-newer-flight", "note": "…" },
+  "issueTrackers": [
+    { "ref": "KAN", "name": "Product planning", "default": true,
+      "backend": "jira",
+      "api": "https://your-site.atlassian.net",  // the site base, no /rest/api/3
+      "project": "KAN",                            // the Jira project key
+      "email": "you@example.com",                  // for email:token Basic auth (or in secrets)
+      "labels": { "status": { "in-progress": "status/in-progress", "new": false } } }
+  ]
 }
 ```
 
 Auth is HTTP **Basic** `email:api_token` (a classic Atlassian API token — not OAuth). The token
-goes in `.flightdirector/secrets.json` under `issues.token`; the account email is `issues.email` in
-config (or `LS_EMAIL` in the env). The dispatcher exports `LS_PROJECT` + `LS_EMAIL` alongside the
-usual `LS_*`. See `adapter-contract.md` → **Jira backend specifics** for the identifier (key-as-id),
-status-as-labels, close-as-transition, ADF, and thin-labels behaviours. `setting-up-a-repo` does
-not yet offer Jira — configure it by hand-editing `.flightdirector/config.json` for now.
+goes in `.flightdirector/secrets.json` under `issueTrackers.<REF>.token` (Jira never shares the
+code credential — different host); the account email is the tracker's `email`, else
+`issueTrackers.<REF>.email` in the secrets file. The dispatcher exports `LS_PROJECT` + `LS_EMAIL`
+alongside the usual `LS_*`. See `adapter-contract.md` → **Jira backend specifics** for the
+identifier (key-as-id), status-as-labels (label names must be space-free), close-as-transition,
+ADF, and thin-labels behaviours. `add-an-issue-tracker` offers Jira, and `setting-up-a-repo`
+suggests it when commit subjects or branch names carry Jira keys.
 
 ### `.flightdirector/secrets.json` — gitignored
 
@@ -490,9 +527,9 @@ git, it warns loudly on every run (it does not refuse). Add the `.flightdirector
 your `.gitignore` — ignoring the whole family (`secrets.local.json`, `secrets.json.bak`,
 `secrets-github.json`, editor swap copies) rather than the one exact filename.
 
-Token precedence: `LS_TOKEN` or `FLIGHT_TOKEN` in the environment override everything
-(`FORGEJO_TOKEN` is still honoured as the legacy name); otherwise the secrets file (the axis's
-token, inheriting `code`'s). **Exception (schema 3):** a tracker with its own credential reads
+Token precedence: `LS_TOKEN` or `FLIGHT_TOKEN` in the environment override the code credential
+(`FORGEJO_TOKEN` is still honoured as the legacy name) — for `code` and for any tracker with
+`"credentialRef": "code"`; otherwise the secrets file's `code.token`. **Exception (schema 3):** a tracker with its own credential reads
 only `issueTrackers.<REF>` — environment tokens are code credentials and never reach it.
 
 **Not sure which token is in play? Run `flight auth check`** — it names the source it used
@@ -512,7 +549,8 @@ the environment variable won. The backend-neutral `LS_TOKEN` / `FLIGHT_TOKEN` st
 A per-machine / per-person override of `config.json`, on the same footing as Claude Code's
 `settings.local.json`: the committed file is the shared baseline, the local file holds what
 differs on *this* machine — a different `owner` for a fork, a self-hosted `api` host,
-`code.promptLog.enabled`, a `ciWatchTimeout`. Absent → nothing changes.
+`code.promptLog.enabled`, a `ciWatchTimeout`, a machine-specific tracker list. Absent → nothing
+changes.
 
 The dispatcher merges it over `config.json` with jq's recursive `*` for every **read**
 (`cfg_get`, `flight config`, and the merged view handed to `branches`, `sync-down`, and the
@@ -522,7 +560,8 @@ adapters). The rules are jq's:
   `{ "code": { "owner": "me" } }` overrides `code.owner` and leaves `code.repo`, `code.stages`
   and everything else alone.
 - **Scalars and arrays replace wholesale.** A local `code.stages` replaces the *whole* pipeline;
-  it does not patch one entry.
+  it does not patch one entry. Likewise a local `issueTrackers` must be the **complete** tracker
+  array — a single-entry local array would hide every tracked tracker on this machine.
 - A `null` in the local file overrides too; there is no "delete this key" spelling.
 
 `flight reconcile` is the one writer and always writes the **tracked** `config.json` — local
@@ -548,13 +587,16 @@ Where to create each token and the reasoning behind each minimum is in
 
 ## How resolution works
 
-The dispatcher picks the **axis** from the group — `issues`/`labels` → `issues.*`,
-`pr`/`ci`/`branches` → `code.*` — resolves that axis's backend, coordinates, and token (inheriting `code`),
-exports them as `LS_*`, and execs `adapters/<backend>/<group>`. On schema 3 the issue side is
-one selected tracker (the default, `--tracker REF`, or the tracker a qualified id names) and the
-adapter receives only that tracker's coordinates, credential and labels. Skills therefore never
-pass owner/repo/token; they just name the verb. `setting-up-a-repo` autodetects and writes the
-coordinates from the git remote on first run, so in the normal case you set nothing by hand.
+The dispatcher picks the target from the group — `pr`/`ci`/`branches` → `code`, `issues`/`labels`
+→ **one** issue tracker (the default, `--tracker REF`, or the tracker a qualified id names) —
+resolves that target's backend, coordinates, and credential, exports them as `LS_*`, and execs
+`adapters/<backend>/<group>`; an issue adapter receives only the selected tracker's coordinates,
+credential and labels. Skills therefore never pass owner/repo/token; they name the verb, and the
+tracker when an issue belongs to one other than the default. `setting-up-a-repo` autodetects and
+writes the code coordinates from the git remote on first run, and `add-an-issue-tracker` proposes
+the code repository as the first tracker, so in the normal case you set nothing by hand. (A
+schema-1/2 config, until reconcile converts it, still routes issues through its `issues` object
+inheriting `code`.)
 
 ## Context note
 
