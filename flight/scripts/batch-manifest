@@ -2,7 +2,17 @@
 # Manage per-run queue-batches manifests under .flightdirector/batches/.
 # A manifest records a run's issue→zone grouping so batch-promote can honor
 # "promote each zone" even when queue-batches inferred the zones. Local,
-# transient, gitignored state.
+# gitignored state.
+#
+# Schema 3 (named issue trackers, #198): every entry is a retained issue identity —
+# exactly what `flight issues resolve` prints ({tracker, number, qualified,
+# branchPrefix}) — so two trackers' issue 1 are two entries and a later default change
+# redirects nothing. Issues are given (and printed) as qualified ids, `FJ-12`; a bare
+# number given here means the CURRENT default tracker, like any typed input. Entries of
+# a pre-schema-3 manifest (bare numbers) resolve through issue-identity.sh, i.e. the
+# tracker `flight reconcile` bound that run to; a manifest with no recoverable binding is
+# reported and left untouched, never reinterpreted with the current default. On a
+# pre-schema-3 config everything stays plain numbers, as before.
 set -euo pipefail
 
 # Windows shims (jq CRLF, path form); a no-op elsewhere.
@@ -15,9 +25,58 @@ ROOT="${BATCH_MANIFEST_ROOT:-$(cd "$(dirname "$(cd "$(git rev-parse --git-common
 CFG_DIR="$ROOT/.flightdirector"
 [ -f "$CFG_DIR/config.json" ] || { [ -f "$ROOT/.lightspeed/config.json" ] && CFG_DIR="$ROOT/.lightspeed"; } || true
 DIR="$CFG_DIR/batches"
+SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FLIGHT="${FLIGHT_SELF:-$SCRIPTS/flight}"
 
 die() { printf 'batch-manifest: %s\n' "$1" >&2; exit 1; }
+warn() { printf 'batch-manifest: %s\n' "$1" >&2; }
 command -v jq >/dev/null 2>&1 || die "jq is required"
+
+SCHEMA="$(jq -r '.schemaVersion // 1' "$CFG_DIR/config.json" 2>/dev/null || echo 1)"
+case "$SCHEMA" in ''|*[!0-9]*) SCHEMA=1 ;; esac
+NAMED=0; [ "$SCHEMA" -ge 3 ] && NAMED=1
+
+# jq helpers shared by every filter: an entry's comparison key and its sort order.
+# shellcheck disable=SC2016  # jq program text
+JQ_DEFS='def key: if type == "object" then .qualified else tostring end;
+	def order: if type == "object" then [.tracker, (.qualified | sub("^.*-"; "") | tonumber)] else ["", .] end;'
+
+# resolve_list "<ids>" — a JSON array of entries for the given issue tokens.
+resolve_list() {
+	local token out='[]' id
+	# shellcheck disable=SC2086  # word splitting is the list syntax; ids hold no spaces
+	for token in $1; do
+		if [ "$NAMED" = 1 ]; then
+			id="$(cd "$ROOT" && "$FLIGHT" issues resolve --number "$token")" || die "cannot resolve issue '$token'"
+		else
+			[[ "$token" =~ ^#?[0-9]+$ ]] || die "issue '$token' is not a number (qualified ids need config schema 3; run flight reconcile)"
+			id="${token#\#}"
+		fi
+		out="$(jq -c --argjson i "$id" '. + [$i]' <<<"$out")"
+	done
+	printf '%s\n' "$out"
+}
+
+# normalized <file> — the manifest with every entry a retained identity; fails (after
+# naming the manifest) when a legacy entry has no recoverable tracker.
+normalized() {
+	local f="$1" run entry id map='{}'
+	[ "$NAMED" = 1 ] || { cat "$f"; return 0; }
+	run="$(basename "$f" .json)"
+	while IFS= read -r entry; do
+		[ -n "$entry" ] || continue
+		id="$(FLIGHT_REPO_ROOT="$ROOT" FLIGHT_SELF="$FLIGHT" "$SCRIPTS/issue-identity.sh" from-manifest --run-id "$run" --entry "$entry")" || {
+			warn "manifest $run has pre-schema-3 entries with no recoverable issue tracker — left untouched; promote its issues by qualified id (REF-N)"
+			return 1
+		}
+		map="$(jq -c --arg e "$entry" --argjson i "$id" '. + {($e): $i}' <<<"$map")"
+	done < <(jq -r '[(.zones // {})[] | if type == "array" then .[] else empty end | select(type != "object") | tostring] | unique[]' "$f")
+	jq --argjson m "$map" '
+		.zones = ((.zones // {}) | with_entries(.value |= ((if type == "array" then . else [] end)
+			| map(if type == "object" then . else $m[tostring] end))))' "$f"
+}
+
+write_atomic() { local tmp; tmp="$(mktemp "$2.tmp.XXXXXX")"; printf '%s\n' "$1" >"$tmp"; mv "$tmp" "$2"; }
 
 cmd="${1:-}"; shift 2>/dev/null || true
 
@@ -31,8 +90,7 @@ write)
 			--issues)
 				[ $# -ge 2 ] || die "missing value for $1"
 				[ -n "$cur" ] || die "--issues given before --zone"
-				# shellcheck disable=SC2086
-				arr="$(printf '%s\n' $2 | jq -R 'select(length>0)|tonumber' | jq -s '.')"
+				arr="$(resolve_list "$2")"
 				zones="$(printf '%s' "$zones" | jq --arg z "$cur" --argjson a "$arr" '.[$z]=$a')"
 				cur=""; shift 2;;
 			*) die "unknown argument: $1";;
@@ -41,25 +99,31 @@ write)
 	[ -n "$run_id" ] || die "--run-id is required"
 	[[ "$run_id" =~ ^[A-Za-z0-9_-]+$ ]] || die "invalid --run-id: '$run_id'"
 	mkdir -p "$DIR"
-	jq -n --arg r "$run_id" --argjson z "$zones" '{runId:$r, zones:$z}' > "$DIR/$run_id.json"
+	write_atomic "$(jq -n --arg r "$run_id" --argjson z "$zones" '{runId:$r, zones:$z}')" "$DIR/$run_id.json"
 	;;
 groups)
+	# zone<TAB>id,id… — same-named zones merged across manifests; ids are qualified
+	# (FJ-7,FJ-12,GH-1) on schema 3, plain numbers before it.
 	[ -d "$DIR" ] || exit 0
-	set -- "$DIR"/*.json
-	[ -e "$1" ] || exit 0
-	jq -rs '
+	all='[]'
+	for f in "$DIR"/*.json; do
+		[ -e "$f" ] || continue
+		doc="$(normalized "$f")" || continue
+		all="$(jq -c --argjson d "$doc" '. + [$d]' <<<"$all")"
+	done
+	jq -r "$JQ_DEFS"'
 		(map(.zones // {})
 		 | reduce .[] as $z ({};
 		     reduce ($z | keys_unsorted[]) as $k (.;
-		       .[$k] = ((.[$k] // []) + $z[$k] | unique))))
+		       .[$k] = ((.[$k] // []) + ($z[$k] | if type == "array" then . else [] end) | unique_by(order)))))
 		| to_entries[]
-		| "\(.key)\t\(.value | map(tostring) | join(","))"
-	' "$@"
+		| "\(.key)\t\(.value | map(key) | join(","))"
+	' <<<"$all"
 	;;
 heal|consume)
-	# heal    --live   "n n …" : KEEP only these issues (self-heal: drop entries whose
-	#                            branches/worktrees vanished outside the workflow).
-	# consume --issues "n n …" : REMOVE exactly these issues (they were just promoted).
+	# heal    --live   "id id …" : KEEP only these issues (self-heal: drop entries whose
+	#                              branches/worktrees vanished outside the workflow).
+	# consume --issues "id id …" : REMOVE exactly these issues (they were just promoted).
 	# Both drop emptied zones and delete emptied manifests. `consume` exists because
 	# "still at to-test" cannot identify promoted issues when stages[0].issueStatus is
 	# itself to-test — the promoted set is known explicitly, so remove it explicitly.
@@ -72,23 +136,23 @@ heal|consume)
 	done
 	[ "$cmd" = "heal" ] || [ -n "$nums" ] || die "consume: --issues is required and must not be empty"
 	[ -d "$DIR" ] || exit 0
-	# shellcheck disable=SC2086
-	nums_json="$(printf '%s\n' $nums | jq -R 'select(length>0)|tonumber' | jq -s '.')"
+	keys_json="$(resolve_list "$nums" | jq -c "$JQ_DEFS"' map(key)')"
 	# jq filter text — `$n` is a jq variable, not a shell one (hence single quotes).
 	# shellcheck disable=SC2016
-	if [ "$cmd" = "heal" ]; then filter='map(select(IN($n[])))'; else filter='map(select(IN($n[]) | not))'; fi
+	if [ "$cmd" = "heal" ]; then filter='map(select(key | IN($n[])))'; else filter='map(select(key | IN($n[]) | not))'; fi
 	for f in "$DIR"/*.json; do
 		[ -e "$f" ] || continue
-		new="$(jq --argjson n "$nums_json" "
+		doc="$(normalized "$f")" || continue
+		new="$(jq --argjson n "$keys_json" "$JQ_DEFS
 			.zones = ( (.zones // {})
 			           | with_entries(.value |= ( (if type == \"array\" then . else [] end)
 			                                       | $filter ))
 			           | with_entries(select(.value | length > 0)) )
-		" "$f")"
+		" <<<"$doc")"
 		if [ "$(printf '%s' "$new" | jq '.zones | length')" -eq 0 ]; then
 			rm -f "$f"
 		else
-			printf '%s\n' "$new" > "$f"
+			write_atomic "$new" "$f"
 		fi
 	done
 	;;
