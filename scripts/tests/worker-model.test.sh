@@ -60,7 +60,7 @@ check "unrecognised id is left for the harness to try" \
 # --- absent key keeps the historical default -----------------------------------
 setmodel ''
 check "absent key: claude falls back to sonnet" "$([ "$(first_use claude)" = sonnet ] && echo 1 || echo 0)"
-check "absent key: codex has nothing usable (ask, don't guess)" "$([ -z "$(first_use codex)" ] && echo 1 || echo 0)"
+check "absent key: codex falls back to luna" "$([ "$(first_use codex)" = luna ] && echo 1 || echo 0)"
 
 # --- empty list and bad values ---------------------------------------------------
 setmodel '[]'

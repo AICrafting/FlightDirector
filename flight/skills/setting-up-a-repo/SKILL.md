@@ -241,7 +241,7 @@ Write `.flightdirector/config.json` in the `.flightdirector/` folder (created in
       { "name": "qa",      "merge": "pr",     "strategy": "merge", "gate": "post-merge-qa", "issueStatus": "qa" },
       { "name": "main",    "merge": "pr",     "strategy": "merge", "issueStatus": "done" }
     ],
-    "queueBatches": { "defaultModel": ["sonnet", "gpt-5.6-sol"] } },
+    "queueBatches": { "defaultModel": ["sonnet", "luna"] } },
   "labels": {
     "status": { "in-progress": "status/in progress", "to-test": "status/to test",
                 "blocked": "status/blocked", "deferred": "status/deferred",
@@ -259,7 +259,7 @@ Write `.flightdirector/config.json` in the `.flightdirector/` folder (created in
 which models `queue-batches` should give its worker agents, **in order of preference**
 (overridable per run). Each harness can only dispatch its own models, and `queue-batches` uses
 the first entry the running harness can use, so suggest one entry per harness the team works
-from: a Claude model followed by a Codex model, e.g. `["sonnet", "gpt-5.6-sol"]`. Write the
+from: a Claude model followed by a Codex model, e.g. `["sonnet", "luna"]`. Write the
 answer to `code.queueBatches.defaultModel` as an array (a single name is fine too). Changing it later
 retargets all future parallel runs (e.g. to a newer model) without editing the skill. You can also add an optional `code.zones` array later — see
 [flight-setup.md](../../references/flight-setup.md) — to make `queue-batches` schedule

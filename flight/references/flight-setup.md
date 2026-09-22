@@ -233,7 +233,7 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
 "code": {
   // …existing keys (backend, owner, repo, api, stages)…
   "zones": [ { "name": "auth", "paths": ["src/auth/**"] } ],
-  "queueBatches": { "defaultModel": ["sonnet", "gpt-5.6-sol"], "agentRulesFile": ".flightdirector/agent-rules.md" }
+  "queueBatches": { "defaultModel": ["sonnet", "luna"], "agentRulesFile": ".flightdirector/agent-rules.md" }
 }
 ```
 
@@ -249,8 +249,8 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
   plan names the model chosen and the entries skipped. A plain string is a one-item list, so
   existing configs need no change. `flight config worker-model --harness claude|codex` prints
   the resolution (`<model>⇥use|skip⇥<reason>` per entry). Seeded by `setting-up-a-repo`; falls
-  back to `sonnet` if unset. To prefer a different model on one machine, set the list in
-  `config.local.json` — arrays replace wholesale there.
+  back to `["sonnet", "luna"]` if unset, so each harness has a default. To prefer a different
+  model on one machine, set the list in `config.local.json` — arrays replace wholesale there.
 - `code.queueBatches.agentRulesFile` — path (repo-relative) to a markdown file of repo-specific
   agent hard-rules / CI gotchas, injected verbatim into each worker prompt. Defaults to
   `.flightdirector/agent-rules.md`; if that file is absent, workers run with the skill's built-in

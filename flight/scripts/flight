@@ -311,14 +311,14 @@ model_harness() {
 # first `use` line is the model to dispatch; if dispatching it fails because the
 # model is unavailable, the next `use` line is the fallback. No `use` line at all
 # means nothing in the list runs here — the skill asks the user. Absent key →
-# the built-in `sonnet`.
+# the built-in `["sonnet", "luna"]` — one default per harness.
 if [ "$group" = "config" ] && [ "$verb" = "worker-model" ]; then
   [ "${1:-}" = "--harness" ] && [ $# -eq 2 ] || die "usage: flight config worker-model --harness claude|codex"
   harness="$2"
   case "$harness" in claude|codex) ;; *) die "config worker-model: --harness must be claude or codex (got '$harness')" ;; esac
   [ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
   models="$(jq -r '
-    (.code.queueBatches.defaultModel // "sonnet") as $m
+    (.code.queueBatches.defaultModel // ["sonnet", "luna"]) as $m
     | if ($m | type) == "string" then [$m]
       elif ($m | type) == "array" and all($m[]; type == "string") then $m
       else error("code.queueBatches.defaultModel must be a model name or an array of model names")
