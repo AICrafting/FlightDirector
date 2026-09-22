@@ -291,6 +291,53 @@ if [ "$group" = "branches" ]; then
   handoff "$SELF_DIR/branches" "$verb" "$@"
 fi
 
+# Which harness can dispatch a model id: `claude`, `codex`, or `unknown`.
+# Same prefix stripping as model_family (`us.anthropic.claude-…`, `openai/gpt-…`).
+# Bare family names cover the aliases people actually write in config.
+model_harness() {
+  local id
+  id="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"; id="${id##*/}"
+  case "$id" in *.claude-*) id="claude-${id##*.claude-}" ;; *.gpt-*) id="gpt-${id##*.gpt-}" ;; esac
+  case "$id" in
+    claude-*|opus|sonnet|haiku|fable|opus\[*|sonnet\[*) echo claude ;;
+    gpt-*|codex-*|o[0-9]|o[0-9]-*|sol|terra|luna|astra) echo codex ;;
+    *) echo unknown ;;
+  esac
+}
+
+# `flight config worker-model --harness claude|codex` — the queue-batches worker
+# model list (`code.queueBatches.defaultModel`: a string, or an ordered array of
+# preferences), one line per entry in order: `<model>⇥use|skip⇥<reason>`. The
+# first `use` line is the model to dispatch; if dispatching it fails because the
+# model is unavailable, the next `use` line is the fallback. No `use` line at all
+# means nothing in the list runs here — the skill asks the user. Absent key →
+# the built-in `["sonnet", "luna"]` — one default per harness.
+if [ "$group" = "config" ] && [ "$verb" = "worker-model" ]; then
+  [ "${1:-}" = "--harness" ] && [ $# -eq 2 ] || die "usage: flight config worker-model --harness claude|codex"
+  harness="$2"
+  case "$harness" in claude|codex) ;; *) die "config worker-model: --harness must be claude or codex (got '$harness')" ;; esac
+  [ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
+  models="$(jq -r '
+    (.code.queueBatches.defaultModel // ["sonnet", "luna"]) as $m
+    | if ($m | type) == "string" then [$m]
+      elif ($m | type) == "array" and all($m[]; type == "string") then $m
+      else error("code.queueBatches.defaultModel must be a model name or an array of model names")
+      end
+    | .[] | select(length > 0)' "$cfg" 2>&1)" || die "$models"
+  while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    owner="$(model_harness "$m")"
+    if [ "$owner" = "$harness" ]; then
+      printf '%s\tuse\t%s model\n' "$m" "$owner"
+    elif [ "$owner" = unknown ]; then
+      printf '%s\tuse\tunrecognised model id — try it; fall through if %s rejects it\n' "$m" "$harness"
+    else
+      printf '%s\tskip\t%s model, not available in %s\n' "$m" "$owner" "$harness"
+    fi
+  done <<<"$models"
+  exit 0
+fi
+
 # `flight config <jq-filter>` — read the resolved config from anywhere (incl. a worktree).
 if [ "$group" = "config" ]; then
   [ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"

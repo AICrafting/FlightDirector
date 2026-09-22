@@ -99,9 +99,22 @@ Render the current board (Display format below) and push back:
 
 ## 2. Present the plan — HALT for approval
 
-Show N×M: per zone, the issues + one-line rationale + the resolved worker model
-(`config '.code.queueBatches.defaultModel // "sonnet"'`). Wait for explicit approval. The user may
-swap/drop/re-zone issues or override the model (per run or per batch).
+Show N×M: per zone, the issues + one-line rationale + the resolved worker model. Wait for explicit
+approval. The user may swap/drop/re-zone issues or override the model (per run or per batch); an
+override always wins over the configured list.
+
+Resolve the worker model against **this** harness — `code.queueBatches.defaultModel` is a model
+name or an ordered preference list, and the same repo is worked from both Claude Code and Codex:
+
+```bash
+flight config worker-model --harness "$HARNESS"   # one line per entry: <model>⇥use|skip⇥<reason>
+```
+
+- The first `use` line is the worker model. Later `use` lines are the fallbacks for Section 3.
+- Show the choice and every skipped entry in the plan, e.g.
+  `worker model: gpt-5.6-sol (opus skipped: claude model, not available in codex)`.
+- **No `use` line → stop and ask the user which model to use.** Never silently pick one — not
+  `sonnet`, not whatever you happen to be running.
 
 ## 3. Dispatch
 
@@ -113,7 +126,9 @@ DISP=flight
 # skill and in the dispatched agents is anchored with `git -C <path>` — a bare `git` is a bug.
 ROOT="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 BASE="$("$DISP" config '.code.stages[0].name')"
-MODEL="$("$DISP" config '.code.queueBatches.defaultModel // "sonnet"')"   # unless user overrode
+# Section 2's approved model: the user's override, else the first `use` line. Keep the rest.
+MODELS="$("$DISP" config worker-model --harness "$HARNESS" | awk -F'\t' '$2 == "use" { print $1 }')"
+MODEL="${OVERRIDE:-$(head -n1 <<<"$MODELS")}"
 RULES_FILE="$("$DISP" config '.code.queueBatches.agentRulesFile // ".flightdirector/agent-rules.md"')"
 REPO_RULES="$( [ -s "$ROOT/$RULES_FILE" ] && cat "$ROOT/$RULES_FILE" || echo 'None configured.' )"
 # The repo's own check command (flight-setup.md → Repo preflight gate). Empty = not configured,
@@ -145,6 +160,12 @@ Per zone:
 - Select and follow exactly one dispatch reference for the active harness:
   [Claude Code](references/dispatch-claude.md) or [Codex](references/dispatch-codex.md).
   Use the approved per-zone model override when present; otherwise use `$MODEL`.
+- **If the dispatch fails because the model is unavailable** (no access, not on this plan, unknown
+  or retired model), fall through to the next model in `$MODELS`: re-render the prompt with that
+  `{model}` and dispatch again. Tell the user which model was dropped and why, and use the
+  model that worked for the remaining zones. A failure for any other reason is not a model
+  problem — surface it, don't fall through. An explicit user override has no fallbacks: if it
+  fails, ask. When the list runs out, stop and ask the user for a model.
 
 Once every zone's issue set is fixed, record the run manifest (one call, all zones) so batch
 promotion can reconstruct the grouping — this survives even when zones were *inferred* (no

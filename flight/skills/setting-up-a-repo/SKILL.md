@@ -241,7 +241,7 @@ Write `.flightdirector/config.json` in the `.flightdirector/` folder (created in
       { "name": "qa",      "merge": "pr",     "strategy": "merge", "gate": "post-merge-qa", "issueStatus": "qa" },
       { "name": "main",    "merge": "pr",     "strategy": "merge", "issueStatus": "done" }
     ],
-    "queueBatches": { "defaultModel": "sonnet" } },
+    "queueBatches": { "defaultModel": ["sonnet", "luna"] } },
   "labels": {
     "status": { "in-progress": "status/in progress", "to-test": "status/to test",
                 "blocked": "status/blocked", "deferred": "status/deferred",
@@ -255,9 +255,12 @@ Write `.flightdirector/config.json` in the `.flightdirector/` folder (created in
 ```
 
 **Ask for the worker model.** Skip this if `code.queueBatches.defaultModel` is already present
-(gap check, Step 0). Otherwise ask which model `queue-batches` should give its worker agents by
-default (overridable per run), offering `sonnet` as the sensible default for mechanical
-implementation work, and write the answer to `code.queueBatches.defaultModel`. Changing it later
+(gap check, Step 0) — a single model name from an older setup counts as answered. Otherwise ask
+which models `queue-batches` should give its worker agents, **in order of preference**
+(overridable per run). Each harness can only dispatch its own models, and `queue-batches` uses
+the first entry the running harness can use, so suggest one entry per harness the team works
+from: a Claude model followed by a Codex model, e.g. `["sonnet", "luna"]`. Write the
+answer to `code.queueBatches.defaultModel` as an array (a single name is fine too). Changing it later
 retargets all future parallel runs (e.g. to a newer model) without editing the skill. You can also add an optional `code.zones` array later — see
 [flight-setup.md](../../references/flight-setup.md) — to make `queue-batches` schedule
 deterministically instead of inferring zones.

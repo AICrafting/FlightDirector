@@ -126,7 +126,8 @@ That triggers **`setting-up-a-repo`**, which walks you through setup:
    - **(a) Simple** — `develop → main`
    - **(b) Multi-stage** — `develop → qa → main`
    - **(c) Advanced** — a custom ordered set of stages, or hand-edit afterward.
-4. **Preferences** — the default worker model for parallel batches; whether to turn on the
+4. **Preferences** — the worker models for parallel batches, in order of preference (one per
+   harness if you use both Claude Code and Codex); whether to turn on the
    prompt ledger (see [Cost ledger](#cost-ledger-optional)); whether newly filed issues get a
    **starting status** such as `status/new` (see [File it](#1-file-it)); and whether flight
    should run a **check command** before it merges (see
