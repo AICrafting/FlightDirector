@@ -13,6 +13,17 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+
+- **The queue-batches worker model can be an ordered list** (#236).
+  `code.queueBatches.defaultModel` now takes an array such as `["sonnet", "gpt-5.6-sol"]`, and
+  `queue-batches` uses the first model the running harness can dispatch. A repo worked from both
+  Claude Code and Codex no longer has one side asking for a model it can't use. If a dispatch
+  fails because a model isn't available (plan, access, retirement), the next entry is tried.
+  If nothing in the list is usable, you're asked. The approval plan names the chosen model and
+  any skipped entries. A plain string still works as before. New dispatcher verb:
+  `flight config worker-model --harness claude|codex`. `setting-up-a-repo` now asks for the list.
+
 ### Changed
 
 - **Docs: why GitHub uses a repo-scoped token, not your `gh` login** (#243). `backends.md` now

@@ -233,7 +233,7 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
 "code": {
   // …existing keys (backend, owner, repo, api, stages)…
   "zones": [ { "name": "auth", "paths": ["src/auth/**"] } ],
-  "queueBatches": { "defaultModel": "sonnet", "agentRulesFile": ".flightdirector/agent-rules.md" }
+  "queueBatches": { "defaultModel": ["sonnet", "gpt-5.6-sol"], "agentRulesFile": ".flightdirector/agent-rules.md" }
 }
 ```
 
@@ -241,8 +241,16 @@ Consumed only by the `queue-batches` skill; absent keys fall back safely.
   schedule parallel work so concurrently-running issues never touch the same paths. If omitted,
   `queue-batches` infers pseudo-zones from issue bodies at triage time and warns that the
   inferred zones are approximate.
-- `code.queueBatches.defaultModel` — worker-agent model when the user gives no per-run override.
-  Seeded by `setting-up-a-repo` during first-run setup; falls back to `sonnet` if unset.
+- `code.queueBatches.defaultModel` — worker-agent model when the user gives no per-run override:
+  a model name, or an **ordered preference list** of them. `queue-batches` uses the first entry
+  the running harness can dispatch — Claude Code skips Codex models and vice versa — and if a
+  dispatch fails because the model is unavailable (no access, not on the plan, retired), it
+  falls through to the next entry. If no entry is usable it asks rather than picking one. The
+  plan names the model chosen and the entries skipped. A plain string is a one-item list, so
+  existing configs need no change. `flight config worker-model --harness claude|codex` prints
+  the resolution (`<model>⇥use|skip⇥<reason>` per entry). Seeded by `setting-up-a-repo`; falls
+  back to `sonnet` if unset. To prefer a different model on one machine, set the list in
+  `config.local.json` — arrays replace wholesale there.
 - `code.queueBatches.agentRulesFile` — path (repo-relative) to a markdown file of repo-specific
   agent hard-rules / CI gotchas, injected verbatim into each worker prompt. Defaults to
   `.flightdirector/agent-rules.md`; if that file is absent, workers run with the skill's built-in
