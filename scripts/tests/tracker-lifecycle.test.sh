@@ -150,7 +150,7 @@ check "a stage hop recovers the issue from the qualified commit subject" "$([ "$
 section "per-tracker starting and terminal statuses (Jira native ids)"
 : >"$CURL_LOG"
 flight issues create --tracker FJ --title T --body B --no-signature >/dev/null
-check "a new issue on FJ gets FJ's own starting status" "$(grep -q '^POST	https://code.example.com/api/v1/repos/acme/widget/issues	' "$CURL_LOG" && tr -d ' \n' <"$CURL_LOG" | grep -q '"labels":\[31\]' && echo 1 || echo 0)" "$(log)"
+check "a new issue on FJ gets FJ's own starting status" "$(grep -q '^POST	https://code.example.com/api/v1/repos/acme/widget/issues	' "$CURL_LOG" && grep -q '"labels":\[31\]' <<<"$(tr -d ' \n' <"$CURL_LOG")" && echo 1 || echo 0)" "$(log)"
 : >"$CURL_LOG"
 flight issues create --tracker GH --title T --body B --no-signature >/dev/null 2>&1 || true
 check "a new issue on GH (new declined) gets no starting status, least of all FJ's" \

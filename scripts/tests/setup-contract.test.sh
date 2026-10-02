@@ -289,7 +289,7 @@ check "add-an-issue-tracker is a packaged skill with its own name" \
 check "add-an-issue-tracker starts with the runtime preflight" \
 	"$(ok says "$TRACKER_SKILL" 'follow [runtime preflight](../../references/runtime.md)')"
 check "its triggers cover adding / connecting a tracker" \
-	"$(sed -n '/^description:/p' "$TRACKER_SKILL" | grep -q 'add an issue tracker' && sed -n '/^description:/p' "$TRACKER_SKILL" | grep -q 'connect Jira' && echo 1 || echo 0)"
+	"$(grep -q 'add an issue tracker' <<<"$(sed -n '/^description:/p' "$TRACKER_SKILL")" && grep -q 'connect Jira' <<<"$(sed -n '/^description:/p' "$TRACKER_SKILL")" && echo 1 || echo 0)"
 check "it verifies with auth check --tracker" "$(ok says "$TRACKER_SKILL" 'flight auth check --tracker <REF>')"
 check "it documents all three starting-status states" \
 	"$(says "$TRACKER_SKILL" '| absent | never asked |' && says "$TRACKER_SKILL" '| `false` | declined |' && says "$TRACKER_SKILL" '| a string | configured |' && echo 1 || echo 0)"
