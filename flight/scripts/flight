@@ -825,7 +825,7 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 		jq -cn --slurpfile ok "$agg_dir/ok" --slurpfile failed "$agg_dir/failed" '
 			{issues: ([$ok[].issues[]] | sort_by([(.created // ""), (.number | tonumber? // 0)]) | reverse),
 			 truncated: any($ok[]; .truncated),
-			 total: (if all($ok[]; .total != null) then ([$ok[].total] | add) else null end),
+			 total: (if ($failed | length) == 0 and all($ok[]; .total != null) then ([$ok[].total] | add) else null end),
 			 errors: $failed}'
 		rm -rf "$agg_dir"
 		exit 0

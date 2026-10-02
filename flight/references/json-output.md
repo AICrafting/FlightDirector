@@ -111,7 +111,8 @@ Every key is present on every backend. Notes:
 
 - Every row carries its own `tracker`.
 - `truncated` is true if any tracker's rows were truncated.
-- `total` is the sum when every tracker reported a total, otherwise null.
+- `total` is the sum when every tracker answered and reported a total, otherwise null. A
+  partial sum would look complete.
 - A tracker that fails adds `{"tracker": "GH", "code": "auth", "reason": "…"}` to `errors`, is also
   named on stderr, and the command still exits 0 with the others' rows. Only when every tracker
   fails is the result the error envelope of the first failure.

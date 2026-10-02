@@ -29,13 +29,14 @@ def status_role:
 	| first // null;
 
 # Same three shapes the dispatcher's signer recognises and replaces (blank lines
-# around the rule allowed: Jira's ADF shim renders blocks a blank line apart):
+# around the rule allowed: Jira's ADF shim renders blocks a blank line apart; and
+# CRLF line ends, which GitHub's web editor writes when a body is edited there):
 #   ---\n🤖 via FlightDirector:<plugin>@<version>[ with <Model/ver>]
 #   ---\nvia FlightDirector:…   and   ---\nFlightDirector:…   (older plugins)
 def split_signature:
 	if (.body | type) != "string" then . + {signature: null}
 	else
-		([.body | capture("^(?<text>[\\s\\S]*?)\\s*\\n---[ \\t]*\\n\\s*(?:(?:🤖 )?via )?FlightDirector:(?<plugin>[A-Za-z0-9._-]+)@(?<version>[^\\s]+?)(?: with (?<model>[^\\n]+?))?\\s*$")] | first) as $m
+		([.body | capture("^(?<text>[\\s\\S]*?)\\s*\\n---[ \\t\\r]*\\n\\s*(?:(?:🤖 )?via )?FlightDirector:(?<plugin>[A-Za-z0-9._-]+)@(?<version>[^\\s]+?)(?: with (?<model>[^\\n]+?))?\\s*$")] | first) as $m
 		| if $m == null then . + {signature: null}
 		  else . + {body: $m.text, signature: {plugin: $m.plugin, version: $m.version, model: $m.model}}
 		  end

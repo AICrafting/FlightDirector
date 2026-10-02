@@ -145,6 +145,11 @@ check "forgejo: identity, offset converted to UTC, comment count, url" \
 check "forgejo: status is the ROLE from the tracker's map" "$(yes jq -e '.status == "to-test" and .labels == ["bug","status/to test"]' <<<"$out")" "$out"
 check "forgejo: the signature is split out of the body" \
 	"$(yes jq -e '.body == "Fix the thing." and .signature == {plugin:"flight", version:"0.16.0", model:"Opus/5.5"}' <<<"$out")" "$out"
+crlf="$(jq -n -c --arg b $'Edited on the web.\r\n\r\n---\r\n🤖 via FlightDirector:flight@0.16.0 with Opus/5.5\r\n' \
+	'{body: $b, number: "1", title: "", state: "open", labels: [], author: null, created: null, updated: null, comments: null, url: null}' \
+	| jq -c -f "$REPO_ROOT/flight/scripts/issue-json.jq" --arg mode get --arg tracker FJ --argjson labels '{}')"
+check "a CRLF body (GitHub web edit) still has its signature split" \
+	"$(yes jq -e '.body == "Edited on the web." and .signature.model == "Opus/5.5"' <<<"$crlf")" "$crlf"
 out="$(fl issues get --number GL-7 --json)"
 check "gitlab: iid, opened → open, fractional seconds dropped, notes count" \
 	"$(yes jq -e '.number == "7" and .qualified == "GL-7" and .state == "open" and .created == "2026-10-01T10:00:00Z" and .comments == 1 and .status == "to-test"' <<<"$out")" "$out"
@@ -203,6 +208,7 @@ check "aggregate: truncated if any tracker was; total null unless every tracker 
 out="$(cd "$R" && FAIL_HOST=gh.example "$DISP" issues list --all-trackers --json 2>"$SANDBOX/err")"; rc=$?
 check "a failing tracker is reported in errors, the rest still listed, exit 0" \
 	"$(yes jq -e '(.errors | length) == 1 and .errors[0].tracker == "GH" and .errors[0].code == "auth" and (.issues | length) == 4' <<<"$out")" "$out"
+check "…and total is null, since a partial sum would look complete" "$(yes jq -e '.total == null' <<<"$out")" "$out"
 check "…and named on stderr" "$(grep -q 'tracker GH unavailable' "$SANDBOX/err" && echo 1 || echo 0)" "$(cat "$SANDBOX/err")"
 check "…with exit status 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)"
 out="$(cd "$R" && FAIL_HOST=example "$DISP" issues list --all-trackers --json 2>/dev/null || true)"
