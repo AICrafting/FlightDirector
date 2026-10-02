@@ -25,10 +25,11 @@ $SK/promoting-branches/SKILL.md $SK/cleaning-up-branches/SKILL.md"
 hits="$(grep -nE "config '\.labels|config \"\.labels" $LIFECYCLE || true)"
 check "no workflow skill reads the retired top-level .labels map" "$(none "$hits")" "$hits"
 
-# An issue/label verb on an issue must name its tracker (--tracker) or carry a qualified id.
+# An issue/label verb on an issue must name its tracker (--tracker) or carry a qualified id —
+# or the list's id column (<ID>/$ID: qualified with several trackers, #12 only with one, #258).
 # shellcheck disable=SC2086
 hits="$(grep -nE 'issues (get|comments|comment|set-status|clear-status|close|label-add|label-remove|update|attach|assign)\b.*--number' $LIFECYCLE \
-	| grep -vE -- '--tracker|--number "?[A-Z][A-Z0-9]*-[0-9]|--number "?<(qualified|QUALIFIED)|--number "\$QUALIFIED"' || true)"
+	| grep -vE -- '--tracker|--number "?[A-Z][A-Z0-9]*-[0-9]|--number "?<(qualified|QUALIFIED|ID)>|--number "\$(QUALIFIED|ID)"' || true)"
 check "every issue write/read names its tracker or a qualified id" "$(none "$hits")" "$hits"
 # shellcheck disable=SC2086
 hits="$(grep -nE 'labels ensure .*--model "' $LIFECYCLE | grep -v -- '--tracker' || true)"
@@ -48,7 +49,8 @@ check "working-an-issue retains the identity for the branch" "$(has "$W" '"$ISSU
 check "working-an-issue resumes from the branch, not the number" "$(has "$W" '"$ISSUE_IDENTITY" from-branch --branch "$BRANCH"')"
 
 T="$SK/queue-batches/templates/agent-prompt.md"
-check "batch agents resolve each qualified issue once" "$(has "$T" 'issues resolve --number <QUALIFIED>')"
+check "batch agents resolve each issue id once" "$(has "$T" 'issues resolve --number <ID>')"
+check "batch agents log and commit by the display id" "$(has "$T" 'ticket=$DISPLAY status=starting')"
 check "batch agents name branches by the qualified prefix" "$(has "$T" 'BRANCH="feature/$PREFIX-<slug>"')"
 
 for f in "$SK/promoting-a-branch/SKILL.md" "$SK/promoting-branches/SKILL.md"; do
@@ -68,7 +70,7 @@ check "cleaning-up-branches reads each tracker's own status labels" \
 for f in "$SK/triaging-issues/SKILL.md" "$SK/filing-issues/SKILL.md" "$SK/queue-batches/SKILL.md"; do
 	check "$(basename "$(dirname "$f")") lists every tracker" "$(has "$f" 'issues list --all-trackers')"
 done
-check "batch manifests are written with qualified identities" "$(has "$SK/queue-batches/SKILL.md" '--issues "<zone-a qualified identities>"')"
+check "batch manifests are written with the list's issue ids" "$(has "$SK/queue-batches/SKILL.md" '--issues "<zone-a ids>"')"
 
 check "runtime preflight defines the identity helper" \
 	"$(has "$REPO_ROOT/flight/references/runtime.md" 'ISSUE_IDENTITY=<plugin-root>/scripts/issue-identity.sh')"

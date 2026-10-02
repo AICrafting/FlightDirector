@@ -211,10 +211,9 @@ in QA is filtered out) so you can pick:
 
 **working-an-issue** creates a dedicated worktree off your first stage and flips the board:
 
-- `git worktree add .worktrees/fj-42-export-button -b feature/fj-42-export-button develop` —
-  `fj-42` is issue 42 on the tracker whose ref is `FJ`, so the same number on another tracker
-  can never share a branch. (Branches made before trackers had refs, `feature/42-…`, keep
-  working.)
+- `git worktree add .worktrees/42-export-button -b feature/42-export-button develop`. With
+  more than one issue tracker the branch carries the tracker's ref, `feature/fj-42-…`, so the
+  same number on another tracker can never share a branch.
 - sets the issue to **`status/in progress`**
 
 You and Claude make the change inside that worktree. Because it's a separate worktree, you could

@@ -51,7 +51,7 @@ fails() {	# fails <pattern> <cmd…> — the command exits non-zero and stderr m
 section "identity resolution"
 out="$(resolve --number 1)"
 check "bare number selects the default" "$(jq -e '.tracker == "FJ"' <<<"$out" >/dev/null && echo 1 || echo 0)" "$out"
-check "identity is qualified and branch-safe" "$(jq -e '.number == "1" and .qualified == "FJ-1" and .branchPrefix == "fj-1" and (keys == ["branchPrefix","number","qualified","tracker"])' <<<"$out" >/dev/null && echo 1 || echo 0)" "$out"
+check "identity is qualified and branch-safe" "$(jq -e '.number == "1" and .qualified == "FJ-1" and .branchPrefix == "fj-1" and .display == "FJ-1" and (keys == ["branchPrefix","display","number","qualified","tracker"])' <<<"$out" >/dev/null && echo 1 || echo 0)" "$out"
 check "a leading hash is still the default tracker" "$(resolve --number '#1' | jq -e '.tracker == "FJ" and .number == "1"' >/dev/null && echo 1 || echo 0)"
 check "compact REF-less form GH1 is case-insensitive" "$(resolve --number fJ1 | jq -e '.tracker == "FJ" and .number == "1"' >/dev/null && echo 1 || echo 0)"
 check "REF#N resolves" "$(resolve --number FJ#2 | jq -e '.qualified == "FJ-2"' >/dev/null && echo 1 || echo 0)"

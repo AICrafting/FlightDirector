@@ -860,12 +860,17 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 	fi
 	if [ "$all_trackers" = 1 ]; then
 		list_failed=0
+		# A single-tracker repo (#258) names its issues #12 / PROJ-7, not FJ-12.
+		list_unprefixed="$(tracker_tool unprefixed --config "$cfg")"
 		list_out="$(mktemp "${TMPDIR:-/tmp}/flight-list.XXXXXX")"
 		list_err="$(mktemp "${TMPDIR:-/tmp}/flight-list-err.XXXXXX")"
 		while IFS= read -r list_ref; do
 			[ -n "$list_ref" ] || continue
 			if "$SELF_DIR/flight" issues list --tracker "$list_ref" "$@" >"$list_out" 2>"$list_err"; then
-				awk -v ref="$list_ref" 'BEGIN { FS = OFS = "\t" } NF { n = $1; sub(/^.*-/, "", n); print ref "-" n, $0 }' "$list_out"
+				awk -v ref="$list_ref" -v bare="$list_unprefixed" 'BEGIN { FS = OFS = "\t" } NF {
+					n = $1; sub(/^.*-/, "", n)
+					if (bare == "true") print ($1 ~ /^[0-9]+$/ ? "#" $1 : $1), $0
+					else print ref "-" n, $0 }' "$list_out"
 				# A successful tracker's stderr (the "showing N of M" truncation warning,
 				# the #177 token note) still matters: forward it, naming the tracker.
 				sed -e 's/^flight: //' -e "s/^/flight: tracker $list_ref: /" "$list_err" >&2

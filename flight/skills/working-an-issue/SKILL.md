@@ -30,15 +30,24 @@ both have an issue 12. Resolve what the user said **exactly once** and retain th
 ISSUE="$(flight issues resolve --number "$INPUT")"   # INPUT as given: 12, #12, GH-12, PROJ-7
 TRACKER="$(jq -r '.tracker' <<<"$ISSUE")"             # the tracker's ref, e.g. FJ
 NUMBER="$(jq -r '.number' <<<"$ISSUE")"               # its native id: 12, or PROJ-7 on Jira
-QUALIFIED="$(jq -r '.qualified' <<<"$ISSUE")"         # FJ-12 — the name to show and write
-PREFIX="$(jq -r '.branchPrefix' <<<"$ISSUE")"         # fj-12 — the branch/worktree prefix
+QUALIFIED="$(jq -r '.qualified' <<<"$ISSUE")"         # FJ-12 — the routing key: always unambiguous
+DISPLAY="$(jq -r '.display' <<<"$ISSUE")"             # #12 — the name to show and write
+PREFIX="$(jq -r '.branchPrefix' <<<"$ISSUE")"         # 12 — the branch/worktree prefix
 ```
+
+`DISPLAY` and `PREFIX` follow the repo's tracker count, decided by the dispatcher — never
+derive them yourself. With **one** tracker (the code repository's own, or Jira) the prefix
+carries no information, so an issue is `#12` (`PROJ-7` on Jira) and its branch
+`feature/12-<slug>`. With **several**, both are qualified — `FJ-12`, `feature/fj-12-<slug>` —
+so two trackers' issue 12 never collide. `QUALIFIED` is always `FJ-12`: use it wherever the id
+is handed back to flight (`--number`, a manifest), and `DISPLAY` wherever a person or the forge
+reads it (pickup lines, commit scopes, reports, ledger comments).
 
 - A bare `12` / `#12` means the **current default** tracker; `GH-12`, `GH12`, `GH#12` (ref or
   alias, any case) and a Jira key `PROJ-7` name their tracker. Add `--tracker REF` when the user
   names the tracker separately. An unknown or ambiguous tracker is an error listing the choices —
   ask the user; never guess. When the repo has more than one tracker, say which one the issue
-  resolved to in the pickup line (`read FJ-12: …`).
+  resolved to in the pickup line (`read FJ-12: …` — with several trackers `DISPLAY` is qualified).
 - **Every later issue or label call passes `--tracker "$TRACKER" --number "$NUMBER"`** — comments,
   the work ledger, model labels, status, assignment, close. Never resolve the bare input again:
   the default tracker can change while the work is in flight, and a re-resolved `12` would then
@@ -47,8 +56,9 @@ PREFIX="$(jq -r '.branchPrefix' <<<"$ISSUE")"         # fj-12 — the branch/wor
   the identity from the branch, not from the number —
   `ISSUE="$("$ISSUE_IDENTITY" from-branch --branch "$BRANCH")"` (the helper from
   [runtime preflight](../../references/runtime.md)). It reads qualified branch names
-  (`feature/fj-12-…`) and the migration's bindings for legacy `feature/12-…` branches. Exit
-  status 4 means a legacy branch whose tracker cannot be recovered: ask the user which tracker it
+  (`feature/fj-12-…`), the bindings `remember` wrote for single-tracker `feature/12-…` branches,
+  the migration's bindings for legacy ones, and — while the repo has one tracker — any other
+  `feature/12-…` branch. Exit status 4 means an unqualified branch whose tracker cannot be recovered: ask the user which tracker it
   belongs to and rerun with `--tracker REF` (the answer is retained); never assume the default.
 
 Read `stages[0]` (the first integration branch) via:
@@ -119,14 +129,13 @@ merge config fields or hand-merge here. Config + verbs:
   flight issues get      --tracker "$TRACKER" --number "$NUMBER"
   flight issues comments --tracker "$TRACKER" --number "$NUMBER"
   ```
-  Then **state what you read** before moving on — e.g. "read FJ-12: body + 3 comments, latest
+  Then **state what you read** before moving on — e.g. "read #12: body + 3 comments, latest
   2026-09-06 by dave" (or "no comments") — so the user can see the thread was consulted. If a
   comment contradicts the body, the later comment wins — work to that, and say so explicitly.
 - Derive a short slug from the issue's title (lowercase, hyphens, no special characters) — e.g.
-  FJ-42 "Add login page" → `feature/fj-42-add-login-page`. The
-  branch and worktree always carry the tracker-qualified `PREFIX`, the default tracker's issues
-  included — `feature/fj-12-<slug>`, `feature/proj-7-<slug>` for Jira — so two trackers' issue 12
-  never collide.
+  #42 "Add login page" → `feature/42-add-login-page`. The branch and worktree carry `PREFIX`
+  exactly as resolved: `feature/42-<slug>` with one tracker, `feature/fj-42-<slug>` (or
+  `feature/proj-7-<slug>` for Jira) with several.
 - Pick `feature` vs `bug` from the issue's type label or content.
 - Create a worktree off `stages[0]` (the first integration branch):
 
@@ -180,15 +189,15 @@ the local ref — offline work must not be blocked — but say so plainly, and r
 pickup line as **unverified**: *"base `$BASE`: UNVERIFIED (fetch failed — offline); forked from
 local `$BASE`"*. The ledger must never imply a freshness check that did not happen.
 
-**Say which case applied in the "read <QUALIFIED> …" pickup line**, next to the comment count — e.g.
-*"read FJ-12: body + 2 comments; base develop: fetched, level with origin"*.
+**Say which case applied in the "read <DISPLAY> …" pickup line**, next to the comment count — e.g.
+*"read #12: body + 2 comments; base develop: fetched, level with origin"*.
 
 Do the work inside `$WT`, and drive git there **by path, not by `cd`**:
 
 ```
 git -C "$WT" status
 git -C "$WT" add flight/skills/<skill>/SKILL.md      # paths are relative to $WT
-git -C "$WT" commit -m "feat($QUALIFIED): …"             # e.g. feat(FJ-12): — never a bare #12
+git -C "$WT" commit -m "feat($DISPLAY): …"               # feat(#12): with one tracker, feat(FJ-12): with several
 git -C "$WT" log --oneline -3
 git -C "$WT" show --no-patch --format=%G? HEAD       # signature check, still anchored
 ```

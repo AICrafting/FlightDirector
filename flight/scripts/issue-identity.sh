@@ -4,9 +4,12 @@
 # name, a batch-manifest entry or a history reference into a retained issue identity
 # (#198). An identity is exactly what `flight issues resolve` prints:
 #
-#   {"tracker":"FJ","number":"12","qualified":"FJ-12","branchPrefix":"fj-12"}
+#   {"tracker":"FJ","number":"12","qualified":"FJ-12","display":"FJ-12","branchPrefix":"fj-12"}
 #
-# (`number` is the tracker's native id — `PROJ-12` for Jira.) Everything here is
+# (`number` is the tracker's native id — `PROJ-12` for Jira.) `qualified` is the routing
+# key and never changes; `display` is the name people and commits see — `#12` (or
+# `PROJ-7`) while the repo has a single tracker (#258), the qualified id otherwise. It
+# is re-derived on every output, so a retained identity never shows a stale form. Everything here is
 # resolved through the dispatcher, so parsing rules are never duplicated. Needs config
 # schema 3 (named issue trackers); run `flight reconcile` first.
 #
@@ -66,16 +69,32 @@ valid_identity() {
 		<<<"$1" >/dev/null 2>&1
 }
 
-# The four canonical keys, compact — `legacy` and any other metadata are dropped, so a
-# reconcile-bound entry and a fresh `issues resolve` compare equal. Fails on anything
-# that is not an identity: a failed `resolve` inside `$(canonical "$(resolve …)")` hands
-# it an empty string, and printing nothing with status 0 would pass for success.
-canonical() { valid_identity "$1" || return 1; jq -c '{tracker, number, qualified, branchPrefix}' <<<"$1"; }
+# The canonical keys, compact — `legacy` and any other metadata are dropped, so a
+# reconcile-bound entry and a fresh `issues resolve` compare equal. `display` is never
+# taken from the input: it depends on how many trackers the repo has NOW, so it is
+# derived here (one resolve per process, cached). Fails on anything that is not an
+# identity: a failed `resolve` inside `$(canonical "$(resolve …)")` hands it an empty
+# string, and printing nothing with status 0 would pass for success.
+UNPREFIXED=""
+canonical() {
+	valid_identity "$1" || return 1
+	if [ -z "$UNPREFIXED" ]; then
+		# A tracker that has since left the config cannot be resolved; show it qualified.
+		UNPREFIXED="$(resolve "$(jq -r '.qualified' <<<"$1")" 2>/dev/null | jq -r 'if .display then .display != .qualified else false end')" \
+			|| UNPREFIXED=false
+	fi
+	jq -c --argjson u "$UNPREFIXED" '{tracker, number, qualified,
+		display: (if $u then (if (.number | test("^[0-9]+$")) then "#" + .number else .number end) else .qualified end),
+		branchPrefix}' <<<"$1"
+}
 
 resolve() { # resolve <input> [tracker]
 	if [ -n "${2:-}" ]; then flight issues resolve --number "$1" --tracker "$2"
 	else flight issues resolve --number "$1"; fi
 }
+
+# sole_tracker — the ref of the repo's only tracker, or nothing when it has several.
+sole_tracker() { flight config 'if (.issueTrackers // [] | length) == 1 then .issueTrackers[0].ref else empty end' 2>/dev/null || true; }
 
 # canonical_ref <selector> — the configured ref a ref-or-alias names (dispatcher-checked).
 canonical_ref() { flight issues tracker --tracker "$1" | jq -r '.ref'; }
@@ -111,23 +130,27 @@ write_binding() { # write_binding <branch> <canonical identity>
 	tmp="$(mktemp "$FILE.tmp.XXXXXX")"
 	jq --arg b "$1" --argjson i "$2" '
 		.schemaVersion = (.schemaVersion // 1)
-		| .branches = ((.branches // {}) + {($b): $i})
+		| .branches = ((.branches // {}) + {($b): ($i | del(.display))})
 		| .manifests = (.manifests // {})' <<<"$data" >"$tmp" || { rm -f "$tmp"; die "could not write $FILE"; }
 	mv "$tmp" "$FILE"
 }
 
 remember() { # remember <branch> <identity>
-	local branch="$1" id="$2" want slug prefix
+	local branch="$1" id="$2" want slug prefix num
 	valid_identity "$id" || die "--identity must be the JSON flight issues resolve prints (tracker, number, qualified, branchPrefix)"
 	id="$(canonical "$id")"
 	# Round-trip through the resolver so nothing hand-built (or stale) is retained.
 	want="$(canonical "$(resolve "$(jq -r '.number' <<<"$id")" "$(jq -r '.tracker' <<<"$id")")")" \
 		|| die "cannot verify identity $(jq -r '.qualified' <<<"$id")"
 	[ "$want" = "$id" ] || die "identity $id does not match the resolver's $want"
-	# A qualified branch name must carry this identity's prefix.
+	# A qualified branch name must carry this identity's prefix; an unqualified one
+	# (feature/12-…: legacy, or a single-tracker repo's, #258) this identity's number.
 	slug="${branch#*/}"; prefix="$(jq -r '.branchPrefix' <<<"$id")"
 	if [[ "$slug" =~ ^[A-Za-z][A-Za-z0-9]*-[0-9]+(-|$) ]]; then
 		case "$(lower "$slug")" in "$prefix"|"$prefix"-*) ;; *) die "branch '$branch' does not carry $prefix";; esac
+	elif [[ "$slug" =~ ^0*([0-9]+)(-|$) ]]; then
+		num="$(jq -r '.number' <<<"$id")"
+		[ "${BASH_REMATCH[1]}" = "${num##*-}" ] || die "branch '$branch' does not carry issue $(jq -r '.qualified' <<<"$id")"
 	fi
 	with_lock write_binding "$branch" "$id"
 }
@@ -162,11 +185,14 @@ from_branch() { # from_branch <branch> [explicit tracker]
 		return 0
 	fi
 	if [[ "$slug" =~ ^([0-9]+)(-|$) ]]; then
-		# Legacy unqualified (feature/12-…): bound at migration, else the migrated
-		# original default, else an explicit choice — never the current default.
+		# Unqualified (feature/12-…): bound when it was started (remember) or at
+		# migration, else the migrated original default, else the repo's ONLY tracker
+		# (#258 names single-tracker branches this way) — never the current default
+		# among several.
 		n="${BASH_REMATCH[1]}"
 		tracker="$explicit"
 		[ -n "$tracker" ] || tracker="$(bindings | jq -r '.legacyDefaultTracker // empty' 2>/dev/null || true)"
+		[ -n "$tracker" ] || tracker="$(sole_tracker)"
 		[ -n "$tracker" ] || die "legacy branch '$branch' has no recoverable tracker binding; rerun with --tracker REF (flight never guesses)" 4
 		id="$(canonical "$(resolve "$n" "$tracker")")"
 		# An explicit choice is retained, so every later step agrees without asking again.

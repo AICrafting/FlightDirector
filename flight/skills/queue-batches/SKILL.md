@@ -10,8 +10,8 @@ Before the first command, follow [runtime preflight](../../references/runtime.md
 Dispatches N parallel background agents, each grinding M issues **sequentially** through the
 native per-issue lifecycle (`working-an-issue`) in its own worktree. A *batch is a zone*: the N
 agents work disjoint file zones so the concurrently-active issues stay merge-clean. Every issue
-gets its own `feature/<branchPrefix>-<slug>` branch (`feature/fj-12-…` — the tracker-qualified
-prefix `flight issues resolve` returns) off `stages[0]` and stops at `to-test` — **no agent ever
+gets its own `feature/<branchPrefix>-<slug>` branch (`feature/12-…` with one tracker,
+`feature/fj-12-…` with several — the prefix `flight issues resolve` returns) off `stages[0]` and stops at `to-test` — **no agent ever
 promotes or pushes**. Live status via per-zone log files + `Monitor`; `status=blocked` questions
 route back to the user tagged by zone. Hands back for **serial** promotion via `promoting-a-branch`.
 
@@ -78,8 +78,10 @@ Render the current board (Display format below) and push back:
    ```bash
    flight issues list --all-trackers --state open --limit 50
    ```
-   Output is `<qualified>⇥<native id>⇥<title>⇥<labels>` (`FJ-12⇥12⇥…`, `JIR-7⇥PROJ-7⇥…`) across
-   every configured tracker; the qualified id is the issue's identity from here on — two trackers
+   Output is `<id>⇥<native id>⇥<title>⇥<labels>` (`FJ-12⇥12⇥…`, `JIR-7⇥PROJ-7⇥…`) across
+   every configured tracker — or `#12⇥12⇥…` when the repo has a single tracker, where the prefix
+   says nothing. That first column is the issue's id from here on (every flight verb accepts it
+   as `--number`, and agents log by it) — two trackers
    can both have an issue 12. A tracker reported `unavailable` on stderr is unavailable, not
    empty. The adapter pages underneath `--limit`. If it warns on
    stderr that it is showing 50 of more, raise `--limit` and list again — otherwise the batch can
@@ -87,15 +89,15 @@ Render the current board (Display format below) and push back:
 2. Apply the **workable filter** (identical rule to `triaging-issues`): **exclude** any issue
    whose label column carries one of **its own tracker's** `labels.status` roles (in-progress,
    to-test, review, qa, blocked, deferred) — read them with
-   `flight issues tracker --tracker "$REF" | jq '.labels.status'`, `$REF` being the qualified
-   id's prefix; never match one tracker's rows against another's names. The `new` role, when a
+   `flight issues tracker --tracker "$REF" | jq '.labels.status'`, `$REF` being the id's prefix
+   (with a single tracker, `#12`, omit `--tracker`); never match one tracker's rows against another's names. The `new` role, when a
    tracker configures it, stays workable.
 3. Resolve zones:
    ```bash
    flight config '.code.zones // "none"'
    ```
-   - **Configured** → read each issue's **body** by its qualified id
-     (`flight issues get --number FJ-12` — a qualified id routes to its own tracker); match predicted
+   - **Configured** → read each issue's **body** by its id
+     (`flight issues get --number FJ-12` — the id routes to its own tracker); match predicted
      touched paths to a zone's `paths` globs. Labels are a hint, not gospel. Skip issues that
      span multiple zones with a note.
    - **`none`** → infer up to N disjoint pseudo-zones by grouping issues whose bodies imply
@@ -155,7 +157,7 @@ Per zone:
 - Create + pre-seed the log so the board renders every issue as `○` before agents start:
   ```bash
   LOG="$SCRATCH/queue-status/<zone>.log"; : > "$LOG"
-  # ISSUES = this zone's qualified identities, smallest-first (e.g. "FJ-72 GH-73")
+  # ISSUES = this zone's ids, smallest-first (e.g. "FJ-72 GH-73", or "#72 #73" with one tracker)
   for ISSUE_ID in $ISSUES; do
     echo "$(date -u +%FT%TZ) <zone> ticket=$ISSUE_ID status=queued" >> "$LOG"
   done
@@ -181,8 +183,8 @@ promotion can reconstruct the grouping — this survives even when zones were *i
 
 ```bash
 batch-manifest write --run-id "$RUN_ID" \
-  --zone <zone-a> --issues "<zone-a qualified identities>" \
-  --zone <zone-b> --issues "<zone-b qualified identities>"   # …one pair per zone
+  --zone <zone-a> --issues "<zone-a ids>" \
+  --zone <zone-b> --issues "<zone-b ids>"   # …one pair per zone
 ```
 
 ## 4. Monitor + render
@@ -198,7 +200,7 @@ line reads `status=done`, render that zone's header with `⇥` (done, awaiting p
 status=safety-valved` means the zone did not finish its queue — render its header with `✗` and
 surface its unfinished issues as deferred. When a zone emits its terminal line, start that zone's
 repo gate sweep (4a) before rendering it as `⇥`. Once every zone has emitted its terminal line
-**and** its sweep has finished, proceed to Section 5. Match tasks by the `[<zone>] <QUALIFIED>` subject
+**and** its sweep has finished, proceed to Section 5. Match tasks by the `[<zone>] <ID>` subject
 prefix (e.g. `[auth] FJ-77`).
 
 **An agent returning is not that signal — its `ticket=all` line is.** When a zone's agent returns,
@@ -258,7 +260,7 @@ until mkdir "$LOCK" 2>/dev/null; do
     # that trips this at 30 and records five FALSE skips. Read 1800 as a stopgap, not a
     # considered value. #227 replaces it with a heartbeat, which can also reclaim the
     # stale directory this path deliberately leaves standing.
-    for ISSUE_ID in <that zone's qualified ids with status=complete>; do
+    for ISSUE_ID in <that zone's ids with status=complete>; do
       echo "$(date -u +%FT%TZ) $ZONE ticket=$ISSUE_ID status=preflight-skip note=\"lock timeout; stale $LOCK?\"" >> "$ZONE_LOG"
     done
     exit 0          # this zone reports unverified; it does NOT run ungated behind the lock
@@ -269,11 +271,11 @@ done
 # holder's lock on its way out.
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
 
-for ISSUE_ID in <that zone's qualified ids with status=complete>; do
-  PFLOG="$SCRATCH/queue-status/$ZONE-preflight-$ISSUE_ID.log"
-  # The branch prefix is the qualified id lowercased (FJ-12 → fj-12, JIR-7 → jir-7),
-  # and the trailing "-" keeps fj-1 from matching fj-12's worktree.
-  PREFIX="$(printf '%s' "$ISSUE_ID" | tr '[:upper:]' '[:lower:]')"
+for ISSUE_ID in <that zone's ids with status=complete>; do
+  PFLOG="$SCRATCH/queue-status/$ZONE-preflight-${ISSUE_ID#\#}.log"   # #12 → …-preflight-12.log
+  # The branch prefix comes from the resolver (#12 → 12 with one tracker, FJ-12 → fj-12
+  # with several); never derive it. The trailing "-" keeps 1 from matching 12's worktree.
+  PREFIX="$("$DISP" issues resolve --number "$ISSUE_ID" | jq -r '.branchPrefix')"
   # Resolve the worktree by glob — the loop knows the identity, not the slug. Use the
   # positional params rather than a variable: a two-match glob collapses into one
   # space-joined string that fails `[ -d ]`, and "no worktree" would be a lie when the
@@ -319,7 +321,7 @@ orchestrator's sweep is the authoritative record.
 Agents append one line per state change to `$SCRATCH/queue-status/<zone>.log`:
 
 ```
-<ISO-timestamp> <zone> ticket=<QUALIFIED> status=<queued|starting|working|complete|blocked|preflight-pass|preflight-fail|preflight-skip> [commit=<sha7>] [note="…"]
+<ISO-timestamp> <zone> ticket=<ID> status=<queued|starting|working|complete|blocked|preflight-pass|preflight-fail|preflight-skip> [commit=<sha7>] [note="…"]
 ```
 `queued` is pre-seeded by the orchestrator before dispatch; workers emit `starting`/`working`/`complete`/`blocked`.
 The three `preflight-*` statuses are written by the **orchestrator** after the zone's terminal
@@ -355,7 +357,7 @@ the gate is only worth pixels when it doesn't pass.
 
 When an agent writes `status=blocked`: parse `note="…"`, render the board, then below it:
 
-> **[<zone>] <QUALIFIED> needs input:** <question>
+> **[<zone>] <ID> needs input:** <question>
 
 Wait for the user's answer, then use the active harness's agent-messaging primitive with body
 `User says: <answer>. Continue.` Treat the agent as `working` until its next log line.
@@ -366,7 +368,7 @@ Once every zone has a `ticket=all` line reading `status=done` or `status=safety-
 its 4a sweep (when one is configured) has finished — the Section 4 condition, not merely every
 agent having returned: summarize each zone (commits with
 SHA + title, test deltas, judgment calls, deferrals). Surface any skipped/deferred issue with a
-follow-up suggestion. Report each `preflight-fail` issue by qualified id with its log path and a tail
+follow-up suggestion. Report each `preflight-fail` issue by its id with its log path and a tail
 of the failure, and say plainly that it should not be promoted until the gate is green —
 `promoting-branches` will skip it anyway, but the user deserves to know before they say "ship the
 batch". Report every `preflight-skip` too, with its `note=` reason: the gate never ran on that
