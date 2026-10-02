@@ -29,11 +29,13 @@ def base_comment: {
 
 case "$verb" in
   list)
-    state="open"; limit="50"; labels=()
+    state="open"; limit="50"; labels=(); per_page=""; cursor=""
     while [ $# -gt 0 ]; do case "$1" in
       --state) state="$2"; shift 2 ;;
       --limit) limit="$2"; shift 2 ;;
       --label) labels+=("$2"); shift 2 ;;
+      --per-page) per_page="$2"; shift 2 ;;
+      --cursor) cursor="$2"; shift 2 ;;
       *) die "issues list: unknown arg '$1'" ;;
     esac; done
     # `state` is unvalidated caller input, so it is encoded alongside the labels.
@@ -42,6 +44,17 @@ case "$verb" in
       enc=()
       for l in "${labels[@]}"; do enc+=("$(urlenc "$l")"); done
       old="$IFS"; IFS=,; q="${q}&labels=${enc[*]}"; IFS="$old"
+    fi
+    # Cursor paging (#262): one page per call, newest created first; see cursor_page.
+    if [ -n "$per_page$cursor" ]; then
+      json_mode || die "issues list: --per-page and --cursor need --json"
+      per_page="$(per_page_arg "${per_page:-50}")" || exit 1
+      _cursor_fetch() { _api GET "/issues?${q}&sort=created&direction=desc&per_page=$2&page=$1";  }
+      meta="$(page_meta_init)"
+      FLIGHT_PAGE_META="$meta" cursor_page _cursor_fetch '.[] | select(.pull_request | not)' '[(.created_at | utc), .number]' "$per_page" "$cursor" \
+          "github $LS_API $LS_OWNER/$LS_REPO $q"  \
+        | jq -c "$ISSUE_JQ"'base_issue | .body = null' | emit_list "$meta"
+      exit 0
     fi
     # /issues mixes pull requests in, so drop them inside the pager: it is the
     # issues that must count against --limit, not the rows the endpoint happens
