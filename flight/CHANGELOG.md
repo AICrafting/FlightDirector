@@ -21,6 +21,13 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   program driving the dispatcher can check for a feature instead of comparing versions.
   Neither needs a repo, config, token or network. Contract:
   `flight/references/json-output.md`.
+- **Structured errors under `--json`** (#251). A failing `--json` call exits non-zero and
+  prints one `{"error":{"code","message"}}` object on stdout, and nothing else. The codes are
+  `not-configured`, `auth`, `not-found`, `network`, `backend` and `usage`. Each code is decided
+  where the cause is known: the dispatcher for config, usage and ref resolution, and the adapters'
+  shared `_errors.sh` for HTTP status and curl failure. Without `--json` nothing changes, except
+  that an adapter missing a coordinate or token now says so in its usual
+  `<adapter>: <message>` form.
 
 - **The queue-batches worker model can be an ordered list** (#236).
   `code.queueBatches.defaultModel` now takes an array such as `["sonnet", "luna"]`, and
