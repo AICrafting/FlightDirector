@@ -108,6 +108,9 @@ Dispatcher-owned verbs:
 - **Exit code**: `0` success; non-zero on any failure (network, HTTP ≥ 400, bad args), with a
   one-line reason on stderr. Skills must check it — a non-zero exit is a hard stop, never a
   silent no-op.
+- **Programs, not agents,** use the opt-in `--json` forms and the `flight --version` /
+  `flight capabilities` probes. Their contract is in [json-output.md](json-output.md); the
+  default output above never changes because of them.
 
 ## URL encoding
 

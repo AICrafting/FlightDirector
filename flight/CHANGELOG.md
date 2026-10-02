@@ -15,6 +15,13 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- **`flight --version` and `flight capabilities`** (#254). `flight --version` prints the
+  plugin version; before, it printed the usage line. `--version --json` prints
+  `{"plugin","version"}`. `flight capabilities --json` adds a list of feature tokens, so a
+  program driving the dispatcher can check for a feature instead of comparing versions.
+  Neither needs a repo, config, token or network. Contract:
+  `flight/references/json-output.md`.
+
 - **The queue-batches worker model can be an ordered list** (#236).
   `code.queueBatches.defaultModel` now takes an array such as `["sonnet", "luna"]`, and
   `queue-batches` uses the first model the running harness can dispatch. A repo worked from both

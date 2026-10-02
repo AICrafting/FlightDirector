@@ -19,7 +19,50 @@ ADAPTERS_DIR="$SELF_DIR/adapters"
 
 die() { echo "flight: $*" >&2; exit 1; }
 
-[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci auth branches config reconcile prompt-log)"
+# Installed plugin version + name, from the manifest (Codex's first, then Claude's).
+plugin_manifest() {
+  local m="$SELF_DIR/../.codex-plugin/plugin.json"
+  [ -f "$m" ] || m="$SELF_DIR/../.claude-plugin/plugin.json"
+  printf '%s' "$m"
+}
+
+# Feature tokens a consumer can detect with `flight capabilities --json` (#254)
+# instead of comparing versions. A token is added here in the same change that
+# ships the feature, and never renamed or removed once released.
+CAPABILITIES=(version capabilities)
+
+# `flight --version [--json]` and `flight capabilities [--json]` (#254) — answered
+# before anything else: no repo, config, token or network needed, so a consumer
+# can probe any Flight, however old the repo it runs in.
+if [ "${1:-}" = "--version" ] || [ "${1:-}" = "capabilities" ]; then
+	probe="$1"; shift
+	probe_json=0
+	while [ $# -gt 0 ]; do case "$1" in
+		--json) probe_json=1; shift ;;
+		*) die "usage: flight --version [--json] | flight capabilities [--json]" ;;
+	esac; done
+	command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
+	manifest="$(plugin_manifest)"
+	[ -f "$manifest" ] || die "cannot find the Flight plugin manifest"
+	version="$(jq -r '.version // empty' "$manifest")"
+	[ -n "$version" ] || die "cannot determine installed Flight version"
+	plugin="$(jq -r '.name // "flight"' "$manifest")"
+	if [ "$probe" = "--version" ]; then
+		if [ "$probe_json" = 1 ]; then
+			jq -cn --arg p "$plugin" --arg v "$version" '{plugin:$p, version:$v}'
+		else
+			printf '%s %s\n' "$plugin" "$version"
+		fi
+	elif [ "$probe_json" = 1 ]; then
+		printf '%s\n' "${CAPABILITIES[@]}" \
+			| jq -cRn --arg p "$plugin" --arg v "$version" '{plugin:$p, version:$v, capabilities:[inputs]}'
+	else
+		printf '%s\n' "${CAPABILITIES[@]}"
+	fi
+	exit 0
+fi
+
+[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci auth branches config reconcile prompt-log; also: flight --version, flight capabilities)"
 group="$1"; verb="$2"; shift 2
 
 # Which config axis backs this group.
@@ -169,13 +212,6 @@ fi
 handoff() {
   if [ -n "$cfg_tmp$sig_tmp" ]; then "$@"; exit $?; fi
   exec "$@"
-}
-
-# Installed plugin version + name, from the manifest (Codex's first, then Claude's).
-plugin_manifest() {
-  local m="$SELF_DIR/../.codex-plugin/plugin.json"
-  [ -f "$m" ] || m="$SELF_DIR/../.claude-plugin/plugin.json"
-  printf '%s' "$m"
 }
 
 # `Fable/5.1` from `claude-fable-5-1`; `Sol/5.6` from `gpt-5.6-sol`; `GPT/5` from
