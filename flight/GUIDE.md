@@ -7,7 +7,8 @@ it, **how to install** it, and **how to use** it, with a full worked example.
 > New to the plugin? Start here. For the at-a-glance skill list and the config schema, see the
 > [README](README.md), [flight-setup.md](references/flight-setup.md),
 > [adapter-contract.md](references/adapter-contract.md), and — for per-backend config,
-> token-creation URLs, and minimum scopes — [backends.md](references/backends.md).
+> token-creation URLs, and minimum scopes — [backends.md](references/backends.md). Building a
+> tool on top of flight? The `--json` contract is [json-output.md](references/json-output.md).
 
 ---
 
@@ -388,6 +389,29 @@ ledger comment pastes in. Cost is priced from a bundled table you can extend per
 what the tokens *would* cost via the API, good for comparing issues, not a bill. Unknown models
 and unreadable transcripts show up as `null` with a warning, never as a silent zero. Full schema
 and semantics: [prompt-log.md](references/prompt-log.md).
+
+---
+
+## Driving flight from another tool (`--json`)
+
+A dashboard, editor panel or script can drive the same dispatcher the skills use, without ever
+seeing a token or calling a forge API. Add `--json` to the read and write verbs and every
+backend answers with the same shape:
+
+```sh
+flight capabilities --json                    # {"plugin","version","capabilities":[…]}: feature-detect here
+flight issues list --state open --json        # {"issues":[…], "truncated", "total"}
+flight issues get --number 42 --json          # one issue: labels, status role, body, signature split out
+flight issues comments --number 42 --json     # [{id, author, created, updated, url, body, signature}]
+flight labels statuses --json                 # this repo's status roles → label names and colours
+flight issues comment --number 42 --body hi --json   # the new comment, same shape as above
+```
+
+A failure under `--json` prints one `{"error":{"code","message"}}` object on stdout and exits
+non-zero. The code is one of `not-configured`, `auth`, `not-found`, `network`, `backend` or
+`usage`, so a UI can show "set this repo up" or "fix your token" instead of raw stderr. Without
+`--json`, the tab-separated output agents rely on is unchanged. Every field, verb and edge
+case: [json-output.md](references/json-output.md).
 
 ---
 
