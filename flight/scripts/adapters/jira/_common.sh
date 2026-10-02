@@ -99,7 +99,9 @@ _jql_search() {
     [ "$page" -le 1000 ] || die "pagination exceeded 1000 pages for /search/jql"
     payload="$(jq -n --arg j "$jql" --argjson m "$size" --argjson f "$fields" --arg t "$token" \
       '{jql:$j, maxResults:$m, fields:$f} + (if $t == "" then {} else {nextPageToken:$t} end)')"
-    resp="$(_api POST "/rest/api/3/search/jql" "$payload")"
+    # `|| exit 1`, not errexit: inside a command substitution (as when a caller caches
+    # the rows) set -e is not inherited, and a failed page would read as an empty one.
+    resp="$(_api POST "/rest/api/3/search/jql" "$payload")" || exit 1
     printf '%s' "$resp" | jq -c '.issues[]?' >>"$out"
     rows="$(wc -l <"$out" | tr -d ' ')"
     token="$(printf '%s' "$resp" | jq -r '.nextPageToken // empty')"
@@ -130,7 +132,9 @@ _offset_get() {
   while :; do
     page=$((page + 1))
     [ "$page" -le 1000 ] || die "pagination exceeded 1000 pages for $path"
-    resp="$(_api GET "${path}?${query:+$query&}startAt=${start}&maxResults=${size}")"
+    # `|| exit 1`, not errexit: inside a command substitution (as when a caller caches
+    # the rows) set -e is not inherited, and a failed page would read as an empty one.
+    resp="$(_api GET "${path}?${query:+$query&}startAt=${start}&maxResults=${size}")" || exit 1
     batch="$(printf '%s' "$resp" | jq --arg k "$key" '(.[$k] // []) | length')"
     printf '%s' "$resp" | jq -c --arg k "$key" '(.[$k] // [])[]' >>"$out"
     rows="$(wc -l <"$out" | tr -d ' ')"

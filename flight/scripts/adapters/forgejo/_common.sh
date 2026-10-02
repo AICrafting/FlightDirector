@@ -117,7 +117,9 @@ _paged_get() {
   _API_HEADER_FILE="$hdr"
   while :; do
     [ "$page" -le 1000 ] || die "pagination exceeded 1000 pages for $path"
-    batch="$(_api GET "${path}?${query:+$query&}limit=${size}&page=${page}")"
+    # `|| exit 1`, not errexit: inside a command substitution (as when a caller caches
+    # the rows) set -e is not inherited, and a failed page would read as an empty one.
+    batch="$(_api GET "${path}?${query:+$query&}limit=${size}&page=${page}")" || exit 1
     count="$(printf '%s' "$batch" | jq 'length')"
     printf '%s' "$batch" | jq -c "$filter" >>"$out"
     rows="$(wc -l <"$out" | tr -d ' ')"
@@ -147,7 +149,12 @@ _paged_get() {
 # Labels are fetched once and cached for the life of the process.
 _LABELS_CACHE=""
 _all_labels() {
-  [ -n "$_LABELS_CACHE" ] || _LABELS_CACHE="$(_paged_get "/labels" "" "" | jq -s '.')"
+  # Not `[ -n … ] || cache=…`: set -e is off on the left of `||`, so a failed fetch
+  # (network, 401) used to become an empty label list — "no labels", exit 0. The
+  # explicit `|| exit 1` carries the failure (already reported by _api) out.
+  if [ -z "$_LABELS_CACHE" ]; then
+    _LABELS_CACHE="$(_paged_get "/labels" "" "" | jq -s '.')" || exit 1
+  fi
   printf '%s' "$_LABELS_CACHE"
 }
 
