@@ -44,7 +44,7 @@ plugin_manifest() {
 # Feature tokens a consumer can detect with `flight capabilities --json` (#254)
 # instead of comparing versions. A token is added here in the same change that
 # ships the feature, and never renamed or removed once released.
-CAPABILITIES=(version capabilities json-errors issues-json labels-json)
+CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json)
 
 # `flight --version [--json]` and `flight capabilities [--json]` (#254) — answered
 # before anything else: no repo, config, token or network needed, so a consumer
@@ -102,7 +102,7 @@ trap cleanup EXIT
 # it, and handed on as LS_JSON=1. Only the verbs in JSON_VERBS accept it; on any
 # other issues/labels verb it is a usage error. Other groups keep their own
 # meaning of the flag (`prompt-log summary --json` predates this).
-JSON_VERBS=(issues/resolve issues/tracker issues/list issues/get issues/comments labels/list labels/statuses)
+JSON_VERBS=(issues/resolve issues/tracker issues/list issues/get issues/comments labels/list labels/statuses issues/create issues/comment issues/set-status)
 json_mode=0
 case "${1:-}" in
 	issues|labels)
@@ -293,14 +293,42 @@ handoff() {
   if [ "$json_mode" = 1 ]; then
     json_out="$(mktemp "${TMPDIR:-/tmp}/flight-out.XXXXXX")"
     if "$@" >"$json_out"; then :; else exit $?; fi
-    if [ -n "$json_finish" ]; then
-      # issues list|get|comments: the adapter's base objects, finished with what only
-      # the dispatcher knows (issue-json.jq). A failure here is still one envelope.
-      jq -c -f "$SELF_DIR/issue-json.jq" --arg mode "$json_finish" --arg tracker "$json_tracker" \
-        --argjson labels "$LS_LABELS_JSON" "$json_out" >"$json_out.done" \
-        || { rm -f "$json_out.done"; die_code backend "could not assemble the --json output"; }
-      mv "$json_out.done" "$json_out"
-    fi
+    case "$json_finish" in
+      list|get|comments|comment)
+        # The adapter's base objects, finished with what only the dispatcher knows
+        # (issue-json.jq). A failure here is still one envelope.
+        jq -c -f "$SELF_DIR/issue-json.jq" --arg mode "$json_finish" --arg tracker "$json_tracker" \
+          --argjson labels "$LS_LABELS_JSON" "$json_out" >"$json_out.done" \
+          || { rm -f "$json_out.done"; die_code backend "could not assemble the --json output"; }
+        mv "$json_out.done" "$json_out"
+        ;;
+      create)
+        # The adapter printed the new issue's number. Answer with the issue itself,
+        # read back through `issues get --json` so the shape cannot differ. The issue
+        # EXISTS by now, so a failed read-back must not look like a failed create (a
+        # caller would file it again): fall back to the fields already known, and say
+        # so on stderr.
+        js_number="$(tr -d '[:space:]' <"$json_out")"
+        if ! env -u FLIGHT_ERROR_FILE -u LS_JSON "$SELF_DIR/flight" issues get --number "$js_number" \
+            ${json_tracker:+--tracker "$json_tracker"} --json >"$json_out.done" 2>/dev/null; then
+          echo "flight: warning — created #$js_number but could not read it back; returning the known fields only" >&2
+          jq -cn --arg n "$js_number" --arg t "$js_title" \
+            '{number: $n, title: $t, state: "open", labels: [], author: null, created: null,
+              updated: null, comments: 0, url: null, body: null}' \
+            | jq -c -f "$SELF_DIR/issue-json.jq" --arg mode get --arg tracker "$json_tracker" \
+                --argjson labels "$LS_LABELS_JSON" >"$json_out.done"
+        fi
+        mv "$json_out.done" "$json_out"
+        ;;
+      set-status)
+        # The adapter prints nothing; echo the status the issue now carries.
+        jq -cn --arg n "$js_number" --arg t "$json_tracker" --arg r "$js_role" \
+          --argjson labels "$LS_LABELS_JSON" '
+          {number: $n, tracker: (if $t == "" then null else $t end),
+           qualified: (if $t == "" then null else "\($t)-\($n | split("-") | last)" end),
+           status: $r, label: ($labels.status[$r] // null)}' >"$json_out"
+        ;;
+    esac
     cat "$json_out"; exit 0
   fi
   if [ -n "$cfg_tmp$sig_tmp" ]; then "$@"; exit $?; fi
@@ -945,8 +973,24 @@ fi
 json_finish=""; json_tracker=""
 if [ "$json_mode" = 1 ]; then
 	case "$group/$verb" in
-		issues/list|issues/get|issues/comments) json_finish="$verb" ;;
+		issues/list|issues/get|issues/comments|issues/comment|issues/create|issues/set-status) json_finish="$verb" ;;
 	esac
+	# What the write verbs' answers need from their own arguments (#252).
+	js_number=""; js_role=""; js_title=""
+	js_i=1
+	while [ "$js_i" -le $# ]; do
+		case "${!js_i}" in
+			--number|--status|--title)
+				js_next=$((js_i + 1))
+				case "${!js_i}" in
+					--number) js_number="${!js_next:-}" ;;
+					--status) js_role="${!js_next:-}" ;;
+					--title)  js_title="${!js_next:-}" ;;
+				esac
+				js_i=$((js_i + 2)) ;;
+			*) js_i=$((js_i + 1)) ;;
+		esac
+	done
 	[ -z "$tracker_json" ] || json_tracker="$(jq -r '.ref' <<<"$tracker_json")"
 fi
 

@@ -11,7 +11,7 @@
 #              pre-schema-3 config, where both are null)
 # and fixes key order so every backend serialises identically.
 #
-# Invoked as: jq -c --arg mode list|get|comments --arg tracker REF --argjson labels MAP
+# Invoked as: jq -c --arg mode list|get|comments|comment --arg tracker REF --argjson labels MAP
 # Contract: ../references/json-output.md.
 
 def tracker_or_null: if $tracker == "" then null else $tracker end;
@@ -64,6 +64,8 @@ elif $mode == "get" then
 	finish_issue
 elif $mode == "comments" then
 	map(finish_comment)
+elif $mode == "comment" then
+	finish_comment
 else
 	error("issue-json: unknown mode \($mode)")
 end

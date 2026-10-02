@@ -36,6 +36,7 @@ $ flight capabilities --json
 | `capabilities` | this probe |
 | `json-errors` | a failing `--json` call reports a coded error envelope (below) |
 | `labels-json` | `labels list --json` and `labels statuses [--json]` |
+| `write-json` | `issues create`, `issues comment` and `issues set-status` take `--json` |
 | `issues-json` | `issues list`, `issues get` and `issues comments` take `--json`, and `issues list` takes `--status ROLE` |
 
 ## Which verbs take `--json`
@@ -53,6 +54,9 @@ their own meaning: `prompt-log summary --json` predates this and is unchanged.
 | `issues get` | one issue object |
 | `issues comments` | an array of comment objects, oldest first |
 | `issues resolve`, `issues tracker` | already JSON; `--json` adds the error envelope |
+| `issues create` | the new issue object |
+| `issues comment` | the new comment object |
+| `issues set-status` | `{number, tracker, qualified, status, label}` |
 | `labels list` | an array of label objects |
 | `labels statuses` | an array of status roles |
 
@@ -159,6 +163,20 @@ The code is decided where the cause is known, and never by matching message text
 classifies config, usage and ref resolution. Each adapter's `_api` maps HTTP status and curl
 failure through the shared `adapters/_errors.sh` (`fail`, `http_fail`, `require_env`), which
 writes the envelope to the `FLIGHT_ERROR_FILE` the dispatcher exports for a `--json` call.
+
+### Writes
+
+- **`issues create --json`** returns the new issue in the `issues get --json` shape, read back
+  through that verb. The issue already exists by then, so if the read-back fails the call
+  **still succeeds**. It answers with the fields it knows (`number`, `tracker`, `qualified`,
+  `title`, `state: "open"`, the rest null) and warns on stderr. That way a caller never files it
+  twice.
+- **`issues comment --json`** returns the new comment in the `comments --json` entry shape. The
+  signature flight appended comes back split into `signature`.
+- **`issues set-status --json`** returns
+  `{"number": "12", "tracker": "FJ", "qualified": "FJ-12", "status": "to-test", "label": "status/to test"}`.
+
+Without `--json` these verbs print what they always did: the number, nothing, and nothing.
 
 ## Labels
 

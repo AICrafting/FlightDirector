@@ -206,7 +206,13 @@ case "$verb" in
     else
       payload="$(jq -n --arg b "$body" '{body:$b}')"
     fi
-    _api POST "/issues/${number}/notes" "$payload" >/dev/null
+    if json_mode; then
+      note="$(_api POST "/issues/${number}/notes" "$payload")"
+      web="$(_api GET "/issues/${number}" | jq -r '.web_url // ""')"
+      jq -c --arg web "$web" "$ISSUE_JQ"'base_comment($web)' <<<"$note"
+    else
+      _api POST "/issues/${number}/notes" "$payload" >/dev/null
+    fi
     ;;
 
   set-status)
