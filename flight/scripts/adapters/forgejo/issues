@@ -183,7 +183,11 @@ case "$verb" in
     else
       payload="$(jq -n --arg b "$body" '{body:$b}')"
     fi
-    _api POST "/issues/${number}/comments" "$payload" >/dev/null
+    if json_mode; then
+      _api POST "/issues/${number}/comments" "$payload" | jq -c "$ISSUE_JQ"'base_comment'
+    else
+      _api POST "/issues/${number}/comments" "$payload" >/dev/null
+    fi
     ;;
 
   set-status)

@@ -21,6 +21,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   program driving the dispatcher can check for a feature instead of comparing versions.
   Neither needs a repo, config, token or network. Contract:
   `flight/references/json-output.md`.
+- **`issues create`, `comment` and `set-status` take `--json`** (#252). `create` returns the new
+  issue in the `issues get --json` shape. A failed read-back still reports success with the known
+  fields, so a caller doesn't file it twice. `comment` returns the new comment, with its signature
+  split out. `set-status` echoes `{number, tracker, qualified, status, label}`.
 - **`labels list --json` and `labels statuses`** (#250).
   - `labels list --json` returns `[{name, color, description}]` on every backend, with colours as
     `#rrggbb`.

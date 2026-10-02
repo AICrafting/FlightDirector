@@ -204,7 +204,12 @@ case "$verb" in
     else
       adf="$(md_to_adf_json "$body")"
     fi
-    _api POST "/rest/api/3/issue/${number}/comment" "$(jq -n --argjson b "$adf" '{body:$b}')" >/dev/null
+    if json_mode; then
+      _api POST "/rest/api/3/issue/${number}/comment" "$(jq -n --argjson b "$adf" '{body:$b}')" \
+        | jq -c --arg site "$SITE" --arg key "$number" "$ISSUE_JQ"'base_comment($site; $key)'
+    else
+      _api POST "/rest/api/3/issue/${number}/comment" "$(jq -n --argjson b "$adf" '{body:$b}')" >/dev/null
+    fi
     ;;
 
   set-status)
