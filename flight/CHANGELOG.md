@@ -13,6 +13,17 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+
+- **Cursor paging for `issues list --json`** (#262). `--per-page M` returns one page and a
+  `next` cursor, and `--cursor C` fetches the page after it, so a "Load more" button no longer
+  re-downloads the whole list with a growing `--limit`. Pages run newest created first, ties by
+  number, on every backend and never overlap. An issue filed between loads doesn't repeat a
+  row, and on Forgejo, GitHub and GitLab one that leaves the list doesn't make a row get
+  skipped. The cursor is opaque and tied to its query; reusing it with other filters or another
+  tracker is a `usage` error, as is combining paging with `--limit` or `--all-trackers`.
+  Feature-detect it with the new `issues-paging` capability.
+
 ### Changed
 
 - **One issue tracker means plain issue numbers again** (#258). While a repo has a single

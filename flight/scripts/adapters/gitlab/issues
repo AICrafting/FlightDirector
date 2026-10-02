@@ -39,11 +39,13 @@ _status_names_csv() {
 
 case "$verb" in
   list)
-    state="open"; limit="50"; labels=()
+    state="open"; limit="50"; labels=(); per_page=""; cursor=""
     while [ $# -gt 0 ]; do case "$1" in
       --state) state="$2"; shift 2 ;;
       --limit) limit="$2"; shift 2 ;;
       --label) labels+=("$2"); shift 2 ;;
+      --per-page) per_page="$2"; shift 2 ;;
+      --cursor) cursor="$2"; shift 2 ;;
       *) die "issues list: unknown arg '$1'" ;;
     esac; done
     # GitLab issue state is opened|closed; `all` means omit the filter.
@@ -59,6 +61,17 @@ case "$verb" in
       enc=()
       for l in "${labels[@]}"; do enc+=("$(urlenc "$l")"); done
       old="$IFS"; IFS=,; q="${q:+$q&}labels=${enc[*]}"; IFS="$old"
+    fi
+    # Cursor paging (#262): one page per call, newest created first; see cursor_page.
+    if [ -n "$per_page$cursor" ]; then
+      json_mode || die "issues list: --per-page and --cursor need --json"
+      per_page="$(per_page_arg "${per_page:-50}")" || exit 1
+      _cursor_fetch() { _api GET "/issues?${q:+$q&}order_by=created_at&sort=desc&per_page=$2&page=$1";  }
+      meta="$(page_meta_init)"
+      FLIGHT_PAGE_META="$meta" cursor_page _cursor_fetch '.[]' '[(.created_at | utc), .iid]' "$per_page" "$cursor" \
+          "gitlab $LS_API $LS_OWNER/$LS_REPO $q" x-total \
+        | jq -c "$ISSUE_JQ"'base_issue | .body = null' | emit_list "$meta"
+      exit 0
     fi
     # _paged_get honours --limit as a ceiling and pages underneath it, so a limit
     # above the server's cap returns what it says rather than one clamped page.

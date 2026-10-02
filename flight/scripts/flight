@@ -44,7 +44,7 @@ plugin_manifest() {
 # Feature tokens a consumer can detect with `flight capabilities --json` (#254)
 # instead of comparing versions. A token is added here in the same change that
 # ships the feature, and never renamed or removed once released.
-CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json)
+CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json issues-paging)
 
 # `flight --version [--json]` and `flight capabilities [--json]` (#254) — answered
 # before anything else: no repo, config, token or network needed, so a consumer
@@ -225,6 +225,21 @@ esac
 [ "$all_trackers" = 0 ] || { [ "$group" = issues ] && [ "$verb" = list ] && [ -z "$tracker_selector" ]; } \
 	|| die "--all-trackers is supported only by 'issues list' and cannot be combined with --tracker"
 [ -z "$tracker_selector" ] || { [ "$group" != auth ] || axis=issues; }
+
+# Cursor paging (#262): `issues list --json --per-page M [--cursor C]`. JSON-only (the
+# next cursor has nowhere to go in the TSV), one tracker at a time (a cursor is one
+# tracker's position), and never mixed with --limit (a page has its own size).
+if [ "$group" = issues ] && [ "$verb" = list ]; then
+	paging=0; limit_given=0
+	for page_arg in "$@"; do
+		case "$page_arg" in --per-page|--cursor) paging=1 ;; --limit) limit_given=1 ;; esac
+	done
+	if [ "$paging" = 1 ]; then
+		[ "$json_mode" = 1 ] || die "issues list: --per-page and --cursor need --json"
+		[ "$all_trackers" = 0 ] || die "issues list: --per-page/--cursor page one tracker at a time; drop --all-trackers and pass --tracker REF"
+		[ "$limit_given" = 0 ] || die "issues list: --per-page/--cursor replace --limit; pass one or the other"
+	fi
+fi
 
 # Sugar for the standard provenance label. Adapters continue to receive only
 # the backend-neutral `ensure --name/--color/--description` contract.

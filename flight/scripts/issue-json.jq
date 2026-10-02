@@ -60,6 +60,7 @@ def newest_first:
 
 if $mode == "list" then
 	{issues: (.issues | map(finish_issue) | newest_first), truncated: (.truncated // false), total: (.total // null), errors: []}
+	+ (if has("next") then {next: .next} else {} end)
 elif $mode == "get" then
 	finish_issue
 elif $mode == "comments" then
