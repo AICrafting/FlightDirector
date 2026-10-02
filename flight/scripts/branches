@@ -253,13 +253,40 @@ merged_pr() {
 	return 1
 }
 
-# issue_number <branch> — the leading number of the slug: feature/90-cleaning-up → 90.
-# Empty when the branch does not carry one; the skill treats that as "cross-check by hand".
-issue_number() {
-	local slug="${1#*/}"
-	case "$slug" in
-		[0-9]*) printf '%s\n' "${slug%%[!0-9]*}" ;;
+# issue_id <branch> — the branch's issue, for the skill's cross-check. Schema 3 (#198):
+# the qualified identity from the shared helper (issue-identity.sh — bindings, qualified
+# names, the migrated legacy default; never the current default): feature/fj-90-x →
+# FJ-90. `unbound` = a legacy unqualified branch whose tracker cannot be recovered — the
+# skill asks which tracker rather than guessing. `error` = the lookup itself failed (a
+# binding naming a tracker no longer configured, an unreadable config…); the helper's
+# message is forwarded to stderr, so a broken lookup never reads as "no issue". Before
+# schema 3: the slug's leading number, as always. Empty when the branch carries no
+# issue ("cross-check by hand").
+SCHEMA="$(jq -r '.schemaVersion // 1' "$CFG" 2>/dev/null || echo 1)"
+case "$SCHEMA" in ''|*[!0-9]*) SCHEMA=1 ;; esac
+issue_id() {
+	local slug="${1#*/}" id err rc=0
+	if [ "$SCHEMA" -lt 3 ]; then
+		case "$slug" in
+			[0-9]*) printf '%s\n' "${slug%%[!0-9]*}" ;;
+		esac
+		return 0
+	fi
+	err="$(mktemp "${TMPDIR:-/tmp}/flight-branches.XXXXXX")"
+	id="$(FLIGHT_REPO_ROOT="$ROOT" FLIGHT_SELF="$FLIGHT_SELF" \
+		"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/issue-identity.sh" from-branch --branch "$1" 2>"$err")" || rc=$?
+	case "$rc" in
+		0) jq -r '.qualified' <<<"$id" ;;
+		3) ;;
+		4) printf 'unbound\n' ;;
+		*)
+			warn "cannot read $1's issue identity:"
+			cat "$err" >&2
+			printf 'error\n'
+			;;
 	esac
+	rm -f "$err"
+	return 0
 }
 
 # ── row assembly ───────────────────────────────────────────────────────────────
@@ -286,7 +313,7 @@ collect_rows() {
 			continue          # not merged anywhere we were asked about — leave it alone
 		fi
 
-		issue="$(issue_number "$b")"; issue="${issue:--}"
+		issue="$(issue_id "$b")"; issue="${issue:--}"
 		wt="$(map_get "$WT_PATH" "$b")"; wt="${wt:--}"
 		printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$b" "$where" "$stage" "$pr" "$issue" "$wt"
 	done

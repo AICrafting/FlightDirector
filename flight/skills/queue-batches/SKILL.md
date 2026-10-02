@@ -10,7 +10,8 @@ Before the first command, follow [runtime preflight](../../references/runtime.md
 Dispatches N parallel background agents, each grinding M issues **sequentially** through the
 native per-issue lifecycle (`working-an-issue`) in its own worktree. A *batch is a zone*: the N
 agents work disjoint file zones so the concurrently-active issues stay merge-clean. Every issue
-gets its own `feature/<N>-<slug>` branch off `stages[0]` and stops at `to-test` — **no agent ever
+gets its own `feature/<branchPrefix>-<slug>` branch (`feature/12-…` with one tracker,
+`feature/fj-12-…` with several — the prefix `flight issues resolve` returns) off `stages[0]` and stops at `to-test` — **no agent ever
 promotes or pushes**. Live status via per-zone log files + `Monitor`; `status=blocked` questions
 route back to the user tagged by zone. Hands back for **serial** promotion via `promoting-a-branch`.
 
@@ -49,7 +50,7 @@ passes `force`) if either is true:
 ROOT="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 
 # Leftover per-issue worktrees from a previous queue:
-git -C "$ROOT" worktree list | grep -E '\.worktrees/[0-9]+-' || true
+git -C "$ROOT" worktree list | grep -E '\.worktrees/([a-z][a-z0-9]*-)?[0-9]+-' || true
 # Leftover zone status logs not yet cleaned up:
 ls "$SCRATCH"/queue-status/*.log 2>/dev/null || true
 ```
@@ -59,9 +60,9 @@ For each leftover, classify from its `ticket=all` line, wherever it sits: no
 **done, awaiting serial ship/cleanup**.
 
 A lingering **run manifest** (`batch-manifest groups` prints zones) is *not* by itself a block:
-a manifest whose issues have **no** `.worktrees/<N>-*` worktree left is **stale** — its run was
+a manifest whose issues have **no** `.worktrees/<branchPrefix>-*` worktree left is **stale** — its run was
 promoted but never consumed (or was cleaned up by hand). Drop it with
-`batch-manifest consume --issues "<those numbers>"` and carry on; only a manifest whose issues
+`batch-manifest consume --issues "<those qualified identities>"` and carry on; only a manifest whose issues
 still have worktrees is an in-flight run.
 
 Render the current board (Display format below) and push back:
@@ -75,19 +76,28 @@ Render the current board (Display format below) and push back:
 
 1. List open issues via the dispatcher (this is the same data `triaging-issues` uses):
    ```bash
-   flight issues list --state open --limit 50
+   flight issues list --all-trackers --state open --limit 50
    ```
-   Output is `<number>⇥<title>⇥<labels>`; the adapter pages underneath `--limit`. If it warns on
+   Output is `<id>⇥<native id>⇥<title>⇥<labels>` (`FJ-12⇥12⇥…`, `JIR-7⇥PROJ-7⇥…`) across
+   every configured tracker — or `#12⇥12⇥…` when the repo has a single tracker, where the prefix
+   says nothing. That first column is the issue's id from here on (every flight verb accepts it
+   as `--number`, and agents log by it) — two trackers
+   can both have an issue 12. A tracker reported `unavailable` on stderr is unavailable, not
+   empty. The adapter pages underneath `--limit`. If it warns on
    stderr that it is showing 50 of more, raise `--limit` and list again — otherwise the batch can
    only ever be drawn from the same slice of the backlog, however many agents are aimed at it.
 2. Apply the **workable filter** (identical rule to `triaging-issues`): **exclude** any issue
-   whose label column carries any configured `labels.status` role (in-progress, to-test, review,
-   qa, blocked, deferred) — it's already in the workflow, not a fresh pick.
+   whose label column carries one of **its own tracker's** `labels.status` roles (in-progress,
+   to-test, review, qa, blocked, deferred) — read them with
+   `flight issues tracker --tracker "$REF" | jq '.labels.status'`, `$REF` being the id's prefix
+   (with a single tracker, `#12`, omit `--tracker`); never match one tracker's rows against another's names. The `new` role, when a
+   tracker configures it, stays workable.
 3. Resolve zones:
    ```bash
    flight config '.code.zones // "none"'
    ```
-   - **Configured** → read each issue's **body** (`issues get --number N`); match predicted
+   - **Configured** → read each issue's **body** by its id
+     (`flight issues get --number FJ-12` — the id routes to its own tracker); match predicted
      touched paths to a zone's `paths` globs. Labels are a hint, not gospel. Skip issues that
      span multiple zones with a note.
    - **`none`** → infer up to N disjoint pseudo-zones by grouping issues whose bodies imply
@@ -99,9 +109,22 @@ Render the current board (Display format below) and push back:
 
 ## 2. Present the plan — HALT for approval
 
-Show N×M: per zone, the issues + one-line rationale + the resolved worker model
-(`config '.code.queueBatches.defaultModel // "sonnet"'`). Wait for explicit approval. The user may
-swap/drop/re-zone issues or override the model (per run or per batch).
+Show N×M: per zone, the issues + one-line rationale + the resolved worker model. Wait for explicit
+approval. The user may swap/drop/re-zone issues or override the model (per run or per batch); an
+override always wins over the configured list.
+
+Resolve the worker model against **this** harness — `code.queueBatches.defaultModel` is a model
+name or an ordered preference list, and the same repo is worked from both Claude Code and Codex:
+
+```bash
+flight config worker-model --harness "$HARNESS"   # one line per entry: <model>⇥use|skip⇥<reason>
+```
+
+- The first `use` line is the worker model. Later `use` lines are the fallbacks for Section 3.
+- Show the choice and every skipped entry in the plan, e.g.
+  `worker model: gpt-5.6-sol (opus skipped: claude model, not available in codex)`.
+- **No `use` line → stop and ask the user which model to use.** Never silently pick one — not
+  `sonnet`, not whatever you happen to be running.
 
 ## 3. Dispatch
 
@@ -113,7 +136,9 @@ DISP=flight
 # skill and in the dispatched agents is anchored with `git -C <path>` — a bare `git` is a bug.
 ROOT="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 BASE="$("$DISP" config '.code.stages[0].name')"
-MODEL="$("$DISP" config '.code.queueBatches.defaultModel // "sonnet"')"   # unless user overrode
+# Section 2's approved model: the user's override, else the first `use` line. Keep the rest.
+MODELS="$("$DISP" config worker-model --harness "$HARNESS" | awk -F'\t' '$2 == "use" { print $1 }')"
+MODEL="${OVERRIDE:-$(head -n1 <<<"$MODELS")}"
 RULES_FILE="$("$DISP" config '.code.queueBatches.agentRulesFile // ".flightdirector/agent-rules.md"')"
 REPO_RULES="$( [ -s "$ROOT/$RULES_FILE" ] && cat "$ROOT/$RULES_FILE" || echo 'None configured.' )"
 # The repo's own check command (flight-setup.md → Repo preflight gate). Empty = not configured,
@@ -132,9 +157,9 @@ Per zone:
 - Create + pre-seed the log so the board renders every issue as `○` before agents start:
   ```bash
   LOG="$SCRATCH/queue-status/<zone>.log"; : > "$LOG"
-  # ISSUES = this zone's issue numbers, smallest-first (e.g. "72 73 74")
-  for ISSUE_NUM in $ISSUES; do
-    echo "$(date -u +%FT%TZ) <zone> ticket=#$ISSUE_NUM status=queued" >> "$LOG"
+  # ISSUES = this zone's ids, smallest-first (e.g. "FJ-72 GH-73", or "#72 #73" with one tracker)
+  for ISSUE_ID in $ISSUES; do
+    echo "$(date -u +%FT%TZ) <zone> ticket=$ISSUE_ID status=queued" >> "$LOG"
   done
   ```
 - Render `templates/agent-prompt.md`, filling `{zone} {model} {dispatcher}=$DISP
@@ -145,6 +170,12 @@ Per zone:
 - Select and follow exactly one dispatch reference for the active harness:
   [Claude Code](references/dispatch-claude.md) or [Codex](references/dispatch-codex.md).
   Use the approved per-zone model override when present; otherwise use `$MODEL`.
+- **If the dispatch fails because the model is unavailable** (no access, not on this plan, unknown
+  or retired model), fall through to the next model in `$MODELS`: re-render the prompt with that
+  `{model}` and dispatch again. Tell the user which model was dropped and why, and use the
+  model that worked for the remaining zones. A failure for any other reason is not a model
+  problem — surface it, don't fall through. An explicit user override has no fallbacks: if it
+  fails, ask. When the list runs out, stop and ask the user for a model.
 
 Once every zone's issue set is fixed, record the run manifest (one call, all zones) so batch
 promotion can reconstruct the grouping — this survives even when zones were *inferred* (no
@@ -152,8 +183,8 @@ promotion can reconstruct the grouping — this survives even when zones were *i
 
 ```bash
 batch-manifest write --run-id "$RUN_ID" \
-  --zone <zone-a> --issues "<zone-a issue numbers>" \
-  --zone <zone-b> --issues "<zone-b issue numbers>"   # …one --zone/--issues pair per zone
+  --zone <zone-a> --issues "<zone-a ids>" \
+  --zone <zone-b> --issues "<zone-b ids>"   # …one pair per zone
 ```
 
 ## 4. Monitor + render
@@ -169,8 +200,8 @@ line reads `status=done`, render that zone's header with `⇥` (done, awaiting p
 status=safety-valved` means the zone did not finish its queue — render its header with `✗` and
 surface its unfinished issues as deferred. When a zone emits its terminal line, start that zone's
 repo gate sweep (4a) before rendering it as `⇥`. Once every zone has emitted its terminal line
-**and** its sweep has finished, proceed to Section 5. Match tasks by the `[<zone>] #<N>` subject
-prefix.
+**and** its sweep has finished, proceed to Section 5. Match tasks by the `[<zone>] <ID>` subject
+prefix (e.g. `[auth] FJ-77`).
 
 **An agent returning is not that signal — its `ticket=all` line is.** When a zone's agent returns,
 look for that zone's `ticket=all` line. No such line means the zone is **unfinished, regardless of
@@ -229,8 +260,8 @@ until mkdir "$LOCK" 2>/dev/null; do
     # that trips this at 30 and records five FALSE skips. Read 1800 as a stopgap, not a
     # considered value. #227 replaces it with a heartbeat, which can also reclaim the
     # stale directory this path deliberately leaves standing.
-    for ISSUE_NUM in <that zone's issues with status=complete>; do
-      echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-skip note=\"lock timeout; stale $LOCK?\"" >> "$ZONE_LOG"
+    for ISSUE_ID in <that zone's ids with status=complete>; do
+      echo "$(date -u +%FT%TZ) $ZONE ticket=$ISSUE_ID status=preflight-skip note=\"lock timeout; stale $LOCK?\"" >> "$ZONE_LOG"
     done
     exit 0          # this zone reports unverified; it does NOT run ungated behind the lock
   fi
@@ -240,27 +271,30 @@ done
 # holder's lock on its way out.
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
 
-for ISSUE_NUM in <that zone's issues with status=complete>; do
-  PFLOG="$SCRATCH/queue-status/$ZONE-preflight-$ISSUE_NUM.log"
-  # Resolve the worktree by glob — the loop knows the number, not the slug. Use the
+for ISSUE_ID in <that zone's ids with status=complete>; do
+  PFLOG="$SCRATCH/queue-status/$ZONE-preflight-${ISSUE_ID#\#}.log"   # #12 → …-preflight-12.log
+  # The branch prefix comes from the resolver (#12 → 12 with one tracker, FJ-12 → fj-12
+  # with several); never derive it. The trailing "-" keeps 1 from matching 12's worktree.
+  PREFIX="$("$DISP" issues resolve --number "$ISSUE_ID" | jq -r '.branchPrefix')"
+  # Resolve the worktree by glob — the loop knows the identity, not the slug. Use the
   # positional params rather than a variable: a two-match glob collapses into one
   # space-joined string that fails `[ -d ]`, and "no worktree" would be a lie when the
   # truth is "more than one". No arrays — the BSD and MSYS legs run bash 3.2.
-  set -- "$ROOT/.worktrees/$ISSUE_NUM"-*
+  set -- "$ROOT/.worktrees/$PREFIX"-*
   # A missing worktree is NOT a gate failure: recording it as one says "your code is
   # broken" when the truth is "I could not find your code".
   if [ "$#" -gt 1 ]; then
-    echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-skip note=\"$# worktrees match\"" >> "$ZONE_LOG"
+    echo "$(date -u +%FT%TZ) $ZONE ticket=$ISSUE_ID status=preflight-skip note=\"$# worktrees match\"" >> "$ZONE_LOG"
     continue
   fi
   if [ ! -d "$1" ]; then
-    echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-skip note=\"no worktree\"" >> "$ZONE_LOG"
+    echo "$(date -u +%FT%TZ) $ZONE ticket=$ISSUE_ID status=preflight-skip note=\"no worktree\"" >> "$ZONE_LOG"
     continue
   fi
   if ( cd "$1" && sh -c "$PREFLIGHT" ) >"$PFLOG" 2>&1; then
-    echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-pass" >> "$ZONE_LOG"
+    echo "$(date -u +%FT%TZ) $ZONE ticket=$ISSUE_ID status=preflight-pass" >> "$ZONE_LOG"
   else
-    echo "$(date -u +%FT%TZ) $ZONE ticket=#$ISSUE_NUM status=preflight-fail note=\"$PFLOG\"" >> "$ZONE_LOG"
+    echo "$(date -u +%FT%TZ) $ZONE ticket=$ISSUE_ID status=preflight-fail note=\"$PFLOG\"" >> "$ZONE_LOG"
   fi
 done
 ```
@@ -287,7 +321,7 @@ orchestrator's sweep is the authoritative record.
 Agents append one line per state change to `$SCRATCH/queue-status/<zone>.log`:
 
 ```
-<ISO-timestamp> <zone> ticket=<#N> status=<queued|starting|working|complete|blocked|preflight-pass|preflight-fail|preflight-skip> [commit=<sha7>] [note="…"]
+<ISO-timestamp> <zone> ticket=<ID> status=<queued|starting|working|complete|blocked|preflight-pass|preflight-fail|preflight-skip> [commit=<sha7>] [note="…"]
 ```
 `queued` is pre-seeded by the orchestrator before dispatch; workers emit `starting`/`working`/`complete`/`blocked`.
 The three `preflight-*` statuses are written by the **orchestrator** after the zone's terminal
@@ -295,7 +329,7 @@ line (Section 4a) and appear only when `code.preflight` is configured: `prefligh
 the failing log's path in `note=`, and `preflight-skip` means the gate could not be **run** at all
 rather than that it failed — never conflate the two, since one is a problem with the code and the
 other is a problem with the workspace. Its `note=` says which: no worktree, several worktrees
-matching the issue number, or a lock timeout. All three mean *unverified*, so all three are
+matching the issue, or a lock timeout. All three mean *unverified*, so all three are
 reported. Terminal line, the agent's last (4a's three statuses may follow it, so match on
 `ticket=all`, not on position): `<ts> <zone> ticket=all status=<done|safety-valved> note="…"`.
 
@@ -303,14 +337,14 @@ reported. Terminal line, the agent's last (4a's three statuses may follow it, so
 
 ```
 ━━━ auth ━━━
-  ✓ #77 complete (a1b2c3d)
-  ◐ #73 working — writing tests
-  ○ #74 #72 queued
+  ✓ FJ-77 complete (a1b2c3d)
+  ◐ FJ-73 working — writing tests
+  ○ FJ-74 GH-72 queued
 
 ━━━ core ━━━
-  ? #112 blocked — "which migration tool?"
-  ! #64 preflight failed — <log path>
-  ○ #65 queued
+  ? FJ-112 blocked — "which migration tool?"
+  ! FJ-64 preflight failed — <log path>
+  ○ JIR-65 queued
 ```
 
 Legend: `✓` complete · `◐` working (also shown for `starting`) · `?` blocked · `○` queued ·
@@ -323,7 +357,7 @@ the gate is only worth pixels when it doesn't pass.
 
 When an agent writes `status=blocked`: parse `note="…"`, render the board, then below it:
 
-> **[<zone>] #<N> needs input:** <question>
+> **[<zone>] <ID> needs input:** <question>
 
 Wait for the user's answer, then use the active harness's agent-messaging primitive with body
 `User says: <answer>. Continue.` Treat the agent as `working` until its next log line.
@@ -334,7 +368,7 @@ Once every zone has a `ticket=all` line reading `status=done` or `status=safety-
 its 4a sweep (when one is configured) has finished — the Section 4 condition, not merely every
 agent having returned: summarize each zone (commits with
 SHA + title, test deltas, judgment calls, deferrals). Surface any skipped/deferred issue with a
-follow-up suggestion. Report each `preflight-fail` issue by number with its log path and a tail
+follow-up suggestion. Report each `preflight-fail` issue by its id with its log path and a tail
 of the failure, and say plainly that it should not be promoted until the gate is green —
 `promoting-branches` will skip it anyway, but the user deserves to know before they say "ship the
 batch". Report every `preflight-skip` too, with its `note=` reason: the gate never ran on that

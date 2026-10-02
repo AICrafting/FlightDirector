@@ -9,18 +9,21 @@
 # Windows shims (jq CRLF, path form); a no-op elsewhere.
 # shellcheck source-path=SCRIPTDIR source=../../_portable.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../_portable.sh"
+# shellcheck source-path=SCRIPTDIR source=../_errors.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_errors.sh"
+# shellcheck source-path=SCRIPTDIR source=../_json.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_json.sh"
 
 command -v curl >/dev/null 2>&1 || { echo "jira adapter: curl is required" >&2; exit 1; }
 command -v jq   >/dev/null 2>&1 || { echo "jira adapter: jq is required"   >&2; exit 1; }
 
-: "${LS_API:?LS_API not set (dispatcher must export the Jira site base, e.g. https://x.atlassian.net)}"
-: "${LS_TOKEN:?LS_TOKEN not set — no Atlassian API token resolved for this axis}"
-: "${LS_EMAIL:?LS_EMAIL not set — Jira Basic auth needs the account email (set issues.email in config/secrets)}"
-: "${LS_PROJECT:?LS_PROJECT not set — set issues.project (the Jira project key, e.g. KAN) in config}"
+require_env LS_API not-configured "LS_API not set (dispatcher must export the Jira site base, e.g. https://x.atlassian.net)"
+require_env LS_TOKEN auth "LS_TOKEN not set — no Atlassian API token resolved for this axis"
+require_env LS_EMAIL auth "LS_EMAIL not set — Jira Basic auth needs the account email (set issues.email in config/secrets)"
+require_env LS_PROJECT not-configured "LS_PROJECT not set — set issues.project (the Jira project key, e.g. KAN) in config"
 
 SITE="${LS_API%/}"
 
-die()  { echo "${ADAPTER_NAME:-jira}: $*" >&2; exit 1; }
 warn() { echo "${ADAPTER_NAME:-jira}: warning: $*" >&2; }
 
 # HTTP Basic auth: email:api_token (classic Atlassian API token, NOT OAuth).
@@ -34,17 +37,17 @@ _api() {
   if [ -n "$data" ]; then
     code="$(curl -sS -o "$tmp" -w '%{http_code}' -X "$method" \
       "${JIRA_AUTH[@]}" -H "Accept: application/json" -H "Content-Type: application/json" \
-      --data-binary "$data" "${SITE}${path}")" || { rm -f "$tmp"; die "$method $path: curl failed"; }
+      --data-binary "$data" "${SITE}${path}")" || { rm -f "$tmp"; fail network "$method $path: curl failed"; }
   else
     code="$(curl -sS -o "$tmp" -w '%{http_code}' -X "$method" \
-      "${JIRA_AUTH[@]}" -H "Accept: application/json" "${SITE}${path}")" || { rm -f "$tmp"; die "$method $path: curl failed"; }
+      "${JIRA_AUTH[@]}" -H "Accept: application/json" "${SITE}${path}")" || { rm -f "$tmp"; fail network "$method $path: curl failed"; }
   fi
   if [ "$code" -ge 400 ]; then
     msg="$(jq -r '((.errorMessages // []) | join("; ")) as $m
                   | (if $m == "" then ((.errors // {}) | to_entries | map("\(.key): \(.value)") | join("; ")) else $m end)' \
           "$tmp" 2>/dev/null || true)"
     rm -f "$tmp"
-    die "$method $path → HTTP $code${msg:+: $msg}"
+    http_fail "$code" "$method $path → HTTP $code${msg:+: $msg}"
   fi
   cat "$tmp"; rm -f "$tmp"
 }
@@ -96,16 +99,22 @@ _jql_search() {
     [ "$page" -le 1000 ] || die "pagination exceeded 1000 pages for /search/jql"
     payload="$(jq -n --arg j "$jql" --argjson m "$size" --argjson f "$fields" --arg t "$token" \
       '{jql:$j, maxResults:$m, fields:$f} + (if $t == "" then {} else {nextPageToken:$t} end)')"
-    resp="$(_api POST "/rest/api/3/search/jql" "$payload")"
+    # `|| exit 1`, not errexit: inside a command substitution (as when a caller caches
+    # the rows) set -e is not inherited, and a failed page would read as an empty one.
+    resp="$(_api POST "/rest/api/3/search/jql" "$payload")" || exit 1
     printf '%s' "$resp" | jq -c '.issues[]?' >>"$out"
     rows="$(wc -l <"$out" | tr -d ' ')"
     token="$(printf '%s' "$resp" | jq -r '.nextPageToken // empty')"
     [ -n "$token" ] || break
     [ -z "$limit" ] || [ "$rows" -lt "$limit" ] || break
   done
+  local truncated=false
   if [ -n "$limit" ] && [ "$rows" -ge "$limit" ] && [ -n "$token" ]; then
+    truncated=true
     warn "showing $limit rows for /search/jql and more are available; raise --limit to see the rest"
   fi
+  # The enhanced-JQL endpoint reports no total.
+  page_meta "$truncated" ""
   _paged_rows "$limit" "$out"
 }
 
@@ -123,7 +132,9 @@ _offset_get() {
   while :; do
     page=$((page + 1))
     [ "$page" -le 1000 ] || die "pagination exceeded 1000 pages for $path"
-    resp="$(_api GET "${path}?${query:+$query&}startAt=${start}&maxResults=${size}")"
+    # `|| exit 1`, not errexit: inside a command substitution (as when a caller caches
+    # the rows) set -e is not inherited, and a failed page would read as an empty one.
+    resp="$(_api GET "${path}?${query:+$query&}startAt=${start}&maxResults=${size}")" || exit 1
     batch="$(printf '%s' "$resp" | jq --arg k "$key" '(.[$k] // []) | length')"
     printf '%s' "$resp" | jq -c --arg k "$key" '(.[$k] // [])[]' >>"$out"
     rows="$(wc -l <"$out" | tr -d ' ')"

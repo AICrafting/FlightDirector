@@ -10,6 +10,23 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 
 verb="${1:-}"; shift || true
 
+# Base objects for --json (#253; ../_json.sh). One mapping per resource, so list,
+# get and comments cannot drift apart.
+# shellcheck disable=SC2016  # jq programs
+ISSUE_JQ="$JSON_JQ"'
+def base_issue: {
+  number: (.number | tostring), title: (.title // ""),
+  state: (if .state == "closed" then "closed" else "open" end),
+  labels: [.labels[]?.name], author: (.user.login // null),
+  created: (.created_at | utc), updated: (.updated_at | utc),
+  comments: (.comments // null), url: (.html_url // null), body: (.body // "")
+};
+def base_comment: {
+  id: (.id | tostring), author: (.user.login // null),
+  created: (.created_at | utc), updated: (.updated_at | utc),
+  url: (.html_url // null), body: (.body // "")
+};'
+
 case "$verb" in
   list)
     state="open"; limit="50"; labels=()
@@ -29,8 +46,14 @@ case "$verb" in
     fi
     # _paged_get honours --limit as a ceiling and pages underneath it, so a limit
     # above the server's cap returns what it says rather than one clamped page.
-    _paged_get "/issues" "$q" "$limit" \
-      | jq -r '[(.number|tostring), .title, ([.labels[].name] | join(","))] | @tsv'
+    if json_mode; then
+      meta="$(page_meta_init)"
+      FLIGHT_PAGE_META="$meta" _paged_get "/issues" "$q" "$limit" \
+        | jq -c "$ISSUE_JQ"'base_issue | .body = null' | emit_list "$meta"
+    else
+      _paged_get "/issues" "$q" "$limit" \
+        | jq -r '[(.number|tostring), .title, ([.labels[].name] | join(","))] | @tsv'
+    fi
     ;;
 
   get)
@@ -40,8 +63,12 @@ case "$verb" in
       *) die "issues get: unknown arg '$1'" ;;
     esac; done
     [ -n "$number" ] || die "issues get: --number required"
-    _api GET "/issues/${number}" \
-      | jq -r '([(.number|tostring), .title, .state] | @tsv), "", (.body // "")'
+    if json_mode; then
+      _api GET "/issues/${number}" | jq -c "$ISSUE_JQ"'base_issue'
+    else
+      _api GET "/issues/${number}" \
+        | jq -r '([(.number|tostring), .title, .state] | @tsv), "", (.body // "")'
+    fi
     ;;
 
   comments)
@@ -57,8 +84,12 @@ case "$verb" in
     # the whole thread (verified against a 53-comment issue), so a page-until-empty
     # loop would re-fetch the same rows forever. The GitHub and GitLab adapters do
     # page their comment endpoints, which cap for real.
-    _api GET "/issues/${number}/comments" \
-      | jq -r '.[] | ([(.user.login // "?"), .created_at] | @tsv), (.body // ""), ""'
+    if json_mode; then
+      _api GET "/issues/${number}/comments" | jq -c "$ISSUE_JQ"'map(base_comment)'
+    else
+      _api GET "/issues/${number}/comments" \
+        | jq -r '.[] | ([(.user.login // "?"), .created_at] | @tsv), (.body // ""), ""'
+    fi
     ;;
 
   create)
@@ -129,10 +160,10 @@ case "$verb" in
     code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
       -H "Authorization: token ${LS_TOKEN}" \
       -F "attachment=@${file};filename=${name}" \
-      "${REPO_API}/issues/${number}/assets")" || { rm -f "$tmp"; die "attach: curl failed"; }
+      "${REPO_API}/issues/${number}/assets")" || { rm -f "$tmp"; fail network "attach: curl failed"; }
     if [ "$code" -ge 400 ]; then
       msg="$(jq -r '.message // empty' "$tmp" 2>/dev/null || true)"; rm -f "$tmp"
-      die "attach → HTTP $code${msg:+: $msg}"
+      http_fail "$code" "attach → HTTP $code${msg:+: $msg}"
     fi
     jq -r '.browser_download_url' "$tmp"; rm -f "$tmp"
     ;;
@@ -152,7 +183,11 @@ case "$verb" in
     else
       payload="$(jq -n --arg b "$body" '{body:$b}')"
     fi
-    _api POST "/issues/${number}/comments" "$payload" >/dev/null
+    if json_mode; then
+      _api POST "/issues/${number}/comments" "$payload" | jq -c "$ISSUE_JQ"'base_comment'
+    else
+      _api POST "/issues/${number}/comments" "$payload" >/dev/null
+    fi
     ;;
 
   set-status)
