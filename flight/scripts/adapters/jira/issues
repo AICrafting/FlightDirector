@@ -17,6 +17,31 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 
 verb="${1:-}"; shift || true
 
+# Base objects for --json (#253; ../_json.sh). One mapping per resource, so list,
+# get and comments cannot drift apart. `number` is the native KEY; state comes from
+# the status category exactly as `get` derives it (a missing category is an error,
+# never a silent "open"); links are built from the site URL, which the API does not
+# return; text fields go through the ADF shim.
+# shellcheck disable=SC2016  # jq programs
+ISSUE_JQ="$JSON_JQ$ADF_JQ"'
+def text: if type == "string" then . elif . == null then "" else adf_to_text end;
+def base_issue($site): {
+  number: .key, title: (.fields.summary // ""),
+  state: (.fields.status.statusCategory.key
+    | if . == null then error("issues: no status category in the response")
+      elif . == "done" then "closed" else "open" end),
+  labels: (.fields.labels // []),
+  author: (.fields.reporter.displayName // .fields.creator.displayName // null),
+  created: (.fields.created | utc), updated: (.fields.updated | utc),
+  comments: (.fields.comment.total // null), url: "\($site)/browse/\(.key)",
+  body: (.fields.description | text)
+};
+def base_comment($site; $key): {
+  id: (.id | tostring), author: (.author.displayName // .author.emailAddress // null),
+  created: (.created | utc), updated: (.updated | utc),
+  url: "\($site)/browse/\($key)?focusedCommentId=\(.id)", body: (.body | text)
+};'
+
 # jql_quote <s> — quote a JQL string literal (escape backslash and double-quote).
 jql_quote() { printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"; }
 
@@ -45,8 +70,14 @@ case "$verb" in
     # Enhanced-JQL search endpoint. (The legacy POST /rest/api/3/search was
     # decommissioned by Atlassian; /search/jql is its replacement.) It pages with
     # an opaque nextPageToken, which _jql_search follows up to --limit.
-    _jql_search "$jql" '["summary","labels"]' "$limit" \
-      | jq -r '[.key, (.fields.summary // ""), ((.fields.labels // []) | join(","))] | @tsv'
+    if json_mode; then
+      meta="$(page_meta_init)"
+      FLIGHT_PAGE_META="$meta" _jql_search "$jql" '["summary","labels","status","created","updated","reporter","creator"]' "$limit" \
+        | jq -c --arg site "$SITE" "$ISSUE_JQ"'base_issue($site) | .body = null' | emit_list "$meta"
+    else
+      _jql_search "$jql" '["summary","labels"]' "$limit" \
+        | jq -r '[.key, (.fields.summary // ""), ((.fields.labels // []) | join(","))] | @tsv'
+    fi
     ;;
 
   get)
@@ -63,6 +94,11 @@ case "$verb" in
     # A missing category is an error, not an "open": Jira is the only backend that
     # DERIVES state rather than reading it, and defaulting to open is the one
     # direction that would let a done issue pass a caller's open/closed check.
+    if json_mode; then
+      _api GET "/rest/api/3/issue/${number}?fields=summary,description,status,labels,created,updated,reporter,creator,comment" \
+        | jq -c --arg site "$SITE" "$ISSUE_JQ"'base_issue($site)'
+      exit 0
+    fi
     _api GET "/rest/api/3/issue/${number}?fields=summary,description,status" \
       | jq -r "$ADF_JQ"'
           ([.key, (.fields.summary // ""),
@@ -85,6 +121,11 @@ case "$verb" in
     # Paged to exhaustion: this endpoint returns 50 comments per request and the
     # thread renders oldest-first, so an unpaged fetch drops the NEWEST comments —
     # precisely the ones "the later comment wins" depends on.
+    if json_mode; then
+      _offset_get "/rest/api/3/issue/${number}/comment" "" comments "" \
+        | jq -cs --arg site "$SITE" --arg key "$number" "$ISSUE_JQ"'map(base_comment($site; $key))'
+      exit 0
+    fi
     _offset_get "/rest/api/3/issue/${number}/comment" "" comments "" \
       | jq -r "$ADF_JQ"'
           ([(.author.displayName // .author.emailAddress // "?"), (.created // "")] | @tsv),

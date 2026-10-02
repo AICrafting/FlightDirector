@@ -11,6 +11,8 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../_portable.sh"
 # shellcheck source-path=SCRIPTDIR source=../_errors.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_errors.sh"
+# shellcheck source-path=SCRIPTDIR source=../_json.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_json.sh"
 
 command -v curl >/dev/null 2>&1 || { echo "jira adapter: curl is required" >&2; exit 1; }
 command -v jq   >/dev/null 2>&1 || { echo "jira adapter: jq is required"   >&2; exit 1; }
@@ -104,9 +106,13 @@ _jql_search() {
     [ -n "$token" ] || break
     [ -z "$limit" ] || [ "$rows" -lt "$limit" ] || break
   done
+  local truncated=false
   if [ -n "$limit" ] && [ "$rows" -ge "$limit" ] && [ -n "$token" ]; then
+    truncated=true
     warn "showing $limit rows for /search/jql and more are available; raise --limit to see the rest"
   fi
+  # The enhanced-JQL endpoint reports no total.
+  page_meta "$truncated" ""
   _paged_rows "$limit" "$out"
 }
 

@@ -12,6 +12,24 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 
 verb="${1:-}"; shift || true
 
+# Base objects for --json (#253; ../_json.sh). One mapping per resource, so list,
+# get and comments cannot drift apart. GitLab says `opened`, numbers issues by
+# `iid`, and its notes carry no link: base_comment takes the issue's web URL.
+# shellcheck disable=SC2016  # jq programs
+ISSUE_JQ="$JSON_JQ"'
+def base_issue: {
+  number: (.iid | tostring), title: (.title // ""),
+  state: (if .state == "closed" then "closed" else "open" end),
+  labels: (.labels // []), author: (.author.username // null),
+  created: (.created_at | utc), updated: (.updated_at | utc),
+  comments: (.user_notes_count // null), url: (.web_url // null), body: (.description // "")
+};
+def base_comment($web): {
+  id: (.id | tostring), author: (.author.username // null),
+  created: (.created_at | utc), updated: (.updated_at | utc),
+  url: (if $web == "" then null else "\($web)#note_\(.id)" end), body: (.body // "")
+};'
+
 # Comma-join the configured status/* label names into $status_csv (helper for
 # set-status/clear-status). Reads LS_LABELS_JSON.
 _status_names_csv() {
@@ -44,8 +62,14 @@ case "$verb" in
     fi
     # _paged_get honours --limit as a ceiling and pages underneath it, so a limit
     # above the server's cap returns what it says rather than one clamped page.
-    _paged_get "/issues" "$q" "$limit" \
-      | jq -r '[(.iid|tostring), .title, ((.labels // []) | join(","))] | @tsv'
+    if json_mode; then
+      meta="$(page_meta_init)"
+      FLIGHT_PAGE_META="$meta" _paged_get "/issues" "$q" "$limit" \
+        | jq -c "$ISSUE_JQ"'base_issue | .body = null' | emit_list "$meta"
+    else
+      _paged_get "/issues" "$q" "$limit" \
+        | jq -r '[(.iid|tostring), .title, ((.labels // []) | join(","))] | @tsv'
+    fi
     ;;
 
   get)
@@ -55,10 +79,14 @@ case "$verb" in
       *) die "issues get: unknown arg '$1'" ;;
     esac; done
     [ -n "$number" ] || die "issues get: --number required"
-    _api GET "/issues/${number}" \
-      | jq -r '([(.iid|tostring), .title,
-                  (.state | if . == "opened" then "open" else . end)] | @tsv),
-               "", (.description // "")'
+    if json_mode; then
+      _api GET "/issues/${number}" | jq -c "$ISSUE_JQ"'base_issue'
+    else
+      _api GET "/issues/${number}" \
+        | jq -r '([(.iid|tostring), .title,
+                    (.state | if . == "opened" then "open" else . end)] | @tsv),
+                 "", (.description // "")'
+    fi
     ;;
 
   comments)
@@ -75,9 +103,16 @@ case "$verb" in
     # oldest-first, so an unpaged fetch drops the NEWEST notes — precisely the ones
     # "the later comment wins" depends on. System notes are dropped inside the
     # pager so they never displace a real comment.
-    _paged_get "/issues/${number}/notes" "sort=asc&order_by=created_at" "" \
-      '.[] | select(.system | not)' \
-      | jq -r '([(.author.username // "?"), .created_at] | @tsv), (.body // ""), ""'
+    if json_mode; then
+      web="$(_api GET "/issues/${number}" | jq -r '.web_url // ""')"
+      _paged_get "/issues/${number}/notes" "sort=asc&order_by=created_at" "" \
+        '.[] | select(.system | not)' \
+        | jq -cs --arg web "$web" "$ISSUE_JQ"'map(base_comment($web))'
+    else
+      _paged_get "/issues/${number}/notes" "sort=asc&order_by=created_at" "" \
+        '.[] | select(.system | not)' \
+        | jq -r '([(.author.username // "?"), .created_at] | @tsv), (.body // ""), ""'
+    fi
     ;;
 
   create)

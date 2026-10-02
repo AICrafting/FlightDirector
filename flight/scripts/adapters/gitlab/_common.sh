@@ -9,6 +9,8 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../_portable.sh"
 # shellcheck source-path=SCRIPTDIR source=../_errors.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_errors.sh"
+# shellcheck source-path=SCRIPTDIR source=../_json.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_json.sh"
 
 command -v curl >/dev/null 2>&1 || { echo "gitlab adapter: curl is required" >&2; exit 1; }
 command -v jq   >/dev/null 2>&1 || { echo "gitlab adapter: jq is required" >&2; exit 1; }
@@ -130,15 +132,19 @@ _paged_get() {
   done
   _API_HEADER_FILE=""
 
+  # GitLab reports the unclamped total in X-Total (omitted above 10,000 rows).
+  local truncated=false
+  total="$(_hdr_value "$hdr" x-total)"
   if [ -n "$limit" ] && [ "$rows" -ge "$limit" ]; then
-    # GitLab reports the unclamped total in X-Total.
-    total="$(_hdr_value "$hdr" x-total)"
     if [ -n "$total" ] && [ "$total" -gt "$limit" ]; then
+      truncated=true
       warn "showing $limit of $total rows for $path; raise --limit to see the rest"
     elif [ -z "$total" ] && _hdr_has_next "$hdr"; then
+      truncated=true
       warn "showing $limit rows for $path and more are available; raise --limit to see the rest"
     fi
   fi
+  page_meta "$truncated" "$total"
 
   if [ -n "$limit" ]; then head -n "$limit" "$out"; else cat "$out"; fi
   rm -f "$out"

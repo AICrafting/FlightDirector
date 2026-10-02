@@ -35,6 +35,7 @@ $ flight capabilities --json
 | `version` | `flight --version [--json]` prints the plugin version |
 | `capabilities` | this probe |
 | `json-errors` | a failing `--json` call reports a coded error envelope (below) |
+| `issues-json` | `issues list`, `issues get` and `issues comments` take `--json`, and `issues list` takes `--status ROLE` |
 
 ## Which verbs take `--json`
 
@@ -47,7 +48,87 @@ their own meaning: `prompt-log summary --json` predates this and is unchanged.
 
 | Verb | `--json` output |
 |---|---|
+| `issues list` | a list object (below) |
+| `issues get` | one issue object |
+| `issues comments` | an array of comment objects, oldest first |
 | `issues resolve`, `issues tracker` | already JSON; `--json` adds the error envelope |
+
+## Issues
+
+`--number` takes whatever `issues list` returned, either `number` or `qualified` (`81`,
+`FJ-81`, a Jira `KAN-7`), exactly as it does without `--json`.
+
+### The issue object
+
+```jsonc
+{
+  "number": "81",            // native id, ALWAYS a string ("81" on a forge, "KAN-7" on Jira)
+  "tracker": "FJ",           // the named tracker's ref (null on a pre-schema-3 config)
+  "qualified": "FJ-81",      // tracker-qualified id; Jira KAN-7 on tracker JIR → "JIR-7"
+  "title": "…",
+  "state": "open",           // "open" | "closed", normalized on every backend
+  "status": "to-test",       // status ROLE from this tracker's label map, or null
+  "labels": ["bug", "status/to test"],
+  "author": "dave",          // login (Jira: display name), or null
+  "created": "2026-10-02T09:28:43Z",   // ISO-8601 UTC, always ending in Z
+  "updated": "2026-10-02T09:29:15Z",
+  "comments": 3,             // comment count, or null where the backend doesn't give one cheaply
+  "url": "https://…/issues/81",        // web link
+  "body": "markdown…",       // without the flight signature; null in list rows
+  "signature": {"plugin": "flight", "version": "0.16.0", "model": "Opus/5.5"}  // or null
+}
+```
+
+Every key is present on every backend. Notes:
+
+- **`status`** is the first role in the tracker's `labels.status` map, in map order, whose label
+  the issue carries. A role recorded as declined (`false`) never matches. It stays set on a
+  closed issue: `state` says open or closed, and `status` says where the work got to.
+- **`signature`** is the trailing `---` / `🤖 via FlightDirector:<plugin>@<version>[ with
+  <model>]` footer Flight appends to every body it writes. It is split out of `body`, and `model`
+  is null when the footer names none. Bodies Flight didn't write have `signature: null` and their
+  text untouched. A `---` elsewhere in the text is left alone.
+- **`comments`** comes straight from the issue on Forgejo, GitHub and GitLab, and from `get` on
+  Jira. Jira list rows have `comments: null`.
+
+### `issues list --json`
+
+```json
+{"issues": [ …issue objects… ], "truncated": true, "total": 38, "errors": []}
+```
+
+- **Rows** are issue objects with `body` and `signature` set to null. Use `issues get` for the body.
+- **Order** is newest created first, with the issue number breaking ties. The order is the same on
+  every backend and with `--all-trackers`.
+- **`truncated`** is true when `--limit` (default 50) held rows back. **`total`** is the server's
+  row count when the backend reports one (Forgejo, GitLab), otherwise null.
+- **Filters:** `--state open|closed|all`, `--label NAME` (repeatable) and `--limit N` work as
+  without `--json`. **`--status ROLE`** filters by a status role, mapped to this tracker's label
+  name. An unconfigured or declined role is a `usage` error.
+- **`errors`** is always `[]` for a single tracker.
+
+**`--all-trackers --json`** lists every configured tracker into the same object:
+
+- Every row carries its own `tracker`.
+- `truncated` is true if any tracker's rows were truncated.
+- `total` is the sum when every tracker reported a total, otherwise null.
+- A tracker that fails adds `{"tracker": "GH", "code": "auth", "reason": "…"}` to `errors`, is also
+  named on stderr, and the command still exits 0 with the others' rows. Only when every tracker
+  fails is the result the error envelope of the first failure.
+- `--status ROLE` is mapped per tracker. A tracker without that role reports a `usage` error
+  entry.
+
+### `issues comments --json`
+
+An array, oldest first:
+
+```json
+[{"id": "17969", "author": "dave", "created": "…Z", "updated": "…Z",
+  "url": "https://…/issues/199#issuecomment-17969", "body": "…", "signature": { … }}]
+```
+
+`id` is a string on every backend. GitLab's system notes (label and state changes) are left out,
+as in the text form. `url` links to the comment itself.
 
 ## Errors
 
