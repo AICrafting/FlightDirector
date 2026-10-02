@@ -34,7 +34,7 @@ reinvent. Manifest state is managed by the `batch-manifest` command.
 - **A configured `code.preflight` runs per branch, before that branch's merge — never once on
   `BASE` after the group.** A gate run after M merges have stacked on the stage can only report a
   failure it is too late to act on: backing it out means resetting a stage, which this skill
-  never does. Per branch, a red gate is a skip (`SKIPPED(<N>, preflight)`) and the clean branches
+  never does. Per branch, a red gate is a skip (`SKIPPED(<QUALIFIED>, preflight)`) and the clean branches
   still ship.
 - **Never build an integration worktree on an unfetched `BASE`.** Fetch and compare before every
   `worktree add` off `stages[0]` (Step 4). Local ahead of / diverged from `origin/$BASE` → STOP
@@ -66,31 +66,50 @@ exactly as it did before the key existed.
 
 ## Step 2: Find candidate branches
 
-Candidates are local `feature/*` branches whose linked issue is at `to-test`:
+Candidates are local `feature/*` branches whose linked issue is at `to-test` **on its own
+tracker**. A repo may have several named issue trackers, two of them can both have an issue 12,
+and each spells its status labels its own way — so every branch is resolved to its retained
+identity first (`$ISSUE_IDENTITY` is the helper from
+[runtime preflight](../../references/runtime.md)), and each tracker is asked about its own issues:
 
 ```bash
-# Resolve the to-test *role* to this repo's label name (as triaging-issues does),
-# then keep issues whose labels column carries it:
-TT="$("$DISP" config '.labels.status["to-test"] // "to-test"')"
-# --limit 100 is a ceiling the adapter pages up to; if it warns on stderr that it is
-# showing 100 of more, raise it and re-list, or the LIVE set silently loses candidates.
-"$DISP" issues list --state open --limit 100   # keep rows whose labels column contains "$TT"
-# local feature branches:
-git -C "$MAIN" for-each-ref --format='%(refname:short)' refs/heads/feature
+for B in $(git -C "$MAIN" for-each-ref --format='%(refname:short)' refs/heads/feature); do
+  ISSUE="$("$ISSUE_IDENTITY" from-branch --branch "$B")"; RC=$?
+  # RC 3 → the branch names no issue: not a candidate. RC 4 → a legacy feature/<N>-… branch
+  # whose tracker cannot be recovered: list it as UNBOUND and ask the user which tracker it
+  # belongs to (rerun from-branch with --tracker REF; the answer is retained). Never assume
+  # the current default tracker.
+  [ "$RC" = 0 ] || continue
+  TRACKER="$(jq -r .tracker <<<"$ISSUE")"; NUMBER="$(jq -r .number <<<"$ISSUE")"
+  QUALIFIED="$(jq -r .qualified <<<"$ISSUE")"; PREFIX="$(jq -r .branchPrefix <<<"$ISSUE")"
+  # …keep B, ISSUE and the fields above together for this candidate.
+done
+
+# Once per tracker that appears above — its OWN to-test label, from its own label map:
+TT="$("$DISP" issues tracker --tracker "$TRACKER" | jq -r '.labels.status["to-test"] // empty')"
+# Empty → that tracker has no to-test label to find candidates by: say so, and ask the user to
+# name its branches explicitly — never fall back to a guessed "to-test".
+# --limit 100 is a ceiling the adapter pages up to; if it warns on stderr that it is showing
+# 100 of more, raise it and re-list, or the LIVE set silently loses candidates.
+"$DISP" issues list --tracker "$TRACKER" --state open --label "$TT" --limit 100   # native ids, col 1
 ```
 
-Match each `feature/<N>-<slug>` to its issue `<N>`; keep those at `to-test` and whose worktree exists
-(`.worktrees/<N>-<slug>`). This is the LIVE set.
+Keep a branch when its native `NUMBER` is in its **own** tracker's to-test rows and its worktree
+exists (`.worktrees/<branch name after feature/>` — `.worktrees/fj-12-<slug>`, or
+`.worktrees/12-<slug>` for a legacy branch). This is the LIVE set, keyed by `QUALIFIED`, so two
+trackers' issue 12 stay two candidates.
 
 ## Step 3: Resolve the selection into groups
 
 - **"promote all to-test"** → one group = all candidates.
 - **"promote issues A, B, C"** → one group = those candidate branches (stateless; no manifest).
+  Match what the user said by qualified id (`FJ-18`, `GH-12`); a bare `18` means the current
+  default tracker's issue 18 — when more than one tracker has a candidate numbered 18, ask.
 - **"promote each zone" / "the first zone"** → read the manifest:
   ```bash
-  LIVE="<space-separated candidate issue numbers>"
+  LIVE="<space-separated candidate qualified identities>"
   batch-manifest heal --live "$LIVE"   # self-heal + consume before reading
-  batch-manifest groups                # zone<TAB>n,n,n per line
+  batch-manifest groups                # zone<TAB>REF-n,REF-n per line
   ```
   "each zone" → one group per printed zone; "the first zone" → the first (if several manifests make
   this ambiguous, ask which). A candidate branch mapping to **no** zone or **multiple** zones is
@@ -121,17 +140,20 @@ MB="$(git -C "$MAIN" merge-base "$BASE" "origin/$BASE")"
 #   otherwise       → diverged → STOP, report, do not auto-reconcile
 # No origin / fetch fails (offline): warn, continue, and mark BASE unverified in the report.
 
-for each branch feature/<N>-<slug> in the group:
+for each candidate (branch "$B", identity fields from Step 2) in the group:
+    # $B is feature/<prefix>-<slug> (legacy: feature/<N>-<slug>); its worktree is .worktrees/${B#feature/}.
     # Repo gate, per branch, in that branch's own worktree — before its merge, so a failure
     # costs a skip rather than a merge commit nobody can take back off the stage.
     if [ -n "$PREFLIGHT" ]; then
-        ( cd "$MAIN/.worktrees/<N>-<slug>" && sh -c "$PREFLIGHT" ) \
-          >"$SCRATCH/preflight-<N>.log" 2>&1 \
-          || { tail -40 "$SCRATCH/preflight-<N>.log"; record SKIPPED(<N>, preflight); continue; }
+        ( cd "$MAIN/.worktrees/${B#feature/}" && sh -c "$PREFLIGHT" ) \
+          >"$SCRATCH/preflight-$QUALIFIED.log" 2>&1 \
+          || { tail -40 "$SCRATCH/preflight-$QUALIFIED.log"; record SKIPPED($QUALIFIED, preflight); continue; }
     fi
-    git -C "$MAIN" merge --no-ff "feature/<N>-<slug>" -m "Merge feature/<N>-<slug> into $BASE (#<N>)"
+    # The merge message names the issue by its qualified id — never a bare #N, which the forge
+    # would read as the code repository's own issue N.
+    git -C "$MAIN" merge --no-ff "$B" -m "Merge $B into $BASE ($QUALIFIED)"
     # if the merge commit signs badly (%G? = B), re-sign: git -C "$MAIN" commit --amend --no-edit -S
-    # on conflict: git -C "$MAIN" merge --abort; record SKIPPED(<N>, conflict); continue
+    # on conflict: git -C "$MAIN" merge --abort; record SKIPPED($QUALIFIED, conflict); continue
 # --- Re-check freshness immediately before the push: the group's merges took time, and a
 #     sibling promote or another machine may have moved origin/$BASE meanwhile. Same four
 #     states as above; behind → the push is a non-fast-forward, so fast-forward is not
@@ -155,9 +177,9 @@ INT="batch/<zone-or-run>-<short>"
 #   offline / no origin → warn, fork from local "$BASE", mark the base UNVERIFIED in the report
 git -C "$MAIN" fetch -q origin "$BASE" || echo "base $BASE UNVERIFIED (fetch failed)" >&2
 git -C "$MAIN" worktree add -b "$INT" "$SCRATCH/int-<zone>" "<the ref the check selected>"
-for each branch in the group:
-    git -C "$SCRATCH/int-<zone>" merge --no-ff "feature/<N>-<slug>" \
-      || { git -C "$SCRATCH/int-<zone>" merge --abort; record SKIPPED(<N>, conflict); }
+for each candidate (branch "$B") in the group:
+    git -C "$SCRATCH/int-<zone>" merge --no-ff "$B" \
+      || { git -C "$SCRATCH/int-<zone>" merge --abort; record SKIPPED($QUALIFIED, conflict); }
 # Repo gate on the assembled group, in the integration worktree, before the push: the branches
 # are merged here but nothing is on origin yet, so a red gate costs a re-run, not a revert.
 # The verdict must GUARD the push — a comment saying "stop" stops nothing, and an unguarded
@@ -175,10 +197,21 @@ if [ -n "$PREFLIGHT" ]; then
            continue; }   # next GROUP: no push, no PR. Red gate = skipped, same as a conflict.
 fi
 git -C "$SCRATCH/int-<zone>" push -u origin "$INT"
-# Assemble the PR body: Summary + a per-issue test plan — read each issue's body AND comments first
-# ("$DISP" issues get / issues comments --number <N>; the thread carries scope changes and the work
-# ledger, and the plan must test what was actually built) — halt the group if a resolved issue has no
-# writable plan; then one $KEYWORD #N line per included issue (Closes if stages[0] closesIssues, else Ready).
+# Decide stage closure before assembling the PR body; this value also drives
+# the explicit tracker lifecycle updates in Step 5.
+LAST=$(( $("$DISP" config '.code.stages | length') - 1 ))
+CL="$("$DISP" config '.code.stages[0].closesIssues // null')"
+[ "$CL" = "null" ] && { [ 0 -eq "$LAST" ] && CL=true || CL=false; }
+# Assemble the PR body: Summary + a per-issue test plan — read each retained issue's
+# body AND comments (issues get / issues comments --tracker "$TRACKER" --number "$NUMBER")
+# first: the thread carries scope changes and the work ledger. Halt the group if a resolved
+# issue has no writable plan. The code PR may be public while a tracker is private: write the
+# summary and test steps in your own words and never paste issue bodies, comments, ledger
+# entries or tracker URLs into it. Name each issue ONLY with its pr-reference line:
+"$ISSUE_IDENTITY" pr-reference --identity "$ISSUE" --closes "$CL" >> "$SCRATCH/pr-<zone>.md"
+#   → `Closes #12` / `Ready #12` only when the issue lives in the code repository itself (same
+#     backend, api host, owner/repo); `Tracks GH-12` for any other tracker, so the PR can never
+#     close the code repository's unrelated issue 12. Step 5 drives every issue explicitly.
 # Same two guards as promoting-a-branch Step 3, per issue in the group:
 #   - the `- no user surface` hatch is for an INHERENTLY absent surface (infra/migration/refactor),
 #     never a surface you merely couldn't reach — obstructed means write the real plan, drive the
@@ -186,11 +219,11 @@ git -C "$SCRATCH/int-<zone>" push -u origin "$INT"
 #   - scan the assembled body for deferrals. The test is SEMANTIC, not textual: anything the body
 #     records as deliberately not done ("known gaps", "out of scope", "TODO", "future work", "punted",
 #     "follow-up", ...) counts, however phrased — those are examples, not a list to grep for. Each
-#     needs an #N verified open (IFS=$'\t' read -r _ _ STATE <<<"$("$DISP" issues get --number <N>)"
+#     needs an issue, named by its qualified id, verified open (IFS=$'\t' read -r _ _ STATE <<<"$("$DISP" issues get --number "FJ-31")"
 #     then [ "$STATE" = open ] — state is field 3, normalized across backends, #205), filed right
 #     then if absent. An issue this PR resolves does NOT count as the tracker, even on a Ready #N
 #     hop where it stays open for now. Halt the group otherwise.
-PR="$("$DISP" pr open --head "$INT" --base "$BASE" --title "Batch: <zone> (#<n>, #<n>, …)" --body-file "$SCRATCH/pr-<zone>.md" --model <your-model-id>)"
+PR="$("$DISP" pr open --head "$INT" --base "$BASE" --title "Batch: <zone> (FJ-18, GH-12, …)" --body-file "$SCRATCH/pr-<zone>.md" --model <your-model-id>)"
 # watch CI ("$DISP" ci watch --pr "<pr#>" …). Read the `status=` on the last line, NOT the exit code —
 # it exits 0 on any terminal verdict. status=failure → record the group FAILED ("$DISP" ci log --pr "<pr#>"
 # shows why) and move on;
@@ -207,31 +240,32 @@ git -C "$MAIN" worktree remove "$SCRATCH/int-<zone>"
 ## Step 5: Per-issue bookkeeping + lifecycle (per promoted issue)
 
 Identical to `working-an-issue` Step 4 / `promoting-a-branch` Step 5, for each **successfully
-promoted** `#N`:
+promoted** retained identity:
 
 ```bash
-# 1. Ensure a work-ledger comment exists (queue-batches branches already have one from done-<N>.md;
-#    otherwise write a short finishing record and post it):
-"$DISP" issues comment --number <N> --body-file "$SCRATCH/done-<N>.md" --model <your-model-id>
+# Every call names the issue's OWN tracker: --tracker "$TRACKER" --number "$NUMBER" from Step 2.
+# 1. Ensure a work-ledger comment exists (queue-batches branches already have one from
+#    done-<prefix>.md; otherwise write a short finishing record and post it):
+"$DISP" issues comment --tracker "$TRACKER" --number "$NUMBER" --body-file "$SCRATCH/done-$PREFIX.md" --model <your-model-id>
 # 2. Ask the dispatcher for the stable family, then lazily ensure + add it.
 #    A tool/service id returns non-zero and is skipped:
 PRIMARY_MODEL=<model-id-from-ledger>
 if FAMILY="$("$DISP" labels model-family --id "$PRIMARY_MODEL")"; then
-  "$DISP" labels ensure --model "$PRIMARY_MODEL"
-  "$DISP" issues label-add --number <N> --label "model/$FAMILY"
+  "$DISP" labels ensure --tracker "$TRACKER" --model "$PRIMARY_MODEL"
+  "$DISP" issues label-add --tracker "$TRACKER" --number "$NUMBER" --label "model/$FAMILY"
 fi
 # 3. Stage-driven status/close (do NOT hard-code):
-IS="$("$DISP" config '.code.stages[0].issueStatus // empty')"; [ -n "$IS" ] && "$DISP" issues set-status --number <N> --status "$IS"
+IS="$("$DISP" config '.code.stages[0].issueStatus // empty')"; [ -n "$IS" ] && "$DISP" issues set-status --tracker "$TRACKER" --number "$NUMBER" --status "$IS"
 LAST=$(( $("$DISP" config '.code.stages | length') - 1 )); CL="$("$DISP" config '.code.stages[0].closesIssues // null')"
-[ "$CL" = "null" ] && { [ 0 -eq "$LAST" ] && CL=true || CL=false; }; [ "$CL" = true ] && "$DISP" issues close --number <N>
+[ "$CL" = "null" ] && { [ 0 -eq "$LAST" ] && CL=true || CL=false; }; [ "$CL" = true ] && "$DISP" issues close --tracker "$TRACKER" --number "$NUMBER"
 # 4. remove the worktree (anchored — never bare, you may be standing inside it):
-git -C "$MAIN" worktree remove ".worktrees/<N>-<slug>"
+git -C "$MAIN" worktree remove ".worktrees/${B#feature/}"
 ```
 
-Then **consume the manifest** for exactly what was promoted — by number, not by label:
+Then **consume the manifest** for exactly what was promoted — by qualified identity, not by label:
 
 ```bash
-batch-manifest consume --issues "<the issue numbers promoted in this run>"
+batch-manifest consume --issues "<the qualified identities promoted in this run>"
 ```
 
 Don't derive this from "issues still at to-test": when `stages[0].issueStatus` is itself
@@ -251,7 +285,10 @@ failure without re-running the gate.
 
 - Treating a `pr` hop like a direct one (or vice-versa) — read `stages[0].merge`.
 - Skipping manifest `heal` after promotion — promoted issues would linger. Heal after every group.
-- Using `Closes #N` when `stages[0]` does not close issues — use `Ready #N`.
+- Using `Closes #N` when `stages[0]` does not close issues — use `Ready #N`. And never write either
+  by hand for another tracker's issue: `pr-reference` decides, and says `Tracks GH-12` instead.
+- Matching branches, manifest zones or to-test rows by bare number. Two trackers can both have
+  an issue 12; compare qualified ids, and read each tracker's own to-test label.
 - Aborting the whole run on one conflict. Skip + report; never block the clean branches.
 - Running `code.preflight` once on `BASE` after a direct group's merges instead of per branch
   before each one. It gives you a verdict you cannot act on: the only fix is unwinding a stage,

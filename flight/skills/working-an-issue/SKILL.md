@@ -1,6 +1,6 @@
 ---
 name: working-an-issue
-description: Use when starting, progressing, or finishing work on a specific issue — "let's work on #N", "start issue #N", "I'll take #N", "this is ready to test", "merge #N", "close out #N". Drives the per-issue branch → status-label → test → merge → finish lifecycle. Enforces: never merge to the trunk branch without explicit user approval.
+description: Use when starting, progressing, or finishing work on a specific issue — "let's work on #N" (or a tracker-qualified id like GH-12 / PROJ-7), "start issue #N", "I'll take #N", "this is ready to test", "merge #N", "close out #N". Drives the per-issue branch → status-label → test → merge → finish lifecycle. Enforces: never merge to the trunk branch without explicit user approval.
 ---
 
 # Working an Issue
@@ -18,8 +18,40 @@ flight <group> <verb> [--flag value …]
 ```
 
 The dispatcher resolves coordinates, token, and label names from `.flightdirector/config.json` — you pass
-**status roles** (`in-progress`, `to-test`, …) and it maps them to this repo's actual label
-names. Read `stages[0]` (the first integration branch) via:
+**status roles** (`in-progress`, `to-test`, …) and it maps them to the issue's own tracker's label
+names.
+
+### Resolve the issue once, then keep it
+
+A repo can have several named issue trackers (`issueTrackers` in the config), and two of them can
+both have an issue 12. Resolve what the user said **exactly once** and retain the result:
+
+```
+ISSUE="$(flight issues resolve --number "$INPUT")"   # INPUT as given: 12, #12, GH-12, PROJ-7
+TRACKER="$(jq -r '.tracker' <<<"$ISSUE")"             # the tracker's ref, e.g. FJ
+NUMBER="$(jq -r '.number' <<<"$ISSUE")"               # its native id: 12, or PROJ-7 on Jira
+QUALIFIED="$(jq -r '.qualified' <<<"$ISSUE")"         # FJ-12 — the name to show and write
+PREFIX="$(jq -r '.branchPrefix' <<<"$ISSUE")"         # fj-12 — the branch/worktree prefix
+```
+
+- A bare `12` / `#12` means the **current default** tracker; `GH-12`, `GH12`, `GH#12` (ref or
+  alias, any case) and a Jira key `PROJ-7` name their tracker. Add `--tracker REF` when the user
+  names the tracker separately. An unknown or ambiguous tracker is an error listing the choices —
+  ask the user; never guess. When the repo has more than one tracker, say which one the issue
+  resolved to in the pickup line (`read FJ-12: …`).
+- **Every later issue or label call passes `--tracker "$TRACKER" --number "$NUMBER"`** — comments,
+  the work ledger, model labels, status, assignment, close. Never resolve the bare input again:
+  the default tracker can change while the work is in flight, and a re-resolved `12` would then
+  write to a different issue.
+- **Resuming an issue that already has a branch** (a new session, "this is ready to test"): take
+  the identity from the branch, not from the number —
+  `ISSUE="$("$ISSUE_IDENTITY" from-branch --branch "$BRANCH")"` (the helper from
+  [runtime preflight](../../references/runtime.md)). It reads qualified branch names
+  (`feature/fj-12-…`) and the migration's bindings for legacy `feature/12-…` branches. Exit
+  status 4 means a legacy branch whose tracker cannot be recovered: ask the user which tracker it
+  belongs to and rerun with `--tracker REF` (the answer is retained); never assume the default.
+
+Read `stages[0]` (the first integration branch) via:
 
 ```
 flight config '.code.stages[0].name'
@@ -41,7 +73,7 @@ merge config fields or hand-merge here. Config + verbs:
   parallel; never reuse one worktree for two issues.
 - **Never let a worktree path resolve against `$PWD`.** Anchor every `git worktree` call with
   `-C "$ROOT"` (below). The shell's working directory persists between commands, so if you are
-  still inside the *previous* issue's worktree, a relative `.worktrees/<N>-<slug>` creates the
+  still inside the *previous* issue's worktree, a relative `.worktrees/<branchPrefix>-<slug>` creates the
   new worktree **nested inside that one** — git permits nested worktrees and says nothing.
 - **Every git command is `git -C "$WT" …` (or `git -C "$ROOT" …`). A bare `git` command is a
   bug, even if you think you're in the right directory.** Bind the issue's worktree path to
@@ -72,7 +104,7 @@ merge config fields or hand-merge here. Config + verbs:
   papering over it buries the problem until promote time.
 - **Never start an issue without reading its comments.** The body is a snapshot; the thread is
   where scope corrections, "actually do X instead", decisions, and prior work-ledger entries
-  live. Run `issues comments --number N` *before* creating the worktree, and when a comment
+  live. Run `issues comments --tracker "$TRACKER" --number "$NUMBER"` *before* creating the worktree, and when a comment
   contradicts the body, **the later comment wins** — work to it and say so. This is not optional
   and not a "if there's time" step: skipping it is how an agent builds the wrong thing well.
 
@@ -84,14 +116,17 @@ merge config fields or hand-merge here. Config + verbs:
   The body alone can be stale — clarifications, scope corrections, and decisions often live in
   the comments. Fetch both before you plan anything:
   ```
-  flight issues get      --number N
-  flight issues comments --number N
+  flight issues get      --tracker "$TRACKER" --number "$NUMBER"
+  flight issues comments --tracker "$TRACKER" --number "$NUMBER"
   ```
-  Then **state what you read** before moving on — e.g. "read #N: body + 3 comments, latest
+  Then **state what you read** before moving on — e.g. "read FJ-12: body + 3 comments, latest
   2026-09-06 by dave" (or "no comments") — so the user can see the thread was consulted. If a
   comment contradicts the body, the later comment wins — work to that, and say so explicitly.
-- Determine the issue number `N` and derive a short slug from its title (lowercase, hyphens, no
-  special characters) — e.g. issue #42 "Add login page" → slug `add-login-page`.
+- Derive a short slug from the issue's title (lowercase, hyphens, no special characters) — e.g.
+  FJ-42 "Add login page" → `feature/fj-42-add-login-page`. The
+  branch and worktree always carry the tracker-qualified `PREFIX`, the default tracker's issues
+  included — `feature/fj-12-<slug>`, `feature/proj-7-<slug>` for Jira — so two trackers' issue 12
+  never collide.
 - Pick `feature` vs `bug` from the issue's type label or content.
 - Create a worktree off `stages[0]` (the first integration branch):
 
@@ -130,12 +165,14 @@ Then create the worktree from the ref that check selected — `$BASE` when level
 fast-forwarded, `origin/$BASE` when you chose to fork from the remote tip:
 
 ```
-git -C "$ROOT" worktree add -b "feature/<N>-<slug>" ".worktrees/<N>-<slug>" "<the chosen ref>"
+BRANCH="feature/$PREFIX-<slug>"
+git -C "$ROOT" worktree add -b "$BRANCH" ".worktrees/$PREFIX-<slug>" "<the chosen ref>"
 
 # Bind the issue's worktree ONCE — every later git command is `git -C "$WT" …`.
-WT="$ROOT/.worktrees/<N>-<slug>"
+WT="$ROOT/.worktrees/$PREFIX-<slug>"
+"$ISSUE_IDENTITY" remember --branch "$BRANCH" --identity "$ISSUE"   # retain the identity
 
-flight issues set-status --number N --status in-progress
+flight issues set-status --tracker "$TRACKER" --number "$NUMBER" --status in-progress
 ```
 
 **Offline / no remote.** If there is no `origin` or the fetch fails, **warn and continue** from
@@ -143,15 +180,15 @@ the local ref — offline work must not be blocked — but say so plainly, and r
 pickup line as **unverified**: *"base `$BASE`: UNVERIFIED (fetch failed — offline); forked from
 local `$BASE`"*. The ledger must never imply a freshness check that did not happen.
 
-**Say which case applied in the "read #N …" pickup line**, next to the comment count — e.g.
-*"read #N: body + 2 comments; base develop: fetched, level with origin"*.
+**Say which case applied in the "read <QUALIFIED> …" pickup line**, next to the comment count — e.g.
+*"read FJ-12: body + 2 comments; base develop: fetched, level with origin"*.
 
 Do the work inside `$WT`, and drive git there **by path, not by `cd`**:
 
 ```
 git -C "$WT" status
 git -C "$WT" add flight/skills/<skill>/SKILL.md      # paths are relative to $WT
-git -C "$WT" commit -m "feat(#N): …"
+git -C "$WT" commit -m "feat($QUALIFIED): …"             # e.g. feat(FJ-12): — never a bare #12
 git -C "$WT" log --oneline -3
 git -C "$WT" show --no-patch --format=%G? HEAD       # signature check, still anchored
 ```
@@ -166,7 +203,7 @@ When the work is done and waiting on the user to verify, hand the board over and
 it's ready to test, on which branch:
 
 ```
-flight issues set-status --number N --status to-test
+flight issues set-status --tracker "$TRACKER" --number "$NUMBER" --status to-test
 ```
 
 (One call — it drops `in-progress` and adds `to-test` atomically.)
@@ -198,7 +235,7 @@ Only after explicit approval:
      payloads / transcript path; if you can't determine it, pass every session id that worked
      this issue. Schema and semantics: [prompt-log.md](../../references/prompt-log.md).
    ```
-   flight issues comment --number N --body-file "$SCRATCH/done.md" --model "$PRIMARY_MODEL"
+   flight issues comment --tracker "$TRACKER" --number "$NUMBER" --body-file "$SCRATCH/done.md" --model "$PRIMARY_MODEL"
    ```
    `--model` is the id from step 2 below (resolve it first); the dispatcher signs the comment
    with the plugin version and `with <Model/ver>` so the ledger entry names what wrote it.
@@ -211,11 +248,11 @@ Only after explicit approval:
    ```
    PRIMARY_MODEL=gpt-5.6-sol
    if FAMILY="$(flight labels model-family --id "$PRIMARY_MODEL")"; then
-     flight labels ensure --model "$PRIMARY_MODEL"
-     flight issues label-add --number N --label "model/$FAMILY"
+     flight labels ensure --tracker "$TRACKER" --model "$PRIMARY_MODEL"
+     flight issues label-add --tracker "$TRACKER" --number "$NUMBER" --label "model/$FAMILY"
    fi
    ```
-3. **Promote the branch** `feature/<N>-<slug>` → `stages[0]` using `promoting-a-branch` (invoke
+3. **Promote the branch** `feature/<branchPrefix>-<slug>` → `stages[0]` using `promoting-a-branch` (invoke
    the skill in this session). It applies the hop's merge strategy/gate **and** drives the
    issue's status/close from `stages[0]`'s `issueStatus`/`closesIssues` (Step 5 of that skill):
    a single-trunk repo's terminal `stages[0]` closes the issue; in a multi-stage pipeline it just
@@ -225,7 +262,7 @@ Only after explicit approval:
    including from inside the worktree being removed):
    ```
    ROOT="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
-   git -C "$ROOT" worktree remove ".worktrees/<N>-<slug>"
+   git -C "$ROOT" worktree remove ".worktrees/$PREFIX-<slug>"
    ```
 
 ## Common mistakes
@@ -245,9 +282,9 @@ Only after explicit approval:
   Status and close are driven by the target stage in `promoting-a-branch` (Step 5). Setting them
   here too makes the board show a state the pipeline didn't ask for.
 - **Orphaned worktrees** — if a promotion is abandoned, remove the worktree
-  (`git -C "$ROOT" worktree remove --force ".worktrees/<N>-<slug>"`) rather than leaving it
+  (`git -C "$ROOT" worktree remove --force ".worktrees/$PREFIX-<slug>"`) rather than leaving it
   dangling. If you abandon the work earlier (before promotion), also clear the issue's status
-  label (`issues clear-status --number N`) after removing the worktree so the board doesn't lie.
+  label (`issues clear-status --tracker "$TRACKER" --number "$NUMBER"`) after removing the worktree so the board doesn't lie.
 - Hand-merging instead of delegating to `promoting-a-branch` — the merge strategy and any gate
   checks live there, not here.
 - Running a bare `git add`/`git commit`/`git status` because "I'm in the worktree." You may not
