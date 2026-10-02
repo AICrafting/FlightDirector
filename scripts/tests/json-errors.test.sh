@@ -127,7 +127,7 @@ for b in forgejo github gitlab jira; do
 	check "$b: no token → auth" "$([ "$(adapter_code "$b" 200 LS_TOKEN=)" = auth ] && echo 1 || echo 0)"
 	check "$b: a missing coordinate → not-configured" "$([ "$(adapter_code "$b" 200 LS_API=)" = not-configured ] && echo 1 || echo 0)"
 	check "$b: an unknown argument → usage" \
-		"$(ef="$SANDBOX/errfile"; rm -f "$ef"; env FLIGHT_ERROR_FILE="$ef" LS_API=x LS_OWNER=o LS_REPO=r LS_TOKEN=t LS_PROJECT=P LS_EMAIL=e \
+		"$(ef="$SANDBOX/errfile"; rm -f "$ef"; env PATH="$SANDBOX/bin:$PATH" FLIGHT_ERROR_FILE="$ef" LS_API=x LS_OWNER=o LS_REPO=r LS_TOKEN=t LS_PROJECT=P LS_EMAIL=e \
 			"$ADAPTERS/$b/issues" get --bogus 1 >/dev/null 2>&1 || true; [ "$(jq -r '.error.code' "$ef" 2>/dev/null)" = usage ] && echo 1 || echo 0)"
 done
 ef="$SANDBOX/errfile"; rm -f "$ef"
