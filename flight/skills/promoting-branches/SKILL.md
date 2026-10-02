@@ -34,7 +34,7 @@ reinvent. Manifest state is managed by the `batch-manifest` command.
 - **A configured `code.preflight` runs per branch, before that branch's merge — never once on
   `BASE` after the group.** A gate run after M merges have stacked on the stage can only report a
   failure it is too late to act on: backing it out means resetting a stage, which this skill
-  never does. Per branch, a red gate is a skip (`SKIPPED(<QUALIFIED>, preflight)`) and the clean branches
+  never does. Per branch, a red gate is a skip (`SKIPPED(<DISPLAY>, preflight)`) and the clean branches
   still ship.
 - **Never build an integration worktree on an unfetched `BASE`.** Fetch and compare before every
   `worktree add` off `stages[0]` (Step 4). Local ahead of / diverged from `origin/$BASE` → STOP
@@ -82,6 +82,7 @@ for B in $(git -C "$MAIN" for-each-ref --format='%(refname:short)' refs/heads/fe
   [ "$RC" = 0 ] || continue
   TRACKER="$(jq -r .tracker <<<"$ISSUE")"; NUMBER="$(jq -r .number <<<"$ISSUE")"
   QUALIFIED="$(jq -r .qualified <<<"$ISSUE")"; PREFIX="$(jq -r .branchPrefix <<<"$ISSUE")"
+  DISPLAY="$(jq -r .display <<<"$ISSUE")"   # #12 with one tracker, FJ-12 with several — for messages and reports
   # …keep B, ISSUE and the fields above together for this candidate.
 done
 
@@ -147,13 +148,13 @@ for each candidate (branch "$B", identity fields from Step 2) in the group:
     if [ -n "$PREFLIGHT" ]; then
         ( cd "$MAIN/.worktrees/${B#feature/}" && sh -c "$PREFLIGHT" ) \
           >"$SCRATCH/preflight-$QUALIFIED.log" 2>&1 \
-          || { tail -40 "$SCRATCH/preflight-$QUALIFIED.log"; record SKIPPED($QUALIFIED, preflight); continue; }
+          || { tail -40 "$SCRATCH/preflight-$QUALIFIED.log"; record SKIPPED($DISPLAY, preflight); continue; }
     fi
     # The merge message names the issue by its qualified id — never a bare #N, which the forge
     # would read as the code repository's own issue N.
-    git -C "$MAIN" merge --no-ff "$B" -m "Merge $B into $BASE ($QUALIFIED)"
+    git -C "$MAIN" merge --no-ff "$B" -m "Merge $B into $BASE ($DISPLAY)"
     # if the merge commit signs badly (%G? = B), re-sign: git -C "$MAIN" commit --amend --no-edit -S
-    # on conflict: git -C "$MAIN" merge --abort; record SKIPPED($QUALIFIED, conflict); continue
+    # on conflict: git -C "$MAIN" merge --abort; record SKIPPED($DISPLAY, conflict); continue
 # --- Re-check freshness immediately before the push: the group's merges took time, and a
 #     sibling promote or another machine may have moved origin/$BASE meanwhile. Same four
 #     states as above; behind → the push is a non-fast-forward, so fast-forward is not
@@ -179,7 +180,7 @@ git -C "$MAIN" fetch -q origin "$BASE" || echo "base $BASE UNVERIFIED (fetch fai
 git -C "$MAIN" worktree add -b "$INT" "$SCRATCH/int-<zone>" "<the ref the check selected>"
 for each candidate (branch "$B") in the group:
     git -C "$SCRATCH/int-<zone>" merge --no-ff "$B" \
-      || { git -C "$SCRATCH/int-<zone>" merge --abort; record SKIPPED($QUALIFIED, conflict); }
+      || { git -C "$SCRATCH/int-<zone>" merge --abort; record SKIPPED($DISPLAY, conflict); }
 # Repo gate on the assembled group, in the integration worktree, before the push: the branches
 # are merged here but nothing is on origin yet, so a red gate costs a re-run, not a revert.
 # The verdict must GUARD the push — a comment saying "stop" stops nothing, and an unguarded

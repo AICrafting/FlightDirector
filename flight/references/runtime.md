@@ -5,7 +5,7 @@ Every Flight skill performs this cheap preflight before its first dispatcher cal
 1. Resolve the absolute plugin root from the loaded `SKILL.md` location, then set
    `DISP=<plugin-root>/scripts/flight`, `BATCH_MANIFEST=<plugin-root>/scripts/batch-manifest` and
    `ISSUE_IDENTITY=<plugin-root>/scripts/issue-identity.sh` (the retained issue-identity helper:
-   branch → `{tracker, number, qualified, branchPrefix}`; see its header).
+   branch → `{tracker, number, qualified, display, branchPrefix}`; see its header).
    Do not assume the host added the plugin's `bin/` directory to `PATH`. A bare
    `flight` remains acceptable when `command -v flight` succeeds.
 2. Set `HARNESS` to `codex` when running in Codex, or `claude` when running in Claude Code.

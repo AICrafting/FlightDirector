@@ -66,7 +66,8 @@ flight issues list --all-trackers --state open --limit 50
 ```
 
 The scan covers every tracker, because a duplicate filed on another one is still a duplicate.
-Output is `qualified⇥native id⇥title⇥labels` per line (`FJ-12⇥12⇥…`, `JIR-7⇥PROJ-7⇥…`) —
+Output is `id⇥native id⇥title⇥labels` per line (`FJ-12⇥12⇥…`, `JIR-7⇥PROJ-7⇥…`; `#12⇥12⇥…`
+when the repo has a single tracker) —
 already projected, so it's light in context. A tracker named `unavailable` on stderr was not
 scanned: say so rather than reporting "no overlap". The
 adapter pages underneath `--limit`, so 50 rows means 50 rows; what tells you the scan was partial
@@ -162,10 +163,11 @@ identity with the same tracker, and use it for Step 7 and the report:
 
 ```
 ISSUE="$(flight issues resolve --tracker "$TRACKER" --number "<printed id>")"
-NUMBER="$(jq -r '.number' <<<"$ISSUE")"; QUALIFIED="$(jq -r '.qualified' <<<"$ISSUE")"
+NUMBER="$(jq -r '.number' <<<"$ISSUE")"; DISPLAY="$(jq -r '.display' <<<"$ISSUE")"
 ```
 
-Report with the qualified id: *"Created FJ-12: [title]"*.
+Report with its display id: *"Created #12: [title]"* — `#12` while the repo has one tracker,
+`FJ-12` once it has several (the dispatcher decides; never build it yourself).
 
 ## Step 7: Attach images (if any were shared)
 

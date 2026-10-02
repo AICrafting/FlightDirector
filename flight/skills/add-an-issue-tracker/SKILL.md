@@ -28,7 +28,10 @@ acts on the **default** tracker, which is not necessarily the one being set up.
 - **Exactly one default.** The first tracker becomes the default. Adding, completing or repairing
   a tracker **never** moves the default; only an explicit request to change it does (Step 7).
 - **A `ref` is forever.** It names the tracker in qualified ids (`FJ-12`) and in branch and
-  worktree names (`feature/fj-12-…`). Never change an existing entry's `ref` on a rerun. Renaming
+  worktree names (`feature/fj-12-…`). While a repo has a single tracker, names leave the ref out
+  (`#12`, `feature/12-…`, #258); adding a **second** tracker switches new work to qualified
+  names. Say so when you add one. Branches already started keep resolving to their tracker
+  through their retained bindings. Never change an existing entry's `ref` on a rerun. Renaming
   `name` is harmless; renaming `ref` strands branches and is not a setup edit.
 - **Never guess past a collision.** A proposed ref or alias that another tracker already uses
   (compared case-insensitively, refs and aliases together) is shown to the user, who picks

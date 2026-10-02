@@ -8,7 +8,7 @@ Placeholders the orchestrator fills before dispatch:
 - `{repo_root}` — absolute path to the MAIN repo checkout
 - `{log_path}` — absolute path to this zone's status log
 - `{scratch}` — a writable scratch dir for `--body-file` temp files
-- `{issues_ordered}` — newline-separated `<QUALIFIED> <slug>` list (e.g. `FJ-12 fix-login`), execution
+- `{issues_ordered}` — newline-separated `<ID> <slug>` list (e.g. `#12 fix-login`, or `FJ-12 fix-login` when the repo has several trackers), execution
   order (smallest-first)
 - `{repo_rules}` — verbatim contents of the repo's agent-rules file, or `None configured.`
 - `{preflight}` — the repo's check command (`code.preflight`), or `None configured.`
@@ -70,10 +70,15 @@ names is where every later read and write goes, even if the configured default t
 while you work (two trackers can both have an issue 12, so never fall back to a bare number):
 
 ```bash
-IDENTITY="$({dispatcher} issues resolve --number <QUALIFIED>)"
+IDENTITY="$({dispatcher} issues resolve --number <ID>)"
 TRACKER="$(jq -r '.tracker' <<<"$IDENTITY")"; NUMBER="$(jq -r '.number' <<<"$IDENTITY")"   # NUMBER is native: 12, or PROJ-12 on Jira
-QUALIFIED="$(jq -r '.qualified' <<<"$IDENTITY")"; PREFIX="$(jq -r '.branchPrefix' <<<"$IDENTITY")"
+QUALIFIED="$(jq -r '.qualified' <<<"$IDENTITY")"   # FJ-12 — the routing key (always unambiguous)
+DISPLAY="$(jq -r '.display' <<<"$IDENTITY")"       # #12 with one tracker, FJ-12 with several — what people read
+PREFIX="$(jq -r '.branchPrefix' <<<"$IDENTITY")"   # 12 / fj-12 — the branch and worktree prefix
 ```
+
+Log lines, commit scopes and your report name the issue by `$DISPLAY` — the same form as the
+`<ID>` you were given, so the orchestrator can match them.
 
 ## Pre-made decisions (from orchestrator)
 
@@ -125,7 +130,7 @@ issue and label call:
    WT="{repo_root}/.worktrees/$PREFIX-<slug>"
    "$(dirname "{dispatcher}")/issue-identity.sh" remember --branch "$BRANCH" --identity "$IDENTITY"
    {dispatcher} issues set-status --tracker "$TRACKER" --number "$NUMBER" --status in-progress
-   echo "$(date -u +%FT%TZ) {zone} ticket=$QUALIFIED status=starting comments=<count> base=<level|ff-N|unverified>" >> {log_path}
+   echo "$(date -u +%FT%TZ) {zone} ticket=$DISPLAY status=starting comments=<count> base=<level|ff-N|unverified>" >> {log_path}
    ```
 3. **Work inside `$WT`, driving git there by path rather than by `cd`.** Re-read the issue's
    Acceptance section *as amended by the comments*;
@@ -134,12 +139,12 @@ issue and label call:
    ```bash
    git -C "$WT" status
    git -C "$WT" add <repo-relative path>      # paths resolve relative to $WT, not to your cwd
-   git -C "$WT" commit -m "feat($QUALIFIED): …"
+   git -C "$WT" commit -m "feat($DISPLAY): …"
    git -C "$WT" log --oneline -3
    ```
    Midway, optionally:
    ```bash
-   echo "$(date -u +%FT%TZ) {zone} ticket=$QUALIFIED status=working note=\"<short>\"" >> {log_path}
+   echo "$(date -u +%FT%TZ) {zone} ticket=$DISPLAY status=working note=\"<short>\"" >> {log_path}
    ```
 4. **Before declaring done — walk the user-visible surface.** Don't satisfy only the literal
    acceptance phrase; trace every related field/element a reporter would see. If the real scope
@@ -169,7 +174,7 @@ issue and label call:
    fi
    {dispatcher} issues comment --tracker "$TRACKER" --number "$NUMBER" --body-file "{scratch}/done-$PREFIX.md" --model "$PRIMARY_MODEL"
    SHA=$(git -C "$WT" rev-parse --short HEAD)
-   echo "$(date -u +%FT%TZ) {zone} ticket=$QUALIFIED status=complete commit=$SHA" >> {log_path}
+   echo "$(date -u +%FT%TZ) {zone} ticket=$DISPLAY status=complete commit=$SHA" >> {log_path}
    ```
    Leave the worktree in place (unmerged) and move to the next issue. The user promotes serially
    later via `promoting-a-branch`.
@@ -181,7 +186,7 @@ judgment call, can't quickly fix breaking tests, or find the scope materially la
 described:
 
 ```bash
-echo "$(date -u +%FT%TZ) {zone} ticket=$QUALIFIED status=blocked note=\"<short question>\"" >> {log_path}
+echo "$(date -u +%FT%TZ) {zone} ticket=$DISPLAY status=blocked note=\"<short question>\"" >> {log_path}
 ```
 
 Then stop and return. The orchestrator routes your question to the user and continues you with the
@@ -213,7 +218,7 @@ answer. Shipping 3 solid issues beats forcing 5 shaky ones.
 
 ## Final report (when the queue is complete OR you safety-valve)
 
-Return a concise report: commits (`<SHA> <QUALIFIED> <title>`), test deltas, judgment calls made without
+Return a concise report: commits (`<SHA> <DISPLAY> <title>`), test deltas, judgment calls made without
 asking, anything deferred/safety-valved (with a suggested follow-up). Then the final log line:
 
 ```bash

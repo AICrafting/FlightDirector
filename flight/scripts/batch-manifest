@@ -52,7 +52,8 @@ resolve_list() {
 			[[ "$token" =~ ^#?[0-9]+$ ]] || die "issue '$token' is not a number (qualified ids need config schema 3; run flight reconcile)"
 			id="${token#\#}"
 		fi
-		out="$(jq -c --argjson i "$id" '. + [$i]' <<<"$out")"
+		# `display` (#258) is derived from the tracker count at read time, never stored.
+		out="$(jq -c --argjson i "$id" '. + [if ($i | type) == "object" then $i | del(.display) else $i end]' <<<"$out")"
 	done
 	printf '%s\n' "$out"
 }

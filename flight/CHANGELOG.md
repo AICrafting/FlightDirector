@@ -13,7 +13,18 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- **One issue tracker means plain issue numbers again** (#258). While a repo has a single
+  tracker that is Jira or the code repository's own, the tracker prefix carried no information,
+  so flight leaves it out: issues are `#12` (`PROJ-7` on Jira) in commit scopes, pickup lines,
+  reports and `issues list --all-trackers` rows, and branches are `feature/12-<slug>`, which
+  the forge autolinks. `issues resolve` gains a `display` field that holds that name (the
+  qualified id when there are several trackers) and returns the matching `branchPrefix`.
+  `qualified` stays `FJ-12` everywhere, including the `--json` output, and qualified ids are
+  still accepted as input. A single tracker in another forge repository keeps its prefix, since
+  a bare `#12` would link the code repository's issue. Adding a second tracker switches new work
+  to qualified names; branches started before keep resolving through their bindings.
 
 ## [0.17.0] - 2026-10-02
 

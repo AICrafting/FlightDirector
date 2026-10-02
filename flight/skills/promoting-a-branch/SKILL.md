@@ -108,7 +108,7 @@ STRATEGY="$(flight config '.code.stages[<i>].strategy // "merge"')"   # <i> = ta
 ## Step 2: Identify resolved issues
 
 Each resolved issue is carried by its **retained identity** — the
-`{tracker, number, qualified, branchPrefix}` JSON `flight issues resolve` prints — never by a bare
+`{tracker, number, qualified, display, branchPrefix}` JSON `flight issues resolve` prints — never by a bare
 number: the repo may have several issue trackers, two of them can both have an issue 12, and the
 default tracker may have changed since the work started. `$ISSUE_IDENTITY` is the helper from
 [runtime preflight](../../references/runtime.md).
@@ -127,8 +127,9 @@ default tracker may have changed since the work started. `$ISSUE_IDENTITY` is th
   git -C "$WT" log <target>..HEAD --oneline
   ```
   Record the issues actually *resolved* (judgment — a mention is not a resolution). Commits and
-  merges name them qualified (`feat(FJ-12): …`, `Merge branch 'feature/fj-12-…'`); history from
-  before the repo moved to named trackers names a bare `#12`. Resolve each one:
+  merges name them by display id — qualified while the repo has several trackers
+  (`feat(FJ-12): …`, `Merge branch 'feature/fj-12-…'`), a bare `#12` while it has one (#258) —
+  and history from before the repo moved to named trackers names a bare `#12` too. Resolve each one:
   ```
   ISSUE="$("$ISSUE_IDENTITY" from-history --ref "FJ-12")"      # or --ref "#12"
   ```

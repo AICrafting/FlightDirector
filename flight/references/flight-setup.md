@@ -198,7 +198,7 @@ for you (see **Migration** below) — nobody needs to hand-convert one.
 Per tracker entry:
 
 - **`ref`** (required) — the stable identity used in qualified issue ids (`FJ-12`) and in branch
-  names. A letter followed by letters and digits only — no `-`, `_` or `#`, so `GH1`, `GH-1` and
+  names (once the repo has more than one tracker — see *Issue names with one tracker* below). A letter followed by letters and digits only — no `-`, `_` or `#`, so `GH1`, `GH-1` and
   `GH#1` split without guessing. Unique across every `ref` **and** alias, compared
   case-insensitively; `code` is reserved. Prefer the Jira project key for a Jira tracker,
   otherwise the backend shorthand (`GH`, `FJ`, `GL`). Never rename a ref once branches use it.
@@ -257,6 +257,15 @@ qualified id naming a different tracker is an error. An unknown or near-miss ref
 suggestions and the configured list — flight never guesses a target. See
 [adapter-contract.md](adapter-contract.md) for `issues resolve`, `issues tracker` and
 `issues list --all-trackers`.
+
+**Issue names with one tracker.** While `issueTrackers` holds a single entry that is Jira or the
+code repository's own issue tracker, the prefix says nothing, so flight leaves it out (#258):
+issues are `#12` (`PROJ-7` on Jira) in commits, reports and list rows, and branches are
+`feature/12-<slug>`. The qualified id (`FJ-12`) still works everywhere as input and stays the
+`qualified` field of `issues resolve` and the `--json` output. Adding a second tracker switches
+new work to qualified names; branches started before that keep resolving to their tracker
+through the bindings in `batches/work-items/identities.json`, and an unbound `feature/12-…`
+branch is then asked about rather than guessed.
 
 **Migration.** `flight reconcile` converts a schema-1/2 repo once, file by file:
 

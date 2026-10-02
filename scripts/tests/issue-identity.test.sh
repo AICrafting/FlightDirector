@@ -55,14 +55,14 @@ printf '\033[1m── branches ──\033[0m\n'
 out="$(run from-branch --branch feature/fj-1-first)"; out2="$(run from-branch --branch feature/gh-1-second)"
 check "two issues numbered 1 on different trackers are two identities" \
 	"$([ "$(field qualified "$out")" = FJ-1 ] && [ "$(field qualified "$out2")" = GH-1 ] && echo 1 || echo 0)" "$out / $out2"
-check "the identity is exactly the four resolver keys" \
-	"$(jq -e 'keys == ["branchPrefix","number","qualified","tracker"]' <<<"$out" >/dev/null && echo 1 || echo 0)" "$out"
+check "the identity is exactly the resolver keys" \
+	"$(jq -e 'keys == ["branchPrefix","display","number","qualified","tracker"]' <<<"$out" >/dev/null && echo 1 || echo 0)" "$out"
 out="$(run from-branch --branch feature/jir-7-jira-work)"
 check "a Jira branch keeps the native key and qualifies with the tracker ref" \
-	"$([ "$out" = '{"tracker":"JIR","number":"PROJ-7","qualified":"JIR-7","branchPrefix":"jir-7"}' ] && echo 1 || echo 0)" "$out"
+	"$([ "$out" = '{"tracker":"JIR","number":"PROJ-7","qualified":"JIR-7","display":"JIR-7","branchPrefix":"jir-7"}' ] && echo 1 || echo 0)" "$out"
 out="$(run from-branch --branch feature/12-old-work)"
 check "a reconcile-bound legacy branch returns its binding without the legacy flag" \
-	"$([ "$out" = '{"tracker":"FJ","number":"12","qualified":"FJ-12","branchPrefix":"fj-12"}' ] && echo 1 || echo 0)" "$out"
+	"$([ "$out" = '{"tracker":"FJ","number":"12","qualified":"FJ-12","display":"FJ-12","branchPrefix":"fj-12"}' ] && echo 1 || echo 0)" "$out"
 check "a non-issue branch reports 'no identity' (3)" "$([ "$(status_of from-branch --branch release/0.1.0)" = 3 ] && echo 1 || echo 0)"
 check "a word prefix that is no tracker is not an issue (3)" "$([ "$(status_of from-branch --branch feature/add-2-things)" = 3 ] && echo 1 || echo 0)"
 check "an explicit tracker contradicting a qualified branch fails (1)" "$([ "$(status_of from-branch --branch feature/gh-8-x --tracker FJ)" = 1 ] && echo 1 || echo 0)"
@@ -109,15 +109,15 @@ check "remember keeps the reconcile keys and legacy entries" \
 	"$(jq -e '.legacyDefaultTracker == "FJ" and .branches["feature/12-old-work"].legacy == true and .manifests.run1.tracker == "FJ" and .schemaVersion == 1' "$BIND" >/dev/null && echo 1 || echo 0)"
 check "remember is idempotent" "$(ok run remember --branch feature/gh-1-widget --identity "$ID")"
 check "remember accepts a legacy-bound branch's own identity (legacy flag is metadata)" \
-	"$(ok run remember --branch feature/12-old-work --identity '{"tracker":"FJ","number":"12","qualified":"FJ-12","branchPrefix":"fj-12"}')"
+	"$(ok run remember --branch feature/12-old-work --identity '{"tracker":"FJ","number":"12","qualified":"FJ-12","display":"FJ-12","branchPrefix":"fj-12"}')"
 check "remember never re-points a legacy binding" \
-	"$([ "$(status_of remember --branch feature/12-old-work --identity '{"tracker":"GH","number":"12","qualified":"GH-12","branchPrefix":"gh-12"}')" = 1 ] && echo 1 || echo 0)"
+	"$([ "$(status_of remember --branch feature/12-old-work --identity '{"tracker":"GH","number":"12","qualified":"GH-12","display":"GH-12","branchPrefix":"gh-12"}')" = 1 ] && echo 1 || echo 0)"
 check "remember refuses an identity the branch name contradicts" \
-	"$([ "$(status_of remember --branch feature/gh-4-x --identity '{"tracker":"FJ","number":"4","qualified":"FJ-4","branchPrefix":"fj-4"}')" = 1 ] && echo 1 || echo 0)"
+	"$([ "$(status_of remember --branch feature/gh-4-x --identity '{"tracker":"FJ","number":"4","qualified":"FJ-4","display":"FJ-4","branchPrefix":"fj-4"}')" = 1 ] && echo 1 || echo 0)"
 check "remember refuses a hand-built identity the resolver disagrees with" \
-	"$([ "$(status_of remember --branch feature/gh-4-x --identity '{"tracker":"GH","number":"4","qualified":"GH-99","branchPrefix":"gh-4"}')" = 1 ] && echo 1 || echo 0)"
+	"$([ "$(status_of remember --branch feature/gh-4-x --identity '{"tracker":"GH","number":"4","qualified":"GH-99","display":"GH-99","branchPrefix":"gh-4"}')" = 1 ] && echo 1 || echo 0)"
 check "remember accepts a Jira native id" \
-	"$(ok run remember --branch feature/jir-8-work --identity '{"tracker":"JIR","number":"PROJ-8","qualified":"JIR-8","branchPrefix":"jir-8"}')"
+	"$(ok run remember --branch feature/jir-8-work --identity '{"tracker":"JIR","number":"PROJ-8","qualified":"JIR-8","display":"JIR-8","branchPrefix":"jir-8"}')"
 pids=""
 for n in 21 22 23 24 25; do
 	run remember --branch "feature/gh-$n-concurrent" \
@@ -154,9 +154,9 @@ cp "$SANDBOX/config.good" "$CFG"
 cp "$SANDBOX/bind.good" "$BIND"
 
 printf '\033[1m── code PR issue line ──\033[0m\n'
-fj='{"tracker":"FJ","number":"3","qualified":"FJ-3","branchPrefix":"fj-3"}'
-gh='{"tracker":"GH","number":"3","qualified":"GH-3","branchPrefix":"gh-3"}'
-jir='{"tracker":"JIR","number":"PROJ-3","qualified":"JIR-3","branchPrefix":"jir-3"}'
+fj='{"tracker":"FJ","number":"3","qualified":"FJ-3","display":"FJ-3","branchPrefix":"fj-3"}'
+gh='{"tracker":"GH","number":"3","qualified":"GH-3","display":"GH-3","branchPrefix":"gh-3"}'
+jir='{"tracker":"JIR","number":"PROJ-3","qualified":"JIR-3","display":"JIR-3","branchPrefix":"jir-3"}'
 check "the code repository's own issue gets Closes #N on a closing stage" "$([ "$(run pr-reference --identity "$fj" --closes true)" = 'Closes #3' ] && echo 1 || echo 0)"
 check "…and the non-closing Ready #N otherwise" "$([ "$(run pr-reference --identity "$fj" --closes false)" = 'Ready #3' ] && echo 1 || echo 0)"
 out="$(run pr-reference --identity "$gh" --closes true)"
@@ -189,22 +189,22 @@ check "the emulated jq really emits CR" "$(printf '1\n' | "$CRLF_BIN/jq" . | has
 cp "$SANDBOX/bind.good" "$BIND"
 out="$(msys from-branch --branch feature/gh-1-second 2>&1 || true)"
 check "msys: a qualified branch resolves, CR-free" \
-	"$([ "$out" = '{"tracker":"GH","number":"1","qualified":"GH-1","branchPrefix":"gh-1"}' ] && echo 1 || echo 0)" "$out"
+	"$([ "$out" = '{"tracker":"GH","number":"1","qualified":"GH-1","display":"GH-1","branchPrefix":"gh-1"}' ] && echo 1 || echo 0)" "$out"
 out="$(msys from-branch --branch feature/12-old-work 2>&1 || true)"
 check "msys: a bound legacy branch resolves" \
-	"$([ "$out" = '{"tracker":"FJ","number":"12","qualified":"FJ-12","branchPrefix":"fj-12"}' ] && echo 1 || echo 0)" "$out"
+	"$([ "$out" = '{"tracker":"FJ","number":"12","qualified":"FJ-12","display":"FJ-12","branchPrefix":"fj-12"}' ] && echo 1 || echo 0)" "$out"
 out="$(msys from-branch --branch bugfix/17-unbound 2>&1 || true)"
 check "msys: an unbound legacy branch uses the legacy default" \
-	"$([ "$out" = '{"tracker":"FJ","number":"17","qualified":"FJ-17","branchPrefix":"fj-17"}' ] && echo 1 || echo 0)" "$out"
+	"$([ "$out" = '{"tracker":"FJ","number":"17","qualified":"FJ-17","display":"FJ-17","branchPrefix":"fj-17"}' ] && echo 1 || echo 0)" "$out"
 out="$(msys from-branch --branch feature/12-old-work --tracker fj 2>&1 || true)"
 check "msys: an alias/case lookup compares clean refs" \
-	"$([ "$out" = '{"tracker":"FJ","number":"12","qualified":"FJ-12","branchPrefix":"fj-12"}' ] && echo 1 || echo 0)" "$out"
+	"$([ "$out" = '{"tracker":"FJ","number":"12","qualified":"FJ-12","display":"FJ-12","branchPrefix":"fj-12"}' ] && echo 1 || echo 0)" "$out"
 out="$(msys from-manifest --run-id run1 --entry 5 2>&1 || true)"
-check "msys: a legacy manifest entry resolves" "$([ "$out" = '{"tracker":"FJ","number":"5","qualified":"FJ-5","branchPrefix":"fj-5"}' ] && echo 1 || echo 0)" "$out"
+check "msys: a legacy manifest entry resolves" "$([ "$out" = '{"tracker":"FJ","number":"5","qualified":"FJ-5","display":"FJ-5","branchPrefix":"fj-5"}' ] && echo 1 || echo 0)" "$out"
 out="$(msys from-history --ref '#40' 2>&1 || true)"
-check "msys: a bare history reference resolves" "$([ "$out" = '{"tracker":"FJ","number":"40","qualified":"FJ-40","branchPrefix":"fj-40"}' ] && echo 1 || echo 0)" "$out"
+check "msys: a bare history reference resolves" "$([ "$out" = '{"tracker":"FJ","number":"40","qualified":"FJ-40","display":"FJ-40","branchPrefix":"fj-40"}' ] && echo 1 || echo 0)" "$out"
 check "msys: a non-issue branch is still 'no identity' (3)" "$([ "$(msys_status from-branch --branch release/0.1.0)" = 3 ] && echo 1 || echo 0)"
-check "msys: remember stores a verified identity" "$(ok msys remember --branch feature/gh-2-msys --identity '{"tracker":"GH","number":"2","qualified":"GH-2","branchPrefix":"gh-2"}')"
+check "msys: remember stores a verified identity" "$(ok msys remember --branch feature/gh-2-msys --identity '{"tracker":"GH","number":"2","qualified":"GH-2","display":"GH-2","branchPrefix":"gh-2"}')"
 check "msys: the bindings file stays CR-free" "$(has_cr <"$BIND" && echo 0 || echo 1)"
 out="$(msys pr-reference --identity "$fj" --closes true 2>&1 || true)"
 check "msys: the code repository's own issue still gets Closes #N" "$([ "$out" = 'Closes #3' ] && echo 1 || echo 0)" "$out"

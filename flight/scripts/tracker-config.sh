@@ -4,6 +4,7 @@
 #   tracker-config.sh validate        --config FILE [--tracked FILE]
 #   tracker-config.sh select          --config FILE [--tracker SEL]
 #   tracker-config.sh resolve         --config FILE --number INPUT [--tracker SEL]
+#   tracker-config.sh unprefixed      --config FILE      (true|false: issue names drop the ref, #258)
 #   tracker-config.sh legacy-ref      --config FILE
 #   tracker-config.sh migrate-config  --in FILE --out FILE --ref REF --credential code|own
 #   tracker-config.sh overlay-local   --tracked FILE --local FILE --out FILE --ref REF
@@ -269,9 +270,33 @@ resolve() {
 		fi
 	fi
 
-	local qualified="${selected}-${native##*-}"
-	jq -nc --arg tracker "$selected" --arg number "$native" --arg qualified "$qualified" --arg branchPrefix "$(lower "$qualified")" \
-		'{tracker:$tracker, number:$number, qualified:$qualified, branchPrefix:$branchPrefix}'
+	local qualified="${selected}-${native##*-}" display branch_prefix
+	if [ "$(unprefixed)" = true ]; then
+		# One tracker (#258): the prefix carries no information, so people and the forge
+		# see the issue's own name — #12 (which the forge autolinks), or PROJ-7 on Jira.
+		case "$native" in *[!0-9]*) display="$native" ;; *) display="#$native" ;; esac
+		branch_prefix="$(lower "$native")"
+	else
+		display="$qualified"; branch_prefix="$(lower "$qualified")"
+	fi
+	jq -nc --arg tracker "$selected" --arg number "$native" --arg qualified "$qualified" \
+		--arg display "$display" --arg branchPrefix "$branch_prefix" \
+		'{tracker:$tracker, number:$number, qualified:$qualified, display:$display, branchPrefix:$branchPrefix}'
+}
+
+# unprefixed — "true" when issue names drop the tracker prefix (#258): the repo has
+# exactly one tracker, and that tracker is Jira (its native keys already name the
+# project) or the code repository's own issue tracker (same backend, api, owner and
+# repo), where a bare #12 autolinks to the right issue. A single tracker in some
+# OTHER forge repository keeps its prefix: a bare #12 there would link to the code
+# repository's issue 12 instead.
+unprefixed() {
+	jq -r "$JQ_DEFS"'
+		def norm: (. // "") | tostring | sub("/+$"; "") | lc;
+		def same_repo($c; $t): all("backend", "api", "owner", "repo"; ($c[.] | norm) != "" and ($c[.] | norm) == ($t[.] | norm));
+		(.issueTrackers // []) as $ts
+		| ($ts | length) == 1
+		  and ((($ts[0].backend // "") | tostring | lc) == "jira" or same_repo(.code // {}; $ts[0]))' "$config"
 }
 
 # ── migration ─────────────────────────────────────────────────────────────────
@@ -449,6 +474,7 @@ case "$cmd" in
 	validate)        need_file --config "$config"; [ -z "$tracked" ] || need_file --tracked "$tracked"; validate "$config" ;;
 	select)          need_file --config "$config"; select_json ;;
 	resolve)         need_file --config "$config"; resolve ;;
+	unprefixed)      need_file --config "$config"; unprefixed ;;
 	legacy-ref)      need_file --config "$config"; legacy_ref ;;
 	migrate-config)
 		need_file --in "$in_file"; [ -n "$out_file" ] || die "migrate-config: --out required"
@@ -463,5 +489,5 @@ case "$cmd" in
 		need_file --config "$config"; need_file --secrets "$secrets"; [ -n "$out_file" ] || die "migrate-secrets: --out required"
 		migrate_secrets ;;
 	bind-legacy)     need_file --config "$config"; ref="$selector"; bind_legacy ;;
-	*) die "tracker-config: unknown command '${cmd}' (validate select resolve legacy-ref migrate-config overlay-local migrate-secrets bind-legacy)" ;;
+	*) die "tracker-config: unknown command '${cmd}' (validate select resolve unprefixed legacy-ref migrate-config overlay-local migrate-secrets bind-legacy)" ;;
 esac
