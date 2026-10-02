@@ -63,7 +63,9 @@ case "$method $url" in
 	"POST "*gl.example*/issues/7/notes)
 		body="$(jq -c --argjson d "$data" -n '{id: 70, author: {username: "bot"}, created_at: "2026-10-02T10:00:00Z",
 			updated_at: "2026-10-02T10:00:00Z", body: $d.body}')" ;;
-	"GET "*gl.example*/issues/7) body='{"iid":7,"web_url":"https://gl.example/o/r/-/issues/7"}' ;;
+	"GET "*gl.example*/issues/7)
+		if [ -n "${GL_GET_FAILS:-}" ]; then body='{"message":"boom"}'; code=500
+		else body='{"iid":7,"web_url":"https://gl.example/o/r/-/issues/7"}'; fi ;;
 	"POST "*jira.example*/issue/KAN-9/comment)
 		body='{"id":"900","author":{"displayName":"Bot"},"created":"2026-10-02T10:00:00.000+0000","updated":"2026-10-02T10:00:00.000+0000",
 			"body":{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"from jira"}]}]}}' ;;
@@ -93,6 +95,7 @@ check "the read-back's signature is split as usual" "$(yes jq -e '.body == "Body
 out="$(cd "$R" && GET_FAILS=1 "$DISP" issues create --title "Filed from a panel" --body "Body." --json 2>"$SANDBOX/err")"; rc=$?
 check "a failed read-back still reports the created issue, exit 0 (no duplicate re-file)" \
 	"$([ "$rc" = 0 ] && jq -e --argjson k "$ISSUE_KEYS" 'keys == $k and .number == "12" and .title == "Filed from a panel" and .qualified == "FJ-12"' <<<"$out" >/dev/null && echo 1 || echo 0)" "$out"
+check "…unknown fields null, labels still an array" "$(yes jq -e '.comments == null and .url == null and .labels == []' <<<"$out")" "$out"
 check "…and says so on stderr" "$(grep -q 'created #12 but could not read it back' "$SANDBOX/err" && echo 1 || echo 0)" "$(cat "$SANDBOX/err")"
 check "without --json, create still prints just the number" "$([ "$(fl issues create --title t --body b)" = 12 ] && echo 1 || echo 0)"
 
@@ -110,6 +113,10 @@ check "gitlab: same shape, url built from the issue" \
 out="$(fl issues comment --number KAN-9 --body "hi" --no-signature --json)"
 check "jira: same shape, focused comment url" \
 	"$(yes jq -e --argjson k "$COMMENT_KEYS" 'keys == $k and .id == "900" and .url == "https://jira.example/browse/KAN-9?focusedCommentId=900" and .body == "from jira"' <<<"$out")" "$out"
+: >"$CURL_LOG"
+out="$(cd "$R" && GL_GET_FAILS=1 "$DISP" issues comment --number GL-7 --body "hi" --no-signature --json 2>/dev/null || true)"
+check "gitlab: a failing issue read stops the comment BEFORE it is posted (no double post on retry)" \
+	"$([ "$(jq -r '.error.code' <<<"$out")" = backend ] && ! grep -q 'POST .*gl.example.*/notes' "$CURL_LOG" && echo 1 || echo 0)" "$out $(cat "$CURL_LOG")"
 check "without --json, comment prints nothing" "$([ -z "$(fl issues comment --number 12 --body x)" ] && echo 1 || echo 0)"
 
 section "issues set-status --json"

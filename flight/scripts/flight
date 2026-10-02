@@ -314,7 +314,7 @@ handoff() {
           echo "flight: warning — created #$js_number but could not read it back; returning the known fields only" >&2
           jq -cn --arg n "$js_number" --arg t "$js_title" \
             '{number: $n, title: $t, state: "open", labels: [], author: null, created: null,
-              updated: null, comments: 0, url: null, body: null}' \
+              updated: null, comments: null, url: null, body: null}' \
             | jq -c -f "$SELF_DIR/issue-json.jq" --arg mode get --arg tracker "$json_tracker" \
                 --argjson labels "$LS_LABELS_JSON" >"$json_out.done"
         fi

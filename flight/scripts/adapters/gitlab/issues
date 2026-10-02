@@ -207,8 +207,10 @@ case "$verb" in
       payload="$(jq -n --arg b "$body" '{body:$b}')"
     fi
     if json_mode; then
-      note="$(_api POST "/issues/${number}/notes" "$payload")"
+      # The issue's URL first: once the note is posted, a failed read must not turn
+      # into an error (a caller would post the comment again).
       web="$(_api GET "/issues/${number}" | jq -r '.web_url // ""')"
+      note="$(_api POST "/issues/${number}/notes" "$payload")"
       jq -c --arg web "$web" "$ISSUE_JQ"'base_comment($web)' <<<"$note"
     else
       _api POST "/issues/${number}/notes" "$payload" >/dev/null

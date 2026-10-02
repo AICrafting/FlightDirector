@@ -169,7 +169,8 @@ writes the envelope to the `FLIGHT_ERROR_FILE` the dispatcher exports for a `--j
 - **`issues create --json`** returns the new issue in the `issues get --json` shape, read back
   through that verb. The issue already exists by then, so if the read-back fails the call
   **still succeeds**. It answers with the fields it knows (`number`, `tracker`, `qualified`,
-  `title`, `state: "open"`, the rest null) and warns on stderr. That way a caller never files it
+  `title`, `state: "open"`), `labels: []` so the type never changes, and null for the rest. It
+  also warns on stderr. That way a caller never files it
   twice.
 - **`issues comment --json`** returns the new comment in the `comments --json` entry shape. The
   signature flight appended comes back split into `signature`.
