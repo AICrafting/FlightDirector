@@ -38,6 +38,7 @@ $ flight capabilities --json
 | `labels-json` | `labels list --json` and `labels statuses [--json]` |
 | `write-json` | `issues create`, `issues comment` and `issues set-status` take `--json` |
 | `issues-json` | `issues list`, `issues get` and `issues comments` take `--json`, and `issues list` takes `--status ROLE` |
+| `issues-paging` | `issues list --json` pages with `--per-page M [--cursor C]` (below) |
 
 ## Which verbs take `--json`
 
@@ -125,6 +126,33 @@ Every key is present on every backend. Notes:
   fails is the result the error envelope of the first failure.
 - `--status ROLE` is mapped per tracker. A tracker without that role reports a `usage` error
   entry.
+
+### Paging: `issues list --json --per-page M [--cursor C]`
+
+For a "Load more" button: fetch one page at a time instead of re-running with a growing
+`--limit`.
+
+```json
+{"issues": [ …M issue objects… ], "truncated": true, "total": 38, "errors": [], "next": "eyJ2Ijox…"}
+```
+
+- **First page:** `--per-page M` (1–100) and no `--cursor`. **Next page:** the same command with
+  `--cursor` set to the previous page's `next`. Keep `--state`, `--label`, `--status` and
+  `--tracker` the same; a cursor used with different filters or another tracker is a `usage`
+  error.
+- **`next`** is the cursor for the following page, or null on the last page. It is opaque. Don't
+  parse or build one, and don't keep it across flight upgrades (an outdated cursor is a `usage`
+  error: start again without one). `truncated` is true exactly when `next` is non-null. `total`
+  is the whole list's size where the backend reports one (Forgejo, GitLab), otherwise null.
+- **Order:** newest created first, ties by number descending, the same as without paging. Pages
+  never overlap. An issue filed between two loads doesn't repeat a row on the next page: it
+  appears when the list is loaded from the start. On Forgejo, GitHub and GitLab an issue that
+  leaves the list between loads (closed, relabelled) doesn't make the next page skip one either.
+  Jira's pages only move forward, so there a row can be missed when issues leave the list
+  between loads. Reloading from the start resyncs.
+- **Not combinable** with `--limit` (a page has its own size) or `--all-trackers` (a cursor is one
+  tracker's position): both are `usage` errors. Page each tracker with `--tracker REF` instead.
+  The paging flags need `--json`.
 
 ### `issues comments --json`
 

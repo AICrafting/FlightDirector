@@ -47,11 +47,13 @@ jql_quote() { printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\
 
 case "$verb" in
   list)
-    state="open"; limit="50"; labels=()
+    state="open"; limit="50"; labels=(); per_page=""; cursor=""
     while [ $# -gt 0 ]; do case "$1" in
       --state) state="$2"; shift 2 ;;
       --limit) limit="$2"; shift 2 ;;
       --label) labels+=("$2"); shift 2 ;;
+      --per-page) per_page="$2"; shift 2 ;;
+      --cursor) cursor="$2"; shift 2 ;;
       *) die "issues list: unknown arg '$1'" ;;
     esac; done
     jql="project = $(jql_quote "$LS_PROJECT")"
@@ -70,6 +72,21 @@ case "$verb" in
     # Enhanced-JQL search endpoint. (The legacy POST /rest/api/3/search was
     # decommissioned by Atlassian; /search/jql is its replacement.) It pages with
     # an opaque nextPageToken, which _jql_search follows up to --limit.
+    # Cursor paging (#262): Jira pages forward by token only; see cursor_page_token.
+    if [ -n "$per_page$cursor" ]; then
+      json_mode || die "issues list: --per-page and --cursor need --json"
+      per_page="$(per_page_arg "${per_page:-50}")" || exit 1
+      _cursor_fetch() {
+        _api POST "/rest/api/3/search/jql" "$(jq -n --arg j "$jql" --argjson m "$2" --arg t "$1" \
+          --argjson f '["summary","labels","status","created","updated","reporter","creator"]' \
+          '{jql:$j, maxResults:$m, fields:$f} + (if $t == "" then {} else {nextPageToken:$t} end)')"
+      }
+      meta="$(page_meta_init)"
+      FLIGHT_PAGE_META="$meta" cursor_page_token _cursor_fetch '.issues[]?' '[(.fields.created | utc), (.key | split("-") | last | tonumber)]' \
+          "$per_page" "$cursor" "jira $LS_API $jql" \
+        | jq -c --arg site "$SITE" "$ISSUE_JQ"'base_issue($site) | .body = null' | emit_list "$meta"
+      exit 0
+    fi
     if json_mode; then
       meta="$(page_meta_init)"
       FLIGHT_PAGE_META="$meta" _jql_search "$jql" '["summary","labels","status","created","updated","reporter","creator"]' "$limit" \
