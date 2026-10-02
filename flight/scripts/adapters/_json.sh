@@ -30,6 +30,16 @@ def utc:
     | ($t - $off) | todate
     end
   end;
+#   base_label: a label object (name, color, description) → the shared shape; the
+#        colour as "#rrggbb" lowercase whether the backend sends "#" or not, an
+#        empty description as null. Jira labels are bare strings with neither.
+def base_label:
+  if type == "string" then {name: ., color: null, description: null}
+  else {
+    name: .name,
+    color: (.color | if type == "string" and length > 0 then "#" + (ltrimstr("#") | ascii_downcase) else null end),
+    description: (.description | if type == "string" and length > 0 then . else null end)
+  } end;
 '
 
 # page_meta TRUNCATED TOTAL — record what a pager knows about the rows it held back,

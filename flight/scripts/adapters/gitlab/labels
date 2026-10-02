@@ -13,7 +13,11 @@ case "$verb" in
   list)
     # Through the same paged cache label_id uses, so listing and resolution can
     # never disagree about which labels exist.
-    _all_labels | jq -r '.[] | [.name, .color, (.description // "")] | @tsv'
+    if json_mode; then
+      _all_labels | jq -c "$JSON_JQ"'map(base_label)'
+    else
+      _all_labels | jq -r '.[] | [.name, .color, (.description // "")] | @tsv'
+    fi
     ;;
 
   resolve)

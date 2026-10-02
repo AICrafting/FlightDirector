@@ -35,6 +35,7 @@ $ flight capabilities --json
 | `version` | `flight --version [--json]` prints the plugin version |
 | `capabilities` | this probe |
 | `json-errors` | a failing `--json` call reports a coded error envelope (below) |
+| `labels-json` | `labels list --json` and `labels statuses [--json]` |
 | `issues-json` | `issues list`, `issues get` and `issues comments` take `--json`, and `issues list` takes `--status ROLE` |
 
 ## Which verbs take `--json`
@@ -52,6 +53,8 @@ their own meaning: `prompt-log summary --json` predates this and is unchanged.
 | `issues get` | one issue object |
 | `issues comments` | an array of comment objects, oldest first |
 | `issues resolve`, `issues tracker` | already JSON; `--json` adds the error envelope |
+| `labels list` | an array of label objects |
+| `labels statuses` | an array of status roles |
 
 ## Issues
 
@@ -156,3 +159,36 @@ The code is decided where the cause is known, and never by matching message text
 classifies config, usage and ref resolution. Each adapter's `_api` maps HTTP status and curl
 failure through the shared `adapters/_errors.sh` (`fail`, `http_fail`, `require_env`), which
 writes the envelope to the `FLIGHT_ERROR_FILE` the dispatcher exports for a `--json` call.
+
+## Labels
+
+Both verbs honour `--tracker REF`. Without it they act on the default tracker.
+
+### `labels list --json`
+
+The tracker's labels, in the backend's order, for filter chips:
+
+```json
+[{"name": "bug", "color": "#e11d21", "description": "Something is broken"}]
+```
+
+`color` is `#rrggbb` lowercase whether or not the backend sends the `#`. An empty description is
+`null`. Jira labels have neither, so both are `null`.
+
+### `labels statuses [--json]`
+
+The tracker's status roles, so a UI never assumes a repo's label names:
+
+```json
+[{"role": "in-progress", "label": "status/in progress", "color": "#1f9d55"},
+ {"role": "to-test",     "label": "status/to test",     "color": "#e3a008"}]
+```
+
+- Roles come in the order the tracker's `labels.status` map lists them.
+- A role recorded as declined (`false`) is left out.
+- `color` is that label's colour on the tracker, or `null` when the label is missing there or has
+  no colour.
+- Without `--json` the output is `role⇥label⇥color` rows, with the colour column empty when
+  unknown.
+- Pass a role to `issues list --status ROLE` to filter by it.
+

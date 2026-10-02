@@ -21,6 +21,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   program driving the dispatcher can check for a feature instead of comparing versions.
   Neither needs a repo, config, token or network. Contract:
   `flight/references/json-output.md`.
+- **`labels list --json` and `labels statuses`** (#250).
+  - `labels list --json` returns `[{name, color, description}]` on every backend, with colours as
+    `#rrggbb`.
+  - The new `labels statuses` lists the tracker's status roles in config order, each with its
+    label name and colour (`role⇥label⇥color`, or `--json`), so a UI can build its status filter
+    without assuming a repo's label names.
 - **`issues list`, `get` and `comments` take `--json`** (#253). They return one object shape on
   Forgejo, GitHub, GitLab and Jira, for programs that drive the dispatcher instead of calling a
   forge. The fields are `number` (always a string), `tracker`, `qualified`, `title`, `state`,
@@ -167,6 +173,14 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - **Docs: why GitHub uses a repo-scoped token, not your `gh` login** (#243). `backends.md` now
   explains that `gh` picks credentials per host rather than per repo, that its login token is
   user-wide, and why that matters when an agent reading untrusted issue text holds it.
+
+### Fixed
+
+- **A failed label or list fetch no longer reads as an empty result** (#250). `labels list`
+  (and every lookup of a label by name) loaded the label cache in a way that turned off `set -e`.
+  The pagers' page requests also ran inside command substitutions, which don't inherit it. A
+  network error or a 401 therefore came back as "no labels", exit 0, or as a misleading "label not
+  found". Both now fail with the real reason.
 
 ## [0.16.0] - 2026-09-21
 

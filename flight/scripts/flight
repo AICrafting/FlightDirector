@@ -44,7 +44,7 @@ plugin_manifest() {
 # Feature tokens a consumer can detect with `flight capabilities --json` (#254)
 # instead of comparing versions. A token is added here in the same change that
 # ships the feature, and never renamed or removed once released.
-CAPABILITIES=(version capabilities json-errors issues-json)
+CAPABILITIES=(version capabilities json-errors issues-json labels-json)
 
 # `flight --version [--json]` and `flight capabilities [--json]` (#254) — answered
 # before anything else: no repo, config, token or network needed, so a consumer
@@ -102,7 +102,7 @@ trap cleanup EXIT
 # it, and handed on as LS_JSON=1. Only the verbs in JSON_VERBS accept it; on any
 # other issues/labels verb it is a usage error. Other groups keep their own
 # meaning of the flag (`prompt-log summary --json` predates this).
-JSON_VERBS=(issues/resolve issues/tracker issues/list issues/get issues/comments)
+JSON_VERBS=(issues/resolve issues/tracker issues/list issues/get issues/comments labels/list labels/statuses)
 json_mode=0
 case "${1:-}" in
 	issues|labels)
@@ -948,6 +948,33 @@ if [ "$json_mode" = 1 ]; then
 		issues/list|issues/get|issues/comments) json_finish="$verb" ;;
 	esac
 	[ -z "$tracker_json" ] || json_tracker="$(jq -r '.ref' <<<"$tracker_json")"
+fi
+
+# `labels statuses [--tracker REF] [--json]` (#250) — the selected tracker's status
+# roles in its config order, each with the label name it maps to and that label's
+# colour on the tracker (null when the label is missing there or has no colour).
+# A role recorded as declined (`false`) is not a status, so it is left out. Text form:
+# `role⇥label⇥color` rows. Dispatcher-owned: the roles live in config, and the
+# colours come from this same dispatcher's `labels list --json` for the tracker.
+if [ "$group/$verb" = labels/statuses ]; then
+	[ $# -eq 0 ] || die "usage: flight labels statuses [--tracker REF] [--json]"
+	st_tracker=""; [ -z "$tracker_json" ] || st_tracker="$(jq -r '.ref' <<<"$tracker_json")"
+	if ! st_labels="$(env -u FLIGHT_ERROR_FILE -u LS_JSON "$SELF_DIR/flight" labels list --json ${st_tracker:+--tracker "$st_tracker"})"; then
+		# The nested call already explained itself on stderr; its stdout is its envelope.
+		[ -z "$err_file" ] || printf '%s\n' "$st_labels" >"$err_file"
+		exit 1
+	fi
+	st_rows="$(jq -c --argjson labels "$st_labels" '
+		[(.status // {}) | to_entries[] | select(.value | type == "string")
+		 | .value as $l
+		 | {role: .key, label: $l, color: ([$labels[] | select(.name == $l) | .color] | first // null)}]
+		' <<<"$LS_LABELS_JSON")"
+	if [ "$json_mode" = 1 ]; then
+		printf '%s\n' "$st_rows"
+	else
+		jq -r '.[] | [.role, .label, (.color // "")] | @tsv' <<<"$st_rows"
+	fi
+	exit 0
 fi
 # CI-watch hang-guard timeout (seconds). Precedence: env override → config
 # code.ciWatchTimeout → adapter default (900). Empty stays empty so the adapter
