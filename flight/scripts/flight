@@ -106,9 +106,22 @@ JSON_VERBS=(issues/resolve issues/tracker)
 json_mode=0
 case "${1:-}" in
 	issues|labels)
-		json_args=()
+		# Only a `--json` where a flag can stand counts: the VALUE of an option (a
+		# `--body --json`, a title that is literally "--json") is kept as given. Every
+		# issues/labels option takes a value except these switches.
+		json_args=(); json_value_next=0
 		for json_arg in "$@"; do
-			if [ "$json_arg" = --json ]; then json_mode=1; else json_args+=("$json_arg"); fi
+			if [ "$json_value_next" = 1 ]; then
+				json_args+=("$json_arg"); json_value_next=0
+			elif [ "$json_arg" = --json ]; then
+				json_mode=1
+			else
+				json_args+=("$json_arg")
+				case "$json_arg" in
+					--no-status|--no-signature|--all-trackers) ;;
+					--*) json_value_next=1 ;;
+				esac
+			fi
 		done
 		set -- ${json_args[@]+"${json_args[@]}"}
 		;;
@@ -260,7 +273,7 @@ cfg_local="$cfg_dir/config.local.json"
 # One EXIT trap owns every dispatcher temp file (merged config, signed body).
 if [ -f "$cfg" ] && [ -f "$cfg_local" ]; then
   cfg_local_rel="${cfg_local#"$repo_root"/}"
-  jq -e . "$cfg_local" >/dev/null 2>&1 || die "$cfg_local_rel is not valid JSON"
+  jq -e . "$cfg_local" >/dev/null 2>&1 || die_code not-configured "$cfg_local_rel is not valid JSON"
   if git -C "$repo_root" ls-files --error-unmatch "$cfg_local_rel" >/dev/null 2>&1; then
     echo "flight: WARNING — $cfg_local_rel is tracked by git; it is meant to be a per-machine override — add it to .gitignore." >&2
   fi
@@ -310,7 +323,7 @@ model_display() {
 TRACKER_SCHEMA=3
 TRACKER_TOOL="$SELF_DIR/tracker-config.sh"
 tracker_tool() {
-	[ -x "$TRACKER_TOOL" ] || die "named tracker helper is not installed ($TRACKER_TOOL)"
+	[ -x "$TRACKER_TOOL" ] || die_code not-configured "named tracker helper is not installed ($TRACKER_TOOL)"
 	"$TRACKER_TOOL" "$@"
 }
 # tracker_coded CODE ARGS… — tracker_tool whose failure is recorded under CODE with
@@ -319,6 +332,7 @@ tracker_tool() {
 # `not-found`).
 tracker_coded() {
 	local code="$1" tc_out tc_err; shift
+	[ -x "$TRACKER_TOOL" ] || die_code not-configured "named tracker helper is not installed ($TRACKER_TOOL)"
 	tc_err="$(mktemp "${TMPDIR:-/tmp}/flight-tracker.XXXXXX")"
 	if tc_out="$(tracker_tool "$@" 2>"$tc_err")"; then
 		cat "$tc_err" >&2; rm -f "$tc_err"
@@ -336,15 +350,15 @@ tracker_coded() {
 # and must stay silent, so they are the one exemption.
 runtime_schema=0
 if [ -f "$cfg" ] && [ "$group" != "prompt-log" ]; then
-	jq -e . "$cfg" >/dev/null 2>&1 || die "$cfg_rel is not valid JSON"
+	jq -e . "$cfg" >/dev/null 2>&1 || die_code not-configured "$cfg_rel is not valid JSON"
 	runtime_schema="$(jq -r '.schemaVersion // 0' "$cfg")"
 	case "$runtime_schema" in ''|*[!0-9]*) die "config schemaVersion must be a non-negative integer" ;; esac
-	[ "$runtime_schema" -le "$TRACKER_SCHEMA" ] || die "config uses schema $runtime_schema, newer than this Flight understands (schema $TRACKER_SCHEMA); update the Flight plugin"
+	[ "$runtime_schema" -le "$TRACKER_SCHEMA" ] || die_code not-configured "config uses schema $runtime_schema, newer than this Flight understands (schema $TRACKER_SCHEMA); update the Flight plugin"
 	if [ "$runtime_schema" -lt "$TRACKER_SCHEMA" ] && {
 		[ -n "$tracker_selector" ] || [ "$all_trackers" = 1 ] \
 			|| { [ "$group" = issues ] && { [ "$verb" = resolve ] || [ "$verb" = tracker ]; }; }
 	}; then
-		die "named tracker routing needs config schema $TRACKER_SCHEMA; run flight reconcile --harness claude|codex first"
+		die_code not-configured "named tracker routing needs config schema $TRACKER_SCHEMA; run flight reconcile --harness claude|codex first"
 	fi
 fi
 

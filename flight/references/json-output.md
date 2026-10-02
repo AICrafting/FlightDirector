@@ -39,7 +39,9 @@ $ flight capabilities --json
 ## Which verbs take `--json`
 
 `--json` belongs to the dispatcher for the `issues` and `labels` groups. It is removed from the
-arguments before an adapter sees them, and passed on as `LS_JSON=1`. On a verb of those groups
+arguments before an adapter sees them, and passed on as `LS_JSON=1`. Only a `--json` where a flag
+can stand counts: the value of another option (a body or title that is literally `--json`) is
+kept as given. On a verb of those groups
 that has no JSON form, it is a `usage` error rather than being silently ignored. Other groups keep
 their own meaning: `prompt-log summary --json` predates this and is unchanged.
 
@@ -61,7 +63,7 @@ stderr still carries the human sentence, as without `--json`. `message` is for d
 
 | `code` | When |
 |---|---|
-| `not-configured` | no `.flightdirector/config.json`, an invalid tracker config, no backend or adapter for it, or a coordinate the config should supply. Offer the setting-up-a-repo flow. |
+| `not-configured` | no `.flightdirector/config.json`, one that is not valid JSON or uses a schema this Flight can't use (too new, or not yet migrated where named trackers are needed), an invalid tracker config, no backend or adapter for it, or a coordinate the config should supply. Offer the setting-up-a-repo flow. |
 | `auth` | no token resolved, or the backend answered 401/403 |
 | `not-found` | the backend answered 404/410, or an issue id or tracker ref names nothing configured |
 | `network` | the server couldn't be reached (curl itself failed) |

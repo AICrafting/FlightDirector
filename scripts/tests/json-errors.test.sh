@@ -58,6 +58,27 @@ check "bad arguments → usage" "$(envelope usage)" "$(cat "$OUT" "$ERR")"
 run "$R" "$DISP" issues close --number 1 --json
 check "--json on a verb without JSON output → usage" "$(envelope usage)" "$(cat "$OUT" "$ERR")"
 
+BADJSON="$SANDBOX/badjson"; mkdir -p "$BADJSON/.flightdirector"; git -C "$BADJSON" init -q
+echo '{ not json' >"$BADJSON/.flightdirector/config.json"
+run "$BADJSON" "$DISP" issues resolve --number 1 --json
+check "a config that is not valid JSON → not-configured" "$(envelope not-configured)" "$(cat "$OUT" "$ERR")"
+OLD="$SANDBOX/schema2"; mkdir -p "$OLD/.flightdirector"; git -C "$OLD" init -q
+echo '{"schemaVersion":2,"code":{"backend":"forgejo","api":"https://x/api/v1","owner":"o","repo":"r"}}' >"$OLD/.flightdirector/config.json"
+run "$OLD" "$DISP" issues resolve --number 1 --json
+check "a pre-schema-3 config where trackers are needed → not-configured" "$(envelope not-configured)" "$(cat "$OUT" "$ERR")"
+echo '{"schemaVersion":99}' >"$OLD/.flightdirector/config.json"
+run "$OLD" "$DISP" issues resolve --number 1 --json
+check "a config newer than this Flight → not-configured" "$(envelope not-configured)" "$(cat "$OUT" "$ERR")"
+
+section "--json is a flag only where a flag can stand"
+# A value that is literally --json stays a value: here it is the --number value, which
+# resolves to nothing, so the failure must be the resolver's (stderr) — not JSON mode.
+run "$R" "$DISP" issues resolve --number --json
+check "an option's value '--json' is not taken as the flag" \
+	"$([ "$RC" -ne 0 ] && [ ! -s "$OUT" ] && ! grep -q 'needs a value\|usage: flight issues resolve' "$ERR" && echo 1 || echo 0)" "$(cat "$OUT" "$ERR")"
+run "$R" "$DISP" issues resolve --json --number 3
+check "--json before the other flags still counts" "$([ "$RC" = 0 ] && jq -e '.qualified == "FJ-3"' "$OUT" >/dev/null && echo 1 || echo 0)" "$(cat "$OUT" "$ERR")"
+
 section "success is unchanged"
 run "$R" "$DISP" issues resolve --number 7 --json
 check "a JSON-native verb answers as before under --json" \
