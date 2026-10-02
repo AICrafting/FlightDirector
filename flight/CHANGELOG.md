@@ -21,6 +21,18 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   program driving the dispatcher can check for a feature instead of comparing versions.
   Neither needs a repo, config, token or network. Contract:
   `flight/references/json-output.md`.
+- **`issues list`, `get` and `comments` take `--json`** (#253). They return one object shape on
+  Forgejo, GitHub, GitLab and Jira, for programs that drive the dispatcher instead of calling a
+  forge. The fields are `number` (always a string), `tracker`, `qualified`, `title`, `state`,
+  `status`, `labels`, `author`, `created`, `updated` (UTC), `comments`, `url`, `body` and
+  `signature`.
+  - `status` is the issue's status *role* through the tracker's label map.
+  - The flight signature footer is split out of `body` into `signature`.
+  - `list` adds `truncated`/`total` and is ordered newest created first.
+  - `--all-trackers --json` reports each failing tracker in `errors` instead of failing the
+    whole listing.
+  - New dispatcher filter: `issues list --status ROLE`, mapped per tracker.
+  - The text output is unchanged.
 - **Structured errors under `--json`** (#251). A failing `--json` call exits non-zero and
   prints one `{"error":{"code","message"}}` object on stdout, and nothing else. The codes are
   `not-configured`, `auth`, `not-found`, `network`, `backend` and `usage`. Each code is decided

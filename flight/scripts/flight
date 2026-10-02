@@ -44,7 +44,7 @@ plugin_manifest() {
 # Feature tokens a consumer can detect with `flight capabilities --json` (#254)
 # instead of comparing versions. A token is added here in the same change that
 # ships the feature, and never renamed or removed once released.
-CAPABILITIES=(version capabilities json-errors)
+CAPABILITIES=(version capabilities json-errors issues-json)
 
 # `flight --version [--json]` and `flight capabilities [--json]` (#254) — answered
 # before anything else: no repo, config, token or network needed, so a consumer
@@ -102,7 +102,7 @@ trap cleanup EXIT
 # it, and handed on as LS_JSON=1. Only the verbs in JSON_VERBS accept it; on any
 # other issues/labels verb it is a usage error. Other groups keep their own
 # meaning of the flag (`prompt-log summary --json` predates this).
-JSON_VERBS=(issues/resolve issues/tracker)
+JSON_VERBS=(issues/resolve issues/tracker issues/list issues/get issues/comments)
 json_mode=0
 case "${1:-}" in
 	issues|labels)
@@ -292,7 +292,16 @@ fi
 handoff() {
   if [ "$json_mode" = 1 ]; then
     json_out="$(mktemp "${TMPDIR:-/tmp}/flight-out.XXXXXX")"
-    if "$@" >"$json_out"; then cat "$json_out"; exit 0; else exit $?; fi
+    if "$@" >"$json_out"; then :; else exit $?; fi
+    if [ -n "$json_finish" ]; then
+      # issues list|get|comments: the adapter's base objects, finished with what only
+      # the dispatcher knows (issue-json.jq). A failure here is still one envelope.
+      jq -c -f "$SELF_DIR/issue-json.jq" --arg mode "$json_finish" --arg tracker "$json_tracker" \
+        --argjson labels "$LS_LABELS_JSON" "$json_out" >"$json_out.done" \
+        || { rm -f "$json_out.done"; die_code backend "could not assemble the --json output"; }
+      mv "$json_out.done" "$json_out"
+    fi
+    cat "$json_out"; exit 0
   fi
   if [ -n "$cfg_tmp$sig_tmp" ]; then "$@"; exit $?; fi
   exec "$@"
@@ -790,6 +799,37 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 	# tracker's ordinary list row with its qualified identity (REF-N) prepended. A
 	# tracker that fails is named on stderr and turns the exit status non-zero — it
 	# is never presented as an empty backlog.
+	if [ "$all_trackers" = 1 ] && [ "$json_mode" = 1 ]; then
+		# --json: one object for every tracker (#253). Each tracker is its own --json
+		# dispatch; a tracker that fails lands in `errors` (and on stderr) instead of
+		# looking like an empty backlog. Exit 0 while any tracker answered; when none
+		# did, the first tracker's error is the envelope.
+		agg_dir="$(mktemp -d "${TMPDIR:-/tmp}/flight-all.XXXXXX")"
+		: >"$agg_dir/ok"; : >"$agg_dir/failed"
+		while IFS= read -r list_ref; do
+			[ -n "$list_ref" ] || continue
+			if "$SELF_DIR/flight" issues list --tracker "$list_ref" --json "$@" >"$agg_dir/out" 2>"$agg_dir/err"; then
+				cat "$agg_dir/out" >>"$agg_dir/ok"; printf '\n' >>"$agg_dir/ok"
+				sed -e 's/^flight: //' -e "s/^/flight: tracker $list_ref: /" "$agg_dir/err" >&2
+			else
+				printf 'flight: tracker %s unavailable: %s\n' "$list_ref" "$(tr '\n' ' ' <"$agg_dir/err" | sed -e 's/^flight: //' -e 's/[[:space:]]*$//')" >&2
+				jq -c --arg r "$list_ref" '{tracker: $r, code: (.error.code // "backend"), reason: (.error.message // "failed")}' "$agg_dir/out" 2>/dev/null >>"$agg_dir/failed" \
+					|| jq -cn --arg r "$list_ref" '{tracker: $r, code: "backend", reason: "failed"}' >>"$agg_dir/failed"
+			fi
+		done < <(jq -r '.issueTrackers[].ref' "$cfg")
+		if [ ! -s "$agg_dir/ok" ] && [ -s "$agg_dir/failed" ]; then
+			first_failure="$(head -n1 "$agg_dir/failed")"
+			rm -rf "$agg_dir"
+			die_code "$(jq -r '.code' <<<"$first_failure")" "$(jq -r '"tracker \(.tracker): \(.reason)"' <<<"$first_failure")"
+		fi
+		jq -cn --slurpfile ok "$agg_dir/ok" --slurpfile failed "$agg_dir/failed" '
+			{issues: ([$ok[].issues[]] | sort_by([(.created // ""), (.number | tonumber? // 0)]) | reverse),
+			 truncated: any($ok[]; .truncated),
+			 total: (if ($failed | length) == 0 and all($ok[]; .total != null) then ([$ok[].total] | add) else null end),
+			 errors: $failed}'
+		rm -rf "$agg_dir"
+		exit 0
+	fi
 	if [ "$all_trackers" = 1 ]; then
 		list_failed=0
 		list_out="$(mktemp "${TMPDIR:-/tmp}/flight-list.XXXXXX")"
@@ -883,6 +923,31 @@ if [ -n "$tracker_json" ]; then
 	LS_LABELS_JSON="$(printf '%s' "$tracker_json" | jq -c '.labels // {}')"
 else
 	LS_LABELS_JSON="$(jq -c '.labels // {}' "$cfg")"
+fi
+
+# `issues list --status ROLE` (#253) — a status ROLE filter, mapped through the
+# selected tracker's label map to its label name. Dispatcher-owned, so one call can
+# ask every tracker for "to-test" however each one spells it.
+if [ "$group/$verb" = issues/list ]; then
+	st_args=()
+	while [ $# -gt 0 ]; do case "$1" in
+		--status)
+			[ $# -ge 2 ] || die "issues list: --status needs a role"
+			st_label="$(jq -r --arg r "$2" '.status[$r] // empty | strings' <<<"$LS_LABELS_JSON")"
+			[ -n "$st_label" ] || die "issues list: status role '$2' is not configured for this tracker (see flight labels statuses)"
+			st_args+=(--label "$st_label"); shift 2 ;;
+		*) st_args+=("$1"); shift ;;
+	esac; done
+	set -- ${st_args[@]+"${st_args[@]}"}
+fi
+
+# What issue-json.jq needs to finish an adapter's --json output (see handoff).
+json_finish=""; json_tracker=""
+if [ "$json_mode" = 1 ]; then
+	case "$group/$verb" in
+		issues/list|issues/get|issues/comments) json_finish="$verb" ;;
+	esac
+	[ -z "$tracker_json" ] || json_tracker="$(jq -r '.ref' <<<"$tracker_json")"
 fi
 # CI-watch hang-guard timeout (seconds). Precedence: env override → config
 # code.ciWatchTimeout → adapter default (900). Empty stays empty so the adapter

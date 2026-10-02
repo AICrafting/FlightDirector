@@ -9,6 +9,8 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../_portable.sh"
 # shellcheck source-path=SCRIPTDIR source=../_errors.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_errors.sh"
+# shellcheck source-path=SCRIPTDIR source=../_json.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_json.sh"
 
 command -v curl >/dev/null 2>&1 || { echo "github adapter: curl is required" >&2; exit 1; }
 command -v jq   >/dev/null 2>&1 || { echo "github adapter: jq is required" >&2; exit 1; }
@@ -131,9 +133,12 @@ _paged_get() {
 
   # GitHub sends no row total on list endpoints, so the Link header is the only
   # signal that the ceiling hid something.
+  local truncated=false
   if [ -n "$limit" ] && [ "$rows" -ge "$limit" ] && _hdr_has_next "$hdr"; then
+    truncated=true
     warn "showing $limit rows for $path and more are available; raise --limit to see the rest"
   fi
+  page_meta "$truncated" ""
 
   if [ -n "$limit" ]; then head -n "$limit" "$out"; else cat "$out"; fi
   rm -f "$out"

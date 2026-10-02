@@ -108,6 +108,11 @@ Dispatcher-owned verbs:
 - **Exit code**: `0` success; non-zero on any failure (network, HTTP ≥ 400, bad args), with a
   one-line reason on stderr. Skills must check it — a non-zero exit is a hard stop, never a
   silent no-op.
+- **`LS_JSON=1`** (set by the dispatcher for a `--json` call) asks an adapter's `issues list`,
+  `get` and `comments` for *base objects* instead of TSV: the backend's fields mapped onto the
+  shared shape (`adapters/_json.sh`; list rows plus pager `truncated`/`total`). The dispatcher
+  finishes them (`scripts/issue-json.jq`). Failures go through `adapters/_errors.sh`, so the
+  dispatcher can report a coded error.
 - **Programs, not agents,** use the opt-in `--json` forms and the `flight --version` /
   `flight capabilities` probes. Their contract is in [json-output.md](json-output.md); the
   default output above never changes because of them.
