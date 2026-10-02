@@ -108,7 +108,12 @@ check "a local starting-status string survives in the local array" "$(jqt '.issu
 check "the local file keeps its other keys and drops its legacy keys" "$(jqt '.localOnly == true and (has("issues") | not) and (has("labels") | not)' "$LOCAL")"
 check "the issue secret moves under the stable tracker ref" "$(jqt '.issueTrackers.GH.token == "issue-secret" and .issueTrackers.GH.extra == false' "$SEC")"
 check "the code secret stays and the legacy issues secret is gone" "$(jqt '.code.token == "code-secret" and (has("issues") | not)' "$SEC")"
-check "secrets keep their restrictive mode" "$([ "$(stat -c %a "$SEC" 2>/dev/null || stat -f %Lp "$SEC")" = 600 ] && echo 1 || echo 0)"
+# Windows (MSYS / Cygwin) has no POSIX modes — chmod is a no-op on NTFS — so the check means
+# nothing there; every other leg still holds reconcile to it.
+case "${OSTYPE:-}" in
+	msys* | cygwin* | win32) ;;
+	*) check "secrets keep their restrictive mode" "$([ "$(stat -c %a "$SEC" 2>/dev/null || stat -f %Lp "$SEC")" = 600 ] && echo 1 || echo 0)" ;;
+esac
 check "no token appears in reconcile output" "$(! grep -Eq 'code-secret|issue-secret' "$R/err" && echo 1 || echo 0)" "$(cat "$R/err")"
 before="$(hashes "$R")"
 reconcile "$R"
