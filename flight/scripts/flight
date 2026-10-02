@@ -17,10 +17,132 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 ADAPTERS_DIR="$SELF_DIR/adapters"
 
-die() { echo "flight: $*" >&2; exit 1; }
+# Failure reporting. Every failure prints one human sentence on stderr. Under
+# `--json` (#251) it is ALSO recorded in $err_file as the stable
+# {"error":{"code","message"}} envelope, and the EXIT trap prints that — and only
+# that — on stdout. Recording to a file rather than printing makes it work from
+# inside a command substitution too. Codes: references/json-output.md.
+err_file=""
+record_error() { # CODE MESSAGE — write the envelope when this is a --json call
+	[ -n "$err_file" ] || return 0
+	if command -v jq >/dev/null 2>&1; then
+		jq -cn --arg c "$1" --arg m "$2" '{error:{code:$c, message:$m}}' >"$err_file" 2>/dev/null || true
+	else
+		printf '{"error":{"code":"%s","message":"%s"}}\n' "$1" "$(printf '%s' "$2" | tr -d '"\\')" >"$err_file"
+	fi
+}
+die_code() { local code="$1"; shift; echo "flight: $*" >&2; record_error "$code" "flight: $*"; exit 1; }
+die() { die_code usage "$@"; }
 
-[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci auth branches config reconcile prompt-log)"
+# Installed plugin version + name, from the manifest (Codex's first, then Claude's).
+plugin_manifest() {
+  local m="$SELF_DIR/../.codex-plugin/plugin.json"
+  [ -f "$m" ] || m="$SELF_DIR/../.claude-plugin/plugin.json"
+  printf '%s' "$m"
+}
+
+# Feature tokens a consumer can detect with `flight capabilities --json` (#254)
+# instead of comparing versions. A token is added here in the same change that
+# ships the feature, and never renamed or removed once released.
+CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json)
+
+# `flight --version [--json]` and `flight capabilities [--json]` (#254) — answered
+# before anything else: no repo, config, token or network needed, so a consumer
+# can probe any Flight, however old the repo it runs in.
+if [ "${1:-}" = "--version" ] || [ "${1:-}" = "capabilities" ]; then
+	probe="$1"; shift
+	probe_json=0
+	while [ $# -gt 0 ]; do case "$1" in
+		--json) probe_json=1; shift ;;
+		*) die "usage: flight --version [--json] | flight capabilities [--json]" ;;
+	esac; done
+	command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
+	manifest="$(plugin_manifest)"
+	[ -f "$manifest" ] || die "cannot find the Flight plugin manifest"
+	version="$(jq -r '.version // empty' "$manifest")"
+	[ -n "$version" ] || die "cannot determine installed Flight version"
+	plugin="$(jq -r '.name // "flight"' "$manifest")"
+	if [ "$probe" = "--version" ]; then
+		if [ "$probe_json" = 1 ]; then
+			jq -cn --arg p "$plugin" --arg v "$version" '{plugin:$p, version:$v}'
+		else
+			printf '%s %s\n' "$plugin" "$version"
+		fi
+	elif [ "$probe_json" = 1 ]; then
+		printf '%s\n' "${CAPABILITIES[@]}" \
+			| jq -cRn --arg p "$plugin" --arg v "$version" '{plugin:$p, version:$v, capabilities:[inputs]}'
+	else
+		printf '%s\n' "${CAPABILITIES[@]}"
+	fi
+	exit 0
+fi
+
+# Every dispatcher temp file is removed by one EXIT trap, which also prints the
+# --json error envelope when the call failed (see record_error above).
+cfg_tmp=""; sig_tmp=""; json_out=""
+cleanup() {
+	local rc=$?
+	rm -f ${cfg_tmp:+"$cfg_tmp"} ${sig_tmp:+"$sig_tmp"} ${json_out:+"$json_out"}
+	if [ -n "$err_file" ]; then
+		if [ "$rc" -ne 0 ]; then
+			if [ -s "$err_file" ]; then
+				cat "$err_file"
+			else
+				# A failure nothing classified (an unexpected tool error): still one envelope.
+				jq -cn --arg m "flight: failed with exit status $rc" '{error:{code:"backend", message:$m}}'
+			fi
+		fi
+		rm -f "$err_file"
+	fi
+}
+trap cleanup EXIT
+
+# `--json` (#251, json-output.md) is a dispatcher-owned flag for the issues and
+# labels groups: taken out of the arguments here, so adapters' parsers never see
+# it, and handed on as LS_JSON=1. Only the verbs in JSON_VERBS accept it; on any
+# other issues/labels verb it is a usage error. Other groups keep their own
+# meaning of the flag (`prompt-log summary --json` predates this).
+JSON_VERBS=(issues/resolve issues/tracker issues/list issues/get issues/comments labels/list labels/statuses issues/create issues/comment issues/set-status)
+json_mode=0
+case "${1:-}" in
+	issues|labels)
+		# Only a `--json` where a flag can stand counts: the VALUE of an option (a
+		# `--body --json`, a title that is literally "--json") is kept as given. Every
+		# issues/labels option takes a value except these switches.
+		json_args=(); json_value_next=0
+		for json_arg in "$@"; do
+			if [ "$json_value_next" = 1 ]; then
+				json_args+=("$json_arg"); json_value_next=0
+			elif [ "$json_arg" = --json ]; then
+				json_mode=1
+			else
+				json_args+=("$json_arg")
+				case "$json_arg" in
+					--no-status|--no-signature|--all-trackers) ;;
+					--*) json_value_next=1 ;;
+				esac
+			fi
+		done
+		set -- ${json_args[@]+"${json_args[@]}"}
+		;;
+esac
+if [ "$json_mode" = 1 ]; then
+	err_file="$(mktemp "${TMPDIR:-/tmp}/flight-error.XXXXXX")"
+	export FLIGHT_ERROR_FILE="$err_file" LS_JSON=1
+else
+	unset FLIGHT_ERROR_FILE LS_JSON
+fi
+
+[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci auth branches config reconcile prompt-log; also: flight --version, flight capabilities)"
 group="$1"; verb="$2"; shift 2
+
+if [ "$json_mode" = 1 ]; then
+	json_ok=0
+	for json_verb in ${JSON_VERBS[@]+"${JSON_VERBS[@]}"}; do
+		[ "$json_verb" = "$group/$verb" ] && json_ok=1
+	done
+	[ "$json_ok" = 1 ] || die "--json is not supported by '$group $verb'"
+fi
 
 # Which config axis backs this group.
 case "$group" in
@@ -148,13 +270,10 @@ sec_rel="${sec#"$repo_root"/}"
 # exactly as before.
 cfg_tracked="$cfg"
 cfg_local="$cfg_dir/config.local.json"
-cfg_tmp=""; sig_tmp=""
 # One EXIT trap owns every dispatcher temp file (merged config, signed body).
-cleanup() { rm -f ${cfg_tmp:+"$cfg_tmp"} ${sig_tmp:+"$sig_tmp"}; }
-trap cleanup EXIT
 if [ -f "$cfg" ] && [ -f "$cfg_local" ]; then
   cfg_local_rel="${cfg_local#"$repo_root"/}"
-  jq -e . "$cfg_local" >/dev/null 2>&1 || die "$cfg_local_rel is not valid JSON"
+  jq -e . "$cfg_local" >/dev/null 2>&1 || die_code not-configured "$cfg_local_rel is not valid JSON"
   if git -C "$repo_root" ls-files --error-unmatch "$cfg_local_rel" >/dev/null 2>&1; then
     echo "flight: WARNING — $cfg_local_rel is tracked by git; it is meant to be a per-machine override — add it to .gitignore." >&2
   fi
@@ -166,16 +285,54 @@ fi
 # Hand off to a child program. Normally an `exec`; when a dispatcher temp file
 # exists (merged config, signed body), run the child in the foreground instead
 # so the EXIT trap above still removes the file once the child returns.
+#
+# A --json call never execs: the child's stdout is buffered and released only on
+# success, so a failure leaves stdout holding nothing but the error envelope the
+# EXIT trap prints.
 handoff() {
+  if [ "$json_mode" = 1 ]; then
+    json_out="$(mktemp "${TMPDIR:-/tmp}/flight-out.XXXXXX")"
+    if "$@" >"$json_out"; then :; else exit $?; fi
+    case "$json_finish" in
+      list|get|comments|comment)
+        # The adapter's base objects, finished with what only the dispatcher knows
+        # (issue-json.jq). A failure here is still one envelope.
+        jq -c -f "$SELF_DIR/issue-json.jq" --arg mode "$json_finish" --arg tracker "$json_tracker" \
+          --argjson labels "$LS_LABELS_JSON" "$json_out" >"$json_out.done" \
+          || { rm -f "$json_out.done"; die_code backend "could not assemble the --json output"; }
+        mv "$json_out.done" "$json_out"
+        ;;
+      create)
+        # The adapter printed the new issue's number. Answer with the issue itself,
+        # read back through `issues get --json` so the shape cannot differ. The issue
+        # EXISTS by now, so a failed read-back must not look like a failed create (a
+        # caller would file it again): fall back to the fields already known, and say
+        # so on stderr.
+        js_number="$(tr -d '[:space:]' <"$json_out")"
+        if ! env -u FLIGHT_ERROR_FILE -u LS_JSON "$SELF_DIR/flight" issues get --number "$js_number" \
+            ${json_tracker:+--tracker "$json_tracker"} --json >"$json_out.done" 2>/dev/null; then
+          echo "flight: warning — created #$js_number but could not read it back; returning the known fields only" >&2
+          jq -cn --arg n "$js_number" --arg t "$js_title" \
+            '{number: $n, title: $t, state: "open", labels: [], author: null, created: null,
+              updated: null, comments: null, url: null, body: null}' \
+            | jq -c -f "$SELF_DIR/issue-json.jq" --arg mode get --arg tracker "$json_tracker" \
+                --argjson labels "$LS_LABELS_JSON" >"$json_out.done"
+        fi
+        mv "$json_out.done" "$json_out"
+        ;;
+      set-status)
+        # The adapter prints nothing; echo the status the issue now carries.
+        jq -cn --arg n "$js_number" --arg t "$json_tracker" --arg r "$js_role" \
+          --argjson labels "$LS_LABELS_JSON" '
+          {number: $n, tracker: (if $t == "" then null else $t end),
+           qualified: (if $t == "" then null else "\($t)-\($n | split("-") | last)" end),
+           status: $r, label: ($labels.status[$r] // null)}' >"$json_out"
+        ;;
+    esac
+    cat "$json_out"; exit 0
+  fi
   if [ -n "$cfg_tmp$sig_tmp" ]; then "$@"; exit $?; fi
   exec "$@"
-}
-
-# Installed plugin version + name, from the manifest (Codex's first, then Claude's).
-plugin_manifest() {
-  local m="$SELF_DIR/../.codex-plugin/plugin.json"
-  [ -f "$m" ] || m="$SELF_DIR/../.claude-plugin/plugin.json"
-  printf '%s' "$m"
 }
 
 # `Fable/5.1` from `claude-fable-5-1`; `Sol/5.6` from `gpt-5.6-sol`; `GPT/5` from
@@ -203,8 +360,26 @@ model_display() {
 TRACKER_SCHEMA=3
 TRACKER_TOOL="$SELF_DIR/tracker-config.sh"
 tracker_tool() {
-	[ -x "$TRACKER_TOOL" ] || die "named tracker helper is not installed ($TRACKER_TOOL)"
+	[ -x "$TRACKER_TOOL" ] || die_code not-configured "named tracker helper is not installed ($TRACKER_TOOL)"
 	"$TRACKER_TOOL" "$@"
+}
+# tracker_coded CODE ARGS… — tracker_tool whose failure is recorded under CODE with
+# the helper's own last message (it prints its reason on stderr and exits 1, so
+# the call site is what knows the code: an id or ref that does not resolve is
+# `not-found`).
+tracker_coded() {
+	local code="$1" tc_out tc_err; shift
+	[ -x "$TRACKER_TOOL" ] || die_code not-configured "named tracker helper is not installed ($TRACKER_TOOL)"
+	tc_err="$(mktemp "${TMPDIR:-/tmp}/flight-tracker.XXXXXX")"
+	if tc_out="$(tracker_tool "$@" 2>"$tc_err")"; then
+		cat "$tc_err" >&2; rm -f "$tc_err"
+		printf '%s\n' "$tc_out"
+		return 0
+	fi
+	cat "$tc_err" >&2
+	record_error "$code" "$(awk 'NF { l = $0 } END { print l }' "$tc_err")"
+	rm -f "$tc_err"
+	exit 1
 }
 
 # Every config-reading path rejects a schema this runtime does not understand, so a
@@ -212,15 +387,15 @@ tracker_tool() {
 # and must stay silent, so they are the one exemption.
 runtime_schema=0
 if [ -f "$cfg" ] && [ "$group" != "prompt-log" ]; then
-	jq -e . "$cfg" >/dev/null 2>&1 || die "$cfg_rel is not valid JSON"
+	jq -e . "$cfg" >/dev/null 2>&1 || die_code not-configured "$cfg_rel is not valid JSON"
 	runtime_schema="$(jq -r '.schemaVersion // 0' "$cfg")"
 	case "$runtime_schema" in ''|*[!0-9]*) die "config schemaVersion must be a non-negative integer" ;; esac
-	[ "$runtime_schema" -le "$TRACKER_SCHEMA" ] || die "config uses schema $runtime_schema, newer than this Flight understands (schema $TRACKER_SCHEMA); update the Flight plugin"
+	[ "$runtime_schema" -le "$TRACKER_SCHEMA" ] || die_code not-configured "config uses schema $runtime_schema, newer than this Flight understands (schema $TRACKER_SCHEMA); update the Flight plugin"
 	if [ "$runtime_schema" -lt "$TRACKER_SCHEMA" ] && {
 		[ -n "$tracker_selector" ] || [ "$all_trackers" = 1 ] \
 			|| { [ "$group" = issues ] && { [ "$verb" = resolve ] || [ "$verb" = tracker ]; }; }
 	}; then
-		die "named tracker routing needs config schema $TRACKER_SCHEMA; run flight reconcile --harness claude|codex first"
+		die_code not-configured "named tracker routing needs config schema $TRACKER_SCHEMA; run flight reconcile --harness claude|codex first"
 	fi
 fi
 
@@ -301,7 +476,7 @@ if [ "$group" = "reconcile" ]; then
 	[ "$verb" = "--harness" ] || die "usage: flight reconcile --harness <claude|codex>"
 	harness="${1:-}"
 	case "$harness" in claude|codex) ;; *) die "unsupported harness '$harness' (expected claude or codex)" ;; esac
-	[ -f "$cfg_tracked" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
+	[ -f "$cfg_tracked" ] || die_code not-configured "no .flightdirector/config.json at repo root ($repo_root)"
 	jq -e . "$cfg_tracked" >/dev/null 2>&1 || die "$cfg_rel is not valid JSON"
 	schema="$(jq -r '.schemaVersion // 0' "$cfg_tracked")"
 	case "$schema" in ''|*[!0-9]*) die "config schemaVersion must be a non-negative integer" ;; esac
@@ -561,7 +736,7 @@ fi
 # git-local too, and its `pr` mode recurses through this dispatcher for the PR/CI verbs.
 if [ "$group" = "branches" ]; then
   case "$verb" in list|prune|sync-down) ;; *) die "unknown verb '$verb' (branches: list prune sync-down)" ;; esac
-  [ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
+  [ -f "$cfg" ] || die_code not-configured "no .flightdirector/config.json at repo root ($repo_root)"
   export FLIGHT_REPO_ROOT="$repo_root" FLIGHT_CONFIG="$cfg" FLIGHT_SELF="$SELF_DIR/flight"
   [ "$verb" = "sync-down" ] && handoff "$SELF_DIR/sync-down" "$@"
   handoff "$SELF_DIR/branches" "$verb" "$@"
@@ -592,7 +767,7 @@ if [ "$group" = "config" ] && [ "$verb" = "worker-model" ]; then
   [ "${1:-}" = "--harness" ] && [ $# -eq 2 ] || die "usage: flight config worker-model --harness claude|codex"
   harness="$2"
   case "$harness" in claude|codex) ;; *) die "config worker-model: --harness must be claude or codex (got '$harness')" ;; esac
-  [ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
+  [ -f "$cfg" ] || die_code not-configured "no .flightdirector/config.json at repo root ($repo_root)"
   models="$(jq -r '
     (.code.queueBatches.defaultModel // ["sonnet", "luna"]) as $m
     | if ($m | type) == "string" then [$m]
@@ -616,12 +791,12 @@ fi
 
 # `flight config <jq-filter>` — read the resolved config from anywhere (incl. a worktree).
 if [ "$group" = "config" ]; then
-  [ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
+  [ -f "$cfg" ] || die_code not-configured "no .flightdirector/config.json at repo root ($repo_root)"
   jq -r "$verb" "$cfg"
   exit 0
 fi
 
-[ -f "$cfg" ] || die "no .flightdirector/config.json at repo root ($repo_root)"
+[ -f "$cfg" ] || die_code not-configured "no .flightdirector/config.json at repo root ($repo_root)"
 
 # Named tracker routing (schema 3, #197). Issue and label verbs — and `auth check`
 # with --tracker or --axis issues — act on exactly one selected tracker: the default,
@@ -630,7 +805,7 @@ fi
 # adapters never choose a tracker. PR and CI verbs keep using `code`.
 tracker_json=""
 if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
-	tracker_tool validate --config "$cfg" ${cfg_tmp:+--tracked "$cfg_tracked"} || die "(in $cfg_rel${cfg_tmp:+ merged with its config.local.json}) — fix the config before any issue operation"
+	tracker_tool validate --config "$cfg" ${cfg_tmp:+--tracked "$cfg_tracked"} || die_code not-configured "(in $cfg_rel${cfg_tmp:+ merged with its config.local.json}) — fix the config before any issue operation"
 
 	# config.local.json arrays replace wholesale: a local issueTrackers array that lacks
 	# a tracker the tracked config has hides that tracker on this machine. Warn once per
@@ -652,6 +827,37 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 	# tracker's ordinary list row with its qualified identity (REF-N) prepended. A
 	# tracker that fails is named on stderr and turns the exit status non-zero — it
 	# is never presented as an empty backlog.
+	if [ "$all_trackers" = 1 ] && [ "$json_mode" = 1 ]; then
+		# --json: one object for every tracker (#253). Each tracker is its own --json
+		# dispatch; a tracker that fails lands in `errors` (and on stderr) instead of
+		# looking like an empty backlog. Exit 0 while any tracker answered; when none
+		# did, the first tracker's error is the envelope.
+		agg_dir="$(mktemp -d "${TMPDIR:-/tmp}/flight-all.XXXXXX")"
+		: >"$agg_dir/ok"; : >"$agg_dir/failed"
+		while IFS= read -r list_ref; do
+			[ -n "$list_ref" ] || continue
+			if "$SELF_DIR/flight" issues list --tracker "$list_ref" --json "$@" >"$agg_dir/out" 2>"$agg_dir/err"; then
+				cat "$agg_dir/out" >>"$agg_dir/ok"; printf '\n' >>"$agg_dir/ok"
+				sed -e 's/^flight: //' -e "s/^/flight: tracker $list_ref: /" "$agg_dir/err" >&2
+			else
+				printf 'flight: tracker %s unavailable: %s\n' "$list_ref" "$(tr '\n' ' ' <"$agg_dir/err" | sed -e 's/^flight: //' -e 's/[[:space:]]*$//')" >&2
+				jq -c --arg r "$list_ref" '{tracker: $r, code: (.error.code // "backend"), reason: (.error.message // "failed")}' "$agg_dir/out" 2>/dev/null >>"$agg_dir/failed" \
+					|| jq -cn --arg r "$list_ref" '{tracker: $r, code: "backend", reason: "failed"}' >>"$agg_dir/failed"
+			fi
+		done < <(jq -r '.issueTrackers[].ref' "$cfg")
+		if [ ! -s "$agg_dir/ok" ] && [ -s "$agg_dir/failed" ]; then
+			first_failure="$(head -n1 "$agg_dir/failed")"
+			rm -rf "$agg_dir"
+			die_code "$(jq -r '.code' <<<"$first_failure")" "$(jq -r '"tracker \(.tracker): \(.reason)"' <<<"$first_failure")"
+		fi
+		jq -cn --slurpfile ok "$agg_dir/ok" --slurpfile failed "$agg_dir/failed" '
+			{issues: ([$ok[].issues[]] | sort_by([(.created // ""), (.number | tonumber? // 0)]) | reverse),
+			 truncated: any($ok[]; .truncated),
+			 total: (if ($failed | length) == 0 and all($ok[]; .total != null) then ([$ok[].total] | add) else null end),
+			 errors: $failed}'
+		rm -rf "$agg_dir"
+		exit 0
+	fi
 	if [ "$all_trackers" = 1 ]; then
 		list_failed=0
 		list_out="$(mktemp "${TMPDIR:-/tmp}/flight-list.XXXXXX")"
@@ -676,7 +882,7 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 	# every workflow retains: {tracker, number (native id), qualified, branchPrefix}.
 	if [ "$group" = issues ] && [ "$verb" = resolve ]; then
 		[ "${1:-}" = --number ] && [ $# -eq 2 ] || die "usage: flight issues resolve --number INPUT [--tracker REF]"
-		tracker_tool resolve --config "$cfg" --number "$2" ${tracker_selector:+--tracker "$tracker_selector"}
+		tracker_coded not-found resolve --config "$cfg" --number "$2" ${tracker_selector:+--tracker "$tracker_selector"}
 		exit 0
 	fi
 
@@ -684,7 +890,7 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 	# secrets), e.g. to read its label map: `… | jq -r '.labels.status["to-test"]'`.
 	if [ "$group" = issues ] && [ "$verb" = tracker ]; then
 		[ $# -eq 0 ] || die "usage: flight issues tracker [--tracker REF]"
-		tracker_tool select --config "$cfg" ${tracker_selector:+--tracker "$tracker_selector"}
+		tracker_coded not-found select --config "$cfg" ${tracker_selector:+--tracker "$tracker_selector"}
 		exit 0
 	fi
 
@@ -699,7 +905,7 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 		done
 		[ "$want_number" = 0 ] || die "issues $verb: --number needs a value"
 		if [ -n "$issue_input" ]; then
-			identity_json="$(tracker_tool resolve --config "$cfg" --number "$issue_input" ${tracker_selector:+--tracker "$tracker_selector"})"
+			identity_json="$(tracker_coded not-found resolve --config "$cfg" --number "$issue_input" ${tracker_selector:+--tracker "$tracker_selector"})"
 			tracker_selector="$(jq -r '.tracker' <<<"$identity_json")"
 			native_number="$(jq -r '.number' <<<"$identity_json")"
 			routed=()
@@ -712,7 +918,7 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 		fi
 	fi
 
-	tracker_json="$(tracker_tool select --config "$cfg" ${tracker_selector:+--tracker "$tracker_selector"})"
+	tracker_json="$(tracker_coded not-found select --config "$cfg" ${tracker_selector:+--tracker "$tracker_selector"})"
 fi
 
 # Loud, every-run warning if the secrets file is tracked by git (it holds a token).
@@ -731,7 +937,7 @@ cfg_get() {
 }
 
 backend="$(cfg_get backend)"
-[ -n "$backend" ] || die "no backend configured for axis '$axis' (set code.backend or ${axis}.backend in $cfg_rel)"
+[ -n "$backend" ] || die_code not-configured "no backend configured for axis '$axis' (set code.backend or ${axis}.backend in $cfg_rel)"
 
 LS_API="$(cfg_get api)"
 LS_OWNER="$(cfg_get owner)"
@@ -745,6 +951,74 @@ if [ -n "$tracker_json" ]; then
 	LS_LABELS_JSON="$(printf '%s' "$tracker_json" | jq -c '.labels // {}')"
 else
 	LS_LABELS_JSON="$(jq -c '.labels // {}' "$cfg")"
+fi
+
+# `issues list --status ROLE` (#253) — a status ROLE filter, mapped through the
+# selected tracker's label map to its label name. Dispatcher-owned, so one call can
+# ask every tracker for "to-test" however each one spells it.
+if [ "$group/$verb" = issues/list ]; then
+	st_args=()
+	while [ $# -gt 0 ]; do case "$1" in
+		--status)
+			[ $# -ge 2 ] || die "issues list: --status needs a role"
+			st_label="$(jq -r --arg r "$2" '.status[$r] // empty | strings' <<<"$LS_LABELS_JSON")"
+			[ -n "$st_label" ] || die "issues list: status role '$2' is not configured for this tracker (see flight labels statuses)"
+			st_args+=(--label "$st_label"); shift 2 ;;
+		*) st_args+=("$1"); shift ;;
+	esac; done
+	set -- ${st_args[@]+"${st_args[@]}"}
+fi
+
+# What issue-json.jq needs to finish an adapter's --json output (see handoff).
+json_finish=""; json_tracker=""
+if [ "$json_mode" = 1 ]; then
+	case "$group/$verb" in
+		issues/list|issues/get|issues/comments|issues/comment|issues/create|issues/set-status) json_finish="$verb" ;;
+	esac
+	# What the write verbs' answers need from their own arguments (#252).
+	js_number=""; js_role=""; js_title=""
+	js_i=1
+	while [ "$js_i" -le $# ]; do
+		case "${!js_i}" in
+			--number|--status|--title)
+				js_next=$((js_i + 1))
+				case "${!js_i}" in
+					--number) js_number="${!js_next:-}" ;;
+					--status) js_role="${!js_next:-}" ;;
+					--title)  js_title="${!js_next:-}" ;;
+				esac
+				js_i=$((js_i + 2)) ;;
+			*) js_i=$((js_i + 1)) ;;
+		esac
+	done
+	[ -z "$tracker_json" ] || json_tracker="$(jq -r '.ref' <<<"$tracker_json")"
+fi
+
+# `labels statuses [--tracker REF] [--json]` (#250) — the selected tracker's status
+# roles in its config order, each with the label name it maps to and that label's
+# colour on the tracker (null when the label is missing there or has no colour).
+# A role recorded as declined (`false`) is not a status, so it is left out. Text form:
+# `role⇥label⇥color` rows. Dispatcher-owned: the roles live in config, and the
+# colours come from this same dispatcher's `labels list --json` for the tracker.
+if [ "$group/$verb" = labels/statuses ]; then
+	[ $# -eq 0 ] || die "usage: flight labels statuses [--tracker REF] [--json]"
+	st_tracker=""; [ -z "$tracker_json" ] || st_tracker="$(jq -r '.ref' <<<"$tracker_json")"
+	if ! st_labels="$(env -u FLIGHT_ERROR_FILE -u LS_JSON "$SELF_DIR/flight" labels list --json ${st_tracker:+--tracker "$st_tracker"})"; then
+		# The nested call already explained itself on stderr; its stdout is its envelope.
+		[ -z "$err_file" ] || printf '%s\n' "$st_labels" >"$err_file"
+		exit 1
+	fi
+	st_rows="$(jq -c --argjson labels "$st_labels" '
+		[(.status // {}) | to_entries[] | select(.value | type == "string")
+		 | .value as $l
+		 | {role: .key, label: $l, color: ([$labels[] | select(.name == $l) | .color] | first // null)}]
+		' <<<"$LS_LABELS_JSON")"
+	if [ "$json_mode" = 1 ]; then
+		printf '%s\n' "$st_rows"
+	else
+		jq -r '.[] | [.role, .label, (.color // "")] | @tsv' <<<"$st_rows"
+	fi
+	exit 0
 fi
 # CI-watch hang-guard timeout (seconds). Precedence: env override → config
 # code.ciWatchTimeout → adapter default (900). Empty stays empty so the adapter
@@ -927,7 +1201,7 @@ case "$group/$verb" in
 esac
 
 adapter="$ADAPTERS_DIR/$backend/$group"
-[ -x "$adapter" ] || die "no '$group' adapter for backend '$backend' (expected $adapter)"
+[ -x "$adapter" ] || die_code not-configured "no '$group' adapter for backend '$backend' (expected $adapter)"
 
 export LS_API LS_OWNER LS_REPO LS_PROJECT LS_EMAIL LS_TRUNK LS_TOKEN LS_TOKEN_SOURCE LS_LABELS_JSON LS_CI_WATCH_TIMEOUT LS_CI_QUEUE_TIMEOUT LS_BACKEND="$backend"
 handoff "$adapter" "$verb" "$@"

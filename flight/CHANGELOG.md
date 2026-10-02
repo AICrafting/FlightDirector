@@ -15,6 +15,42 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- **`flight --version` and `flight capabilities`** (#254). `flight --version` prints the
+  plugin version; before, it printed the usage line. `--version --json` prints
+  `{"plugin","version"}`. `flight capabilities --json` adds a list of feature tokens, so a
+  program driving the dispatcher can check for a feature instead of comparing versions.
+  Neither needs a repo, config, token or network. Contract:
+  `flight/references/json-output.md`.
+- **`issues create`, `comment` and `set-status` take `--json`** (#252). `create` returns the new
+  issue in the `issues get --json` shape. A failed read-back still reports success with the known
+  fields, so a caller doesn't file it twice. `comment` returns the new comment, with its signature
+  split out. `set-status` echoes `{number, tracker, qualified, status, label}`.
+- **`labels list --json` and `labels statuses`** (#250).
+  - `labels list --json` returns `[{name, color, description}]` on every backend, with colours as
+    `#rrggbb`.
+  - The new `labels statuses` lists the tracker's status roles in config order, each with its
+    label name and colour (`role⇥label⇥color`, or `--json`), so a UI can build its status filter
+    without assuming a repo's label names.
+- **`issues list`, `get` and `comments` take `--json`** (#253). They return one object shape on
+  Forgejo, GitHub, GitLab and Jira, for programs that drive the dispatcher instead of calling a
+  forge. The fields are `number` (always a string), `tracker`, `qualified`, `title`, `state`,
+  `status`, `labels`, `author`, `created`, `updated` (UTC), `comments`, `url`, `body` and
+  `signature`.
+  - `status` is the issue's status *role* through the tracker's label map.
+  - The flight signature footer is split out of `body` into `signature`.
+  - `list` adds `truncated`/`total` and is ordered newest created first.
+  - `--all-trackers --json` reports each failing tracker in `errors` instead of failing the
+    whole listing.
+  - New dispatcher filter: `issues list --status ROLE`, mapped per tracker.
+  - The text output is unchanged.
+- **Structured errors under `--json`** (#251). A failing `--json` call exits non-zero and
+  prints one `{"error":{"code","message"}}` object on stdout, and nothing else. The codes are
+  `not-configured`, `auth`, `not-found`, `network`, `backend` and `usage`. Each code is decided
+  where the cause is known: the dispatcher for config, usage and ref resolution, and the adapters'
+  shared `_errors.sh` for HTTP status and curl failure. Without `--json` nothing changes, except
+  that an adapter missing a coordinate or token now says so in its usual
+  `<adapter>: <message>` form.
+
 - **The queue-batches worker model can be an ordered list** (#236).
   `code.queueBatches.defaultModel` now takes an array such as `["sonnet", "luna"]`, and
   `queue-batches` uses the first model the running harness can dispatch. A repo worked from both
@@ -141,6 +177,14 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - **Docs: why GitHub uses a repo-scoped token, not your `gh` login** (#243). `backends.md` now
   explains that `gh` picks credentials per host rather than per repo, that its login token is
   user-wide, and why that matters when an agent reading untrusted issue text holds it.
+
+### Fixed
+
+- **A failed label or list fetch no longer reads as an empty result** (#250). `labels list`
+  (and every lookup of a label by name) loaded the label cache in a way that turned off `set -e`.
+  The pagers' page requests also ran inside command substitutions, which don't inherit it. A
+  network error or a 401 therefore came back as "no labels", exit 0, or as a misleading "label not
+  found". Both now fail with the real reason.
 
 ## [0.16.0] - 2026-09-21
 
