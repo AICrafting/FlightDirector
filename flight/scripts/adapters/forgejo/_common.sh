@@ -7,18 +7,19 @@
 # Windows shims (jq CRLF, path form); a no-op elsewhere.
 # shellcheck source-path=SCRIPTDIR source=../../_portable.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../_portable.sh"
+# shellcheck source-path=SCRIPTDIR source=../_errors.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_errors.sh"
 
 command -v curl >/dev/null 2>&1 || { echo "forgejo adapter: curl is required" >&2; exit 1; }
 command -v jq   >/dev/null 2>&1 || { echo "forgejo adapter: jq is required" >&2; exit 1; }
 
-: "${LS_API:?LS_API not set (dispatcher must export it)}"
-: "${LS_OWNER:?LS_OWNER not set}"
-: "${LS_REPO:?LS_REPO not set}"
-: "${LS_TOKEN:?LS_TOKEN not set — no token resolved for this axis}"
+require_env LS_API not-configured "LS_API not set (dispatcher must export it)"
+require_env LS_OWNER not-configured "LS_OWNER not set"
+require_env LS_REPO not-configured "LS_REPO not set"
+require_env LS_TOKEN auth "LS_TOKEN not set — no token resolved for this axis"
 
 REPO_API="${LS_API%/}/repos/${LS_OWNER}/${LS_REPO}"
 
-die()  { echo "${ADAPTER_NAME:-forgejo}: $*" >&2; exit 1; }
 warn() { echo "${ADAPTER_NAME:-forgejo}: warning: $*" >&2; }
 
 # `urlenc` comes from ../../_portable.sh — every value interpolated into a URL
@@ -36,15 +37,15 @@ _api() {
   if [ -n "$data" ]; then
     code="$(curl -sS ${dump[@]+"${dump[@]}"} -o "$tmp" -w '%{http_code}' -X "$method" \
       -H "Authorization: token ${LS_TOKEN}" -H "Content-Type: application/json" \
-      --data-binary "$data" "${REPO_API}${path}")" || { rm -f "$tmp"; die "$method $path: curl failed"; }
+      --data-binary "$data" "${REPO_API}${path}")" || { rm -f "$tmp"; fail network "$method $path: curl failed"; }
   else
     code="$(curl -sS ${dump[@]+"${dump[@]}"} -o "$tmp" -w '%{http_code}' -X "$method" \
-      -H "Authorization: token ${LS_TOKEN}" "${REPO_API}${path}")" || { rm -f "$tmp"; die "$method $path: curl failed"; }
+      -H "Authorization: token ${LS_TOKEN}" "${REPO_API}${path}")" || { rm -f "$tmp"; fail network "$method $path: curl failed"; }
   fi
   if [ "$code" -ge 400 ]; then
     msg="$(jq -r '.message // empty' "$tmp" 2>/dev/null || true)"
     rm -f "$tmp"
-    die "$method $path → HTTP $code${msg:+: $msg}"
+    http_fail "$code" "$method $path → HTTP $code${msg:+: $msg}"
   fi
   cat "$tmp"; rm -f "$tmp"
 }

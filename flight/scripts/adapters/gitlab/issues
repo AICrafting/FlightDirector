@@ -148,10 +148,10 @@ case "$verb" in
     code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
       "${GL_HEADERS[@]}" \
       -F "file=@${file};filename=${name}" \
-      "${PROJECT_API}/uploads")" || { rm -f "$tmp"; die "attach: curl failed"; }
+      "${PROJECT_API}/uploads")" || { rm -f "$tmp"; fail network "attach: curl failed"; }
     if [ "$code" -ge 400 ]; then
       msg="$(jq -r '(.message // .error // empty) | if type=="string" then . else tojson end' "$tmp" 2>/dev/null || true)"
-      rm -f "$tmp"; die "attach → HTTP $code${msg:+: $msg}"
+      rm -f "$tmp"; http_fail "$code" "attach → HTTP $code${msg:+: $msg}"
     fi
     jq -r '.full_path // .url' "$tmp"; rm -f "$tmp"
     ;;

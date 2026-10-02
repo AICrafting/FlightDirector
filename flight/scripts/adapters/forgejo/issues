@@ -129,10 +129,10 @@ case "$verb" in
     code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
       -H "Authorization: token ${LS_TOKEN}" \
       -F "attachment=@${file};filename=${name}" \
-      "${REPO_API}/issues/${number}/assets")" || { rm -f "$tmp"; die "attach: curl failed"; }
+      "${REPO_API}/issues/${number}/assets")" || { rm -f "$tmp"; fail network "attach: curl failed"; }
     if [ "$code" -ge 400 ]; then
       msg="$(jq -r '.message // empty' "$tmp" 2>/dev/null || true)"; rm -f "$tmp"
-      die "attach → HTTP $code${msg:+: $msg}"
+      http_fail "$code" "attach → HTTP $code${msg:+: $msg}"
     fi
     jq -r '.browser_download_url' "$tmp"; rm -f "$tmp"
     ;;
