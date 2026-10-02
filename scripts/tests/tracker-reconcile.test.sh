@@ -140,14 +140,14 @@ R="$(repo inherited-nosecrets)"
 printf '%s\n' '{"code":{"backend":"forgejo","api":"https://forge.example.com/api/v1","owner":"acme","repo":"widget"}}' >"$R/.flightdirector/config.json"
 reconcile "$R"
 calls="$(dispatch "$R" LS_TOKEN=ci-token)"
-check "an env-only setup (no secrets file) migrates and keeps working" "$(jqt '.issueTrackers[0].credentialRef == "code"' "$R/.flightdirector/config.json" | grep -q 1 && grep -q 'token ci-token' <<<"$calls" && [ ! -e "$R/.flightdirector/secrets.json" ] && echo 1 || echo 0)" "$calls"
+check "an env-only setup (no secrets file) migrates and keeps working" "$(grep -q 1 <<<"$(jqt '.issueTrackers[0].credentialRef == "code"' "$R/.flightdirector/config.json")" && grep -q 'token ci-token' <<<"$calls" && [ ! -e "$R/.flightdirector/secrets.json" ] && echo 1 || echo 0)" "$calls"
 
 section "credential choices"
 R="$(repo same-target-own-token)"
 printf '%s\n' '{"code":{"backend":"forgejo","api":"https://forge.example.com/api/v1","owner":"acme","repo":"widget"},"issues":{"owner":"acme"}}' >"$R/.flightdirector/config.json"
 printf '%s\n' '{"code":{"token":"code-t"},"issues":{"token":"issue-t"}}' >"$R/.flightdirector/secrets.json"
 reconcile "$R"
-check "same target but a separate issue token → own credential, token moved" "$(jqt '.issueTrackers[0].credentialRef == "FJ"' "$R/.flightdirector/config.json" | grep -q 1 && jqt '.issueTrackers.FJ.token == "issue-t" and .code.token == "code-t"' "$R/.flightdirector/secrets.json")"
+check "same target but a separate issue token → own credential, token moved" "$(grep -q 1 <<<"$(jqt '.issueTrackers[0].credentialRef == "FJ"' "$R/.flightdirector/config.json")" && jqt '.issueTrackers.FJ.token == "issue-t" and .code.token == "code-t"' "$R/.flightdirector/secrets.json")"
 calls="$(dispatch "$R" FLIGHT_TOKEN=env-t)"
 check "…and an env token never shadows it" "$(grep -q 'token issue-t' <<<"$calls" && echo 1 || echo 0)" "$calls"
 
@@ -165,7 +165,7 @@ R="$(repo sibling-env-only)"
 printf '%s\n' '{"schemaVersion":2,"code":{"backend":"forgejo","api":"https://code.example.com/api/v1","owner":"o","repo":"r","stages":[{"name":"develop"}]},"issues":{"repo":"backlog"}}' >"$R/.flightdirector/config.json"
 reconcile "$R"
 calls="$(dispatch "$R" LS_TOKEN=ci-token)"
-check "a sibling-repo tracker with no secrets file keeps working with LS_TOKEN" "$(jqt '.issueTrackers[0].credentialRef == "code"' "$R/.flightdirector/config.json" | grep -q 1 && grep -q 'repos/o/backlog/issues.*token ci-token' <<<"$calls" && [ ! -e "$R/.flightdirector/secrets.json" ] && echo 1 || echo 0)" "$calls"
+check "a sibling-repo tracker with no secrets file keeps working with LS_TOKEN" "$(grep -q 1 <<<"$(jqt '.issueTrackers[0].credentialRef == "code"' "$R/.flightdirector/config.json")" && grep -q 'repos/o/backlog/issues.*token ci-token' <<<"$calls" && [ ! -e "$R/.flightdirector/secrets.json" ] && echo 1 || echo 0)" "$calls"
 
 R="$(repo same-token-twice)"
 printf '%s\n' '{"code":{"backend":"forgejo","api":"https://forge.example.com/api/v1","owner":"acme","repo":"widget"},"issues":{"repo":"tickets"}}' >"$R/.flightdirector/config.json"
@@ -261,7 +261,7 @@ printf '.flightdirector/batches/\n.flightdirector/secrets*\n' >"$R/.gitignore"
 printf '%s\n' '{"code":{"backend":"github","api":"https://api.github.example.com","owner":"o","repo":"r"}}' >"$R/.flightdirector/config.json"
 reconcile "$R"
 WI="$R/.flightdirector/batches/work-items/identities.json"
-check "reconcile succeeds with legacy branches and manifests present" "$([ -f "$WI" ] && jqt '.schemaVersion == 3' "$R/.flightdirector/config.json" | grep -q 1 && echo 1 || echo 0)" "$(cat "$R/err")"
+check "reconcile succeeds with legacy branches and manifests present" "$([ -f "$WI" ] && grep -q 1 <<<"$(jqt '.schemaVersion == 3' "$R/.flightdirector/config.json")" && echo 1 || echo 0)" "$(cat "$R/err")"
 check "the binding file records the legacy default" "$(jqt '.schemaVersion == 1 and .legacyDefaultTracker == "GH"' "$WI")"
 check "a local legacy branch is bound to its full identity" "$(jqt '.branches["feature/12-old-work"] == {tracker:"GH",number:"12",qualified:"GH-12",branchPrefix:"gh-12",legacy:true}' "$WI")"
 check "a slug-less legacy branch is bound" "$(jqt '.branches["bugfix/7"].qualified == "GH-7"' "$WI")"
@@ -308,7 +308,7 @@ for f in config.json config.local.json secrets.json batches/work-items/identitie
 	[ "$(jq -S . "$R/.flightdirector/$f")" = "$(jq -S . "$SANDBOX/interrupted-clean/.flightdirector/$f")" ] || same=0
 done
 check "the retried run ends exactly where an uninterrupted run does" "$same"
-check "the retried run kept the separate credential choice" "$(jqt '.issueTrackers[0].credentialRef == "FJ"' "$R/.flightdirector/config.json" | grep -q 1 && jqt '.issueTrackers.FJ.token == "i"' "$R/.flightdirector/secrets.json")"
+check "the retried run kept the separate credential choice" "$(grep -q 1 <<<"$(jqt '.issueTrackers[0].credentialRef == "FJ"' "$R/.flightdirector/config.json")" && jqt '.issueTrackers.FJ.token == "i"' "$R/.flightdirector/secrets.json")"
 # The reviewer's fixture: a Jira split whose leftover bindings name FJ. Before, the Jira
 # token had already been moved under issueTrackers.PROJ when the bind check failed.
 R="$(repo jira-bind-conflict)"

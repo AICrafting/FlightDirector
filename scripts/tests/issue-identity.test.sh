@@ -90,7 +90,7 @@ printf '{"schemaVersion":1,"branches":{},"manifests":{}}\n' >"$BIND"
 check "an unbound legacy branch with no legacy default needs --tracker (4)" \
 	"$([ "$(status_of from-branch --branch feature/9-old)" = 4 ] && echo 1 || echo 0)"
 check "the error tells the user to choose, never guesses" \
-	"$(errtext from-branch --branch feature/9-old | grep -q 'rerun with --tracker' && echo 1 || echo 0)"
+	"$(grep -q 'rerun with --tracker' <<<"$(errtext from-branch --branch feature/9-old)" && echo 1 || echo 0)"
 check "a legacy manifest with no binding needs a choice (4)" "$([ "$(status_of from-manifest --run-id other --entry 5)" = 4 ] && echo 1 || echo 0)"
 check "a bare history reference with no binding needs a choice (4)" "$([ "$(status_of from-history --ref '#5')" = 4 ] && echo 1 || echo 0)"
 out="$(run from-branch --branch feature/9-old --tracker gh)"
@@ -139,7 +139,7 @@ check "legacy tracker == code-repo tracker: a bare #N maps to it" "$([ "$(field 
 jq '.legacyDefaultTracker = "GH"' "$SANDBOX/bind.good" >"$BIND"
 check "legacy tracker != code-repo tracker: a bare #N is ambiguous (4)" "$([ "$(status_of from-history --ref '#40')" = 4 ] && echo 1 || echo 0)"
 check "…and the error names both candidates and asks for --tracker" \
-	"$(errtext from-history --ref '#40' | grep 'ambiguous' | grep 'GH' | grep 'FJ' | grep -q 'rerun with --tracker' && echo 1 || echo 0)" \
+	"$(grep -q 'rerun with --tracker' <<<"$(errtext from-history --ref '#40' | grep 'ambiguous' | grep 'GH' | grep 'FJ')" && echo 1 || echo 0)" \
 	"$(errtext from-history --ref '#40')"
 out="$(run from-history --ref '#40' --tracker gh)"
 check "…which an explicit --tracker settles" "$([ "$(field qualified "$out")" = GH-40 ] && echo 1 || echo 0)" "$out"
@@ -184,7 +184,7 @@ SH
 chmod +x "$CRLF_BIN/jq"
 msys() { (cd "$R" && PATH="$CRLF_BIN:$PATH" OSTYPE=msys "$IDENTITY" "$@"); }
 msys_status() { local rc=0; msys "$@" >/dev/null 2>&1 || rc=$?; echo "$rc"; }
-has_cr() { od -c | grep -q '\\r'; }
+has_cr() { grep -q '\\r' <<<"$(od -c)"; }
 check "the emulated jq really emits CR" "$(printf '1\n' | "$CRLF_BIN/jq" . | has_cr && echo 1 || echo 0)"
 cp "$SANDBOX/bind.good" "$BIND"
 out="$(msys from-branch --branch feature/gh-1-second 2>&1 || true)"
@@ -215,7 +215,7 @@ cp "$SANDBOX/bind.good" "$BIND"
 printf '\033[1m── schema guard ──\033[0m\n'
 jq '.schemaVersion = 2 | del(.issueTrackers, .legacyIssueTracker) | .issues = {"backend":"forgejo"}' "$SANDBOX/config.good" >"$CFG"
 check "a pre-schema-3 config is refused with a reconcile hint" \
-	"$(errtext from-branch --branch feature/fj-1-x | grep -q 'flight reconcile' && echo 1 || echo 0)"
+	"$(grep -q 'flight reconcile' <<<"$(errtext from-branch --branch feature/fj-1-x)" && echo 1 || echo 0)"
 cp "$SANDBOX/config.good" "$CFG"
 
 [ "$fail" -gt 0 ] && colour=$'\033[0;31m' || colour=''
