@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.17.0] - 2026-10-02
+
 ### Added
 
 - **`flight --version` and `flight capabilities`** (#254). `flight --version` prints the
