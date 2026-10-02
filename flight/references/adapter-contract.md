@@ -2,7 +2,8 @@
 
 The boundary between skills and backends, per [ADR 0001](../../docs/adr/0001-curl-over-mcp-and-adapter-architecture.md).
 Skills never embed a backend's endpoints — they invoke **verbs** through a single dispatcher,
-which resolves the right backend for the axis and execs that backend's adapter.
+which resolves the right target — `code`, or one named issue tracker — and execs that
+backend's adapter.
 
 ## Layout
 
@@ -36,15 +37,21 @@ flight <group> <verb> [--flag value …]
 
 The dispatcher:
 
-1. Reads `.flightdirector/config.json` (config) and `.flightdirector/secrets.json` (token), from repo root.
-2. Picks the **axis** for the group — `issues`/`labels` → `issues.*`, `pr`/`ci`/`auth`/`branches` → `code.*`
-   (`auth check --axis issues` overrides that one) — applying `code → issues` inheritance when the
-   `issues` block is omitted.
+1. Reads `.flightdirector/config.json` (config) and `.flightdirector/secrets.json` (token), from repo
+   root, and refuses a `schemaVersion` newer than it understands (currently 3).
+2. Picks the **axis** for the group — `issues`/`labels` → the issue side, `pr`/`ci`/`auth`/`branches` →
+   `code.*` (`auth check --axis issues` or `--tracker` overrides that one). On a schema-2 config the
+   issue side is `issues.*` with `code → issues` inheritance. On schema 3 it is **one named
+   tracker** from `issueTrackers` — see **Named tracker routing** below — and the config is
+   validated first, so an invalid tracker list never reaches an adapter.
 3. Exports the resolved coordinates + token into the adapter's environment: `LS_API`,
-   `LS_OWNER`, `LS_REPO`, `LS_TOKEN`, `LS_TOKEN_SOURCE`, `LS_TRUNK` (code's trunk branch),
-   `LS_LABELS_JSON` (the `labels` map, for role→name resolution), and `LS_BACKEND`. Token
-   precedence: `LS_TOKEN` / `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a
-   legacy name), else the secrets file (axis, `code → issues`). `LS_TOKEN_SOURCE` names which
+   `LS_OWNER`, `LS_REPO`, `LS_PROJECT`, `LS_EMAIL`, `LS_TOKEN`, `LS_TOKEN_SOURCE`, `LS_TRUNK` (code's
+   trunk branch), `LS_LABELS_JSON` (the selected tracker's `labels` map — schema 2: the top-level
+   one — for role→name resolution), and `LS_BACKEND`. Token precedence: `LS_TOKEN` /
+   `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a legacy name), else the
+   secrets file (axis, `code → issues`; for a schema-3 tracker with `credentialRef: "code"`,
+   `secrets.code`). A schema-3 tracker with **its own credential** skips the env override
+   entirely and reads only `secrets.issueTrackers.<REF>`. `LS_TOKEN_SOURCE` names which
    of those won — the env var as `$FLIGHT_TOKEN` (leading `$`), or the secrets file's path in a
    form that resolves from wherever the caller ran: absolute for the repo's own (gitignored,
    main-checkout-only) file, or exactly the argument when `auth check --secrets` supplied a
@@ -60,7 +67,35 @@ The dispatcher:
 5. Execs `adapters/<backend>/<group> <verb> [args…]`.
 
 So adapters are pure: they read coordinates/token from `LS_*` env, never parse config, never
-know which axis they serve. Swapping `forgejo` for `github` changes nothing above the adapter.
+know which axis — or which named tracker — they serve. Swapping `forgejo` for `github` changes
+nothing above the adapter.
+
+## Named tracker routing (schema 3, dispatcher-owned)
+
+Config and credential rules are in [flight-setup.md](flight-setup.md#named-issue-trackers-config-schema-3).
+On a schema-3 config the dispatcher, not the adapter, chooses the tracker for every `issues` and
+`labels` verb and for `auth check --tracker REF` / `--axis issues`:
+
+- **`--tracker REF`** (any `issues`/`labels` verb, `auth check`) — select by `ref` or alias,
+  case-insensitively. Stripped before the adapter runs. Given twice → error. Unknown → error
+  naming near matches and every configured tracker; no network call is made. `pr`/`ci` do not
+  take it: they always use `code`. `auth check --tracker REF --axis code` is a conflict.
+- **`--number INPUT`** on any `issues` verb is resolved first: a bare `12`/`#12` means the default
+  tracker (or the `--tracker` one); `GH12`, `GH-12`, `GH#12` or a Jira key `PROJ-7` names its
+  tracker. The adapter receives the **native** id (`12`, or `PROJ-7` for Jira). A qualified id
+  naming a different tracker than `--tracker` is an error.
+- Without `--tracker` or a qualified id, the default tracker is used — so every existing
+  unqualified call keeps working, with unchanged output.
+- On a schema-2 config, `--tracker`, `--all-trackers`, `issues resolve` and `issues tracker`
+  fail with "run flight reconcile" rather than falling back to the single-tracker path.
+
+Dispatcher-owned verbs:
+
+| Verb | Args | stdout |
+|------|------|--------|
+| `issues resolve` | `--number INPUT` `[--tracker REF]` | one line of JSON: `{"tracker":"FJ","number":"12","qualified":"FJ-12","branchPrefix":"fj-12"}`. `tracker` is the canonical ref; `number` the native id as a string (`"PROJ-7"` for Jira, leading zeros stripped otherwise); `qualified` is `REF-<digits>`; `branchPrefix` is `qualified` lowercased. No coordinates, URLs or secrets. No network call. Ambiguous input (`A12` with refs `A` and `A1`) fails listing the candidates unless `--tracker` picks one |
+| `issues tracker` | `[--tracker REF]` | the selected tracker's config entry as one line of JSON (config only — never secrets), e.g. to read its label map: `flight issues tracker --tracker GH \| jq -r '.labels.status["to-test"]'` |
+| `issues list` | `--all-trackers` plus the ordinary `list` flags | every tracker in config order, each dispatched with its own coordinates, credential and label map. Each row is that tracker's ordinary `list` row with the qualified id prepended: `qualified⇥number⇥title⇥labels` (Jira: `JIR-1⇥PROJ-1⇥…`). A tracker that fails is reported on stderr as `flight: tracker REF unavailable: <reason>` and makes the exit status non-zero; the other trackers' rows are still printed — a failure is never an empty backlog. A tracker that succeeds keeps its stderr too (the "showing N of M rows" truncation warning, the `FORGEJO_TOKEN` note), each line prefixed `flight: tracker REF: `. Cannot be combined with `--tracker`; only `issues list` accepts it |
 
 ## Output & exit conventions (every verb)
 
@@ -172,7 +207,7 @@ GitLab comment endpoints do cap, and are paged.
 
 | Verb    | Args                                          | stdout |
 |---------|-----------------------------------------------|--------|
-| `check` | `[--secrets PATH]` `[--axis code\|issues]`     | one `✓`/`✗`/`-` line per check: `<mark> <label>  <detail>`. Exit non-zero if any check failed |
+| `check` | `[--secrets PATH]` `[--axis code\|issues]` `[--tracker REF]` | one `✓`/`✗`/`-` line per check: `<mark> <label>  <detail>`. Exit non-zero if any check failed |
 
 `auth check` verifies a token **before** anything relies on it: the identity the backend reports,
 whether the repo/project named in `config.json` is reachable, one probe per capability group the
@@ -187,8 +222,9 @@ skills exercise, and the token's expiry where the backend exposes it. Rules:
 - Failures carry the **backend's own wording**, which is what actually names the fix — GitLab's
   `insufficient_granular_scope … [Work Item: Read]`, GitHub's per-resource 403.
 - The **token is never printed** beyond its first 8 characters.
-- Both flags are dispatcher-owned. `--axis` selects which axis's coordinates and token to check
-  (default `code`). `--secrets PATH` points the token lookup at a **candidate** file so a new
+- All three flags are dispatcher-owned. `--axis` selects which axis's coordinates and token to
+  check (default `code`; on schema 3 `issues` means the default tracker). `--tracker REF`
+  (schema 3) checks that tracker with its own credential selection. `--secrets PATH` points the token lookup at a **candidate** file so a new
   token is verified before it replaces the live one; precedence is `--secrets` > `LS_SECRETS_FILE`
   > the normal resolution (`LS_TOKEN`/`FLIGHT_TOKEN` env, then the repo's secrets file) — an
   explicit candidate file deliberately beats an ambient env token.
@@ -214,7 +250,7 @@ behaves identically when invoked from a linked worktree. Driven by the
 
 | Verb    | Args | stdout |
 |---------|------|--------|
-| `list`  | `[--merged-into STAGE] [--pattern GLOB]… [--no-fetch]` | one row per **merged** candidate: `branch⇥where⇥merged-into⇥pr⇥issue⇥worktree`. `where` is `local`/`remote`/`local+remote`; `pr` is the merged PR number when the evidence came from the backend, else `-`; `issue` is the `N` parsed from `<prefix>/<N>-<slug>`, else `-`; `worktree` is the `.worktrees/` path still holding it, else `-`. Runs `git fetch --prune origin` first unless `--no-fetch` (a fetch failure warns, it does not stop). Unmerged branches are absent, not flagged. |
+| `list`  | `[--merged-into STAGE] [--pattern GLOB]… [--no-fetch]` | one row per **merged** candidate: `branch⇥where⇥merged-into⇥pr⇥issue⇥worktree`. `where` is `local`/`remote`/`local+remote`; `pr` is the merged PR number when the evidence came from the backend, else `-`; `issue` is the branch's issue as a qualified id from `scripts/issue-identity.sh` (`FJ-12` for `feature/fj-12-…`; a legacy `feature/12-…` branch through the migration's binding), `unbound` for a legacy branch whose tracker cannot be recovered, `error` when the identity lookup itself failed (the helper's reason goes to stderr — never read it as "no issue"), else `-` (before config schema 3: the `N` parsed from `<prefix>/<N>-<slug>`); `worktree` is the `.worktrees/` path still holding it, else `-`. Runs `git fetch --prune origin` first unless `--no-fetch` (a fetch failure warns, it does not stop). Unmerged branches are absent, not flagged. |
 | `prune` | `[--merged-into STAGE] [--pattern GLOB]… [--branch NAME]… [--local] [--remote] [--worktrees] [--dry-run] [--no-fetch]` | one row per action: `action⇥branch⇥detail`, where action is `remove-worktree`, `delete-local`, `delete-remote`, the `would-…` preview form, or `skip` (detail = why). Exits non-zero if anything was skipped because an operation *failed*. |
 | `sync-down` | `--from STAGE` | After a promotion into `STAGE` (`stages[i]`, `i ≥ 1`): for `j = i-1 … 0`, merge `stages[j+1]` back into `stages[j]` per that stage's `syncDown` (`direct` \| `pr` \| `none`, default = its `merge`). One row per stage, in cascade order: `stage⇥outcome⇥detail`, outcome ∈ `fast-forwarded` \| `merged` \| `already-level` \| `pr-merged` (detail starts `#N`) \| `skipped` (`none`) \| `stopped` \| `nothing-below` (`STAGE` is `stages[0]`). Runs the freshness check on each lower stage first (behind → fast-forward; ahead/diverged → `stopped`). `direct` merges with `--ff` (a merge commit only when needed) in the checkout holding the stage, or in a throwaway worktree when that checkout is dirty or absent, then pushes; `pr` recurses through the dispatcher — `pr open` (head = upper, base = lower, no issue keywords), `ci watch --pr`, then `pr merge --strategy merge` **only** on `status=success` — and leaves the PR open on anything else (red CI, or an all-skipped run that verified nothing). A conflict is aborted and reported. Stops the cascade and exits non-zero on the first `stopped` row; never resolves, rebases or resets a stage ([ADR 0002](../../docs/adr/0002-sync-down-after-promotion.md)). |
 
@@ -302,15 +338,18 @@ Safety is in the verb, not in the caller:
   pass through rather than mapping.
   MR **mergeability is computed asynchronously**, so an immediate `pr merge` right after `pr open`
   can transiently 405 until GitLab finishes its merge check — retry briefly (the rig smoke does).
-- **Jira backend specifics:** Jira is an **issues-axis-only** backend (an issue tracker, not a git
-  host) — it implements **only `issues` + `labels`**; `pr`/`ci` keep resolving to the `code`
+- **Jira backend specifics:** Jira is an **issue-tracker-only** backend (not a git host) — it
+  implements **only `issues` + `labels`**; `pr`/`ci` keep resolving to the `code`
   backend. Pair it with a git `code` backend. There is no `jira/pr` adapter file at all, so every
-  `pr` verb — `list` included — is unreachable through a Jira axis (the dispatcher's "no `pr`
+  `pr` verb — `list` included — is unreachable through a Jira tracker (the dispatcher's "no `pr`
   adapter for backend 'jira'"). `branches` treats a `pr list` it cannot get an answer from as
   "no PR evidence" and falls back to the ancestry test alone rather than failing. It targets Jira **Cloud REST v3** with HTTP **Basic**
   `email:api_token` auth (a classic Atlassian API token, not OAuth). The dispatcher threads two
-  generic passthroughs for it — `LS_PROJECT` (the project key, config `issues.project`) and
-  `LS_EMAIL` (config `issues.email`, or `LS_EMAIL` in the env). Decisions:
+  generic passthroughs for it — `LS_PROJECT` (the selected tracker's `project` key) and
+  `LS_EMAIL` (own credential: the tracker's `email`, else `secrets.issueTrackers.<REF>.email`;
+  a tracker on `credentialRef: "code"`: `LS_EMAIL` in the env, the tracker's `email`, then
+  `secrets.code.email`; a schema-1/2 config: `issues.project` / `issues.email` or `LS_EMAIL`).
+  Decisions:
   - **Identifier = key.** The `--number` value is a Jira **key** (`KAN-123`), treated as an opaque
     id; skills print `#<key>` unchanged. `issues create` returns the key.
   - **`set-status` → Jira labels.** Maps a role → a `status/*` **label** (atomic add-target /

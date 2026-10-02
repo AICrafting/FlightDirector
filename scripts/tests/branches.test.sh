@@ -29,8 +29,10 @@ STUB="$SANDBOX/flight-stub"
 cat >"$STUB" <<'EOF'
 #!/usr/bin/env bash
 # Stand-in for the dispatcher's `pr list` — prints $PR_ROWS when the requested
-# --head matches $PR_HEAD, nothing otherwise. Any other group exits non-zero,
-# which is what a Jira-style backend with no `pr` adapter does.
+# --head matches $PR_HEAD, nothing otherwise. `issues resolve|tracker` (the offline
+# identity verbs issue-identity.sh uses, #198) go to the real dispatcher. Any other
+# group exits non-zero, which is what a Jira-style backend with no `pr` adapter does.
+if [ "$1" = issues ] && { [ "$2" = resolve ] || [ "$2" = tracker ]; }; then exec "$FLIGHT_REAL" "$@"; fi
 [ "$1" = pr ] && [ "$2" = list ] || exit 2
 head=""
 while [ $# -gt 0 ]; do case "$1" in --head) head="$2"; shift 2 ;; *) shift ;; esac; done
@@ -38,6 +40,7 @@ while [ $# -gt 0 ]; do case "$1" in --head) head="$2"; shift 2 ;; *) shift ;; es
 printf '%s\n' "${PR_ROWS:-}"
 EOF
 chmod +x "$STUB"
+export FLIGHT_REAL="$DISPATCH"
 
 # ── the sandbox repo ─────────────────────────────────────────────────────────
 ORIGIN="$SANDBOX/origin.git"; R="$SANDBOX/repo"
@@ -145,6 +148,71 @@ check "a branch with a worktree reports its path" \
 	"$([ -n "$wt7" ] && [ "${wt7%/.worktrees/7-worktree}" != "$wt7" ] \
 		&& grep -q "^feature/7-worktree	local+remote	develop	-	7	$wt7\$" <<<"$out" \
 		&& echo 1 || echo 0)" "out=$out; wt7=$wt7"
+
+printf '\033[1m── schema 3: qualified issue identities (#198) ──\033[0m\n'
+# Two trackers' issue 10, a Jira issue, and the legacy branches above: the issue column
+# comes from issue-identity.sh — bindings, then qualified names, then the migrated
+# legacy default — and never from whichever tracker is the default now.
+for b in feature/fj-10-first feature/gh-10-second feature/jir-4-jira; do
+	branch "$b" "$(printf '%s' "$b" | tr '/' '-')"
+done
+git -C "$R" switch -q develop
+for b in feature/fj-10-first feature/gh-10-second feature/jir-4-jira; do git -C "$R" merge -q --no-ff -m "merge $b" "$b"; done
+git -C "$R" push -q origin develop
+cp "$R/.flightdirector/config.json" "$SANDBOX/config.legacy"
+cat >"$R/.flightdirector/config.json" <<'EOF'
+{
+  "schemaVersion": 3,
+  "code": {
+    "backend": "forgejo", "owner": "o", "repo": "r", "api": "http://fake",
+    "stages": [ { "name": "develop" }, { "name": "qa" }, { "name": "main" } ]
+  },
+  "issueTrackers": [
+    {"ref":"FJ","name":"Code issues","default":true,"backend":"forgejo","api":"http://fake","owner":"o","repo":"r"},
+    {"ref":"GH","name":"Public issues","backend":"github","api":"https://api.github.com","owner":"o","repo":"r"},
+    {"ref":"JIR","name":"Jira","backend":"jira","api":"https://jira.example.com","project":"PROJ","email":"bot@example.com"}
+  ]
+}
+EOF
+cp "$R/.flightdirector/config.json" "$SANDBOX/config.s3"
+BINDINGS="$R/.flightdirector/batches/work-items/identities.json"
+mkdir -p "$(dirname "$BINDINGS")"
+printf '%s\n' '{"schemaVersion":1,"legacyDefaultTracker":"FJ","branches":{"feature/7-worktree":{"tracker":"GH","number":"7","qualified":"GH-7","branchPrefix":"gh-7","legacy":true}},"manifests":{}}' >"$BINDINGS"
+row() { grep "^$1	" <<<"$2" | cut -f5; }
+out="$(run list)"
+check "same-number branches on two trackers report distinct identities" \
+	"$([ "$(row feature/fj-10-first "$out")" = FJ-10 ] && [ "$(row feature/gh-10-second "$out")" = GH-10 ] && echo 1 || echo 0)" "out=$out"
+check "a Jira branch reports its qualified id" "$([ "$(row feature/jir-4-jira "$out")" = JIR-4 ] && echo 1 || echo 0)" "out=$out"
+check "a legacy branch uses the migrated legacy default" "$([ "$(row feature/1-merged "$out")" = FJ-1 ] && echo 1 || echo 0)" "out=$out"
+check "a reconcile binding wins over the legacy default" "$([ "$(row feature/7-worktree "$out")" = GH-7 ] && echo 1 || echo 0)" "out=$out"
+check "a non-issue branch still reports no issue" "$([ "$(row batch/zone-0919 "$out")" = - ] && echo 1 || echo 0)" "out=$out"
+jq '.issueTrackers |= map(.default = (.ref == "GH"))' "$SANDBOX/config.s3" >"$R/.flightdirector/config.json"
+out="$(run list)"
+check "a default change moves no existing branch's identity" \
+	"$([ "$(row feature/1-merged "$out")" = FJ-1 ] && [ "$(row feature/fj-10-first "$out")" = FJ-10 ] && echo 1 || echo 0)" "out=$out"
+printf '%s\n' '{"schemaVersion":1,"branches":{},"manifests":{}}' >"$BINDINGS"
+out="$(run list)"
+check "a legacy branch with no recoverable binding reports unbound" "$([ "$(row feature/1-merged "$out")" = unbound ] && echo 1 || echo 0)" "out=$out"
+check "…while qualified branches need no binding" "$([ "$(row feature/gh-10-second "$out")" = GH-10 ] && echo 1 || echo 0)" "out=$out"
+# A lookup that FAILS (here: the binding's legacy default names a tracker since removed
+# from the config) is not "no issue" — the column says `error` and the reason reaches
+# stderr, so the cleanup skill cannot wave the branch through as issue-less.
+printf '%s\n' '{"schemaVersion":1,"legacyDefaultTracker":"OLD","branches":{},"manifests":{}}' >"$BINDINGS"
+errf="$SANDBOX/branches.err"
+out="$(run list)"
+FLIGHT_REPO_ROOT="$R" FLIGHT_CONFIG="$R/.flightdirector/config.json" FLIGHT_SELF="$STUB" \
+	bash "$BRANCHES" list --no-fetch >/dev/null 2>"$errf" || true
+check "a failed identity lookup reports error, not no-issue" "$([ "$(row feature/1-merged "$out")" = error ] && echo 1 || echo 0)" "out=$out"
+check "…and forwards the helper's reason to stderr" \
+	"$(grep -q 'feature/1-merged' "$errf" && grep -q "unknown tracker 'OLD'" "$errf" && echo 1 || echo 0)" "err=$(cat "$errf")"
+check "…while qualified branches are unaffected" "$([ "$(row feature/gh-10-second "$out")" = GH-10 ] && echo 1 || echo 0)" "out=$out"
+# Back to the pre-schema-3 fixture the rest of this file expects.
+cp "$SANDBOX/config.legacy" "$R/.flightdirector/config.json"
+rm -rf "$R/.flightdirector/batches"
+for b in feature/fj-10-first feature/gh-10-second feature/jir-4-jira; do
+	git -C "$R" branch -q -D "$b"; git -C "$R" push -q origin --delete "$b"
+done
+git -C "$R" fetch -q --prune origin
 
 check "--merged-into narrows to that one stage" \
 	"$(out2="$(run list --merged-into develop)"; grep -q '^bugfix/3-merged' <<<"$out2" && echo 0 || echo 1)" \

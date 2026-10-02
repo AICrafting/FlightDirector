@@ -24,7 +24,10 @@ See [flight-setup.md](../../references/flight-setup.md) and
 - **Never promote to a trunk stage without the hop's gate satisfied.** A `pre-merge` hop needs
   the user's go-ahead; a `post-merge-qa` hop merges then verifies. The gate governs *merging*;
   issue close/relabel is governed separately by the target stage's `closesIssues`/`issueStatus`
-  (Step 5). A `pr` hop uses `Closes #N` only when the target stage closes issues, else `Ready #N`.
+  (Step 5). A `pr` hop uses `Closes #N` only when the target stage closes issues, else `Ready #N` —
+  and only for an issue that lives in the code repository itself. Another tracker's issue is
+  named `Tracks GH-12` and driven explicitly in Step 5; a bare `#12` for it would close the code
+  repository's *own* issue 12 (Step 4).
 - **Halt if you can't write a test plan** for a resolved issue on a `pr` hop — an unwritable
   plan usually means the feature isn't reachable. Fix that before opening the PR, and don't reach
   for the `no user surface` hatch to get past it: that hatch is for an *inherently* absent
@@ -73,7 +76,7 @@ WT="$(cd "$(git rev-parse --show-toplevel)" && pwd)"
 MAIN="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 
 BRANCH="$(git -C "$WT" branch --show-current)"
-# Any FILENAME built from a branch name needs the slash flattened first. `feature/12-foo`
+# Any FILENAME built from a branch name needs the slash flattened first. `feature/fj-12-foo`
 # in a redirect target or a --status-file path names a *directory* that does not exist, so
 # the write fails and whatever depended on it reports a failure that never happened.
 SAFE_BRANCH="$(printf '%s' "$BRANCH" | tr '/' '-')"
@@ -104,24 +107,52 @@ STRATEGY="$(flight config '.code.stages[<i>].strategy // "merge"')"   # <i> = ta
 
 ## Step 2: Identify resolved issues
 
-Scan this branch's commits for issue references:
+Each resolved issue is carried by its **retained identity** — the
+`{tracker, number, qualified, branchPrefix}` JSON `flight issues resolve` prints — never by a bare
+number: the repo may have several issue trackers, two of them can both have an issue 12, and the
+default tracker may have changed since the work started. `$ISSUE_IDENTITY` is the helper from
+[runtime preflight](../../references/runtime.md).
 
-```
-git -C "$WT" log <target>..HEAD --oneline
-```
+- **Feature branch** (→ `stages[0]`): the branch names its issue.
+  ```
+  ISSUE="$("$ISSUE_IDENTITY" from-branch --branch "$BRANCH")"
+  ```
+  It reads qualified names (`feature/fj-12-…`, `feature/proj-7-…`) and the migration's bindings for
+  legacy `feature/12-…` branches. Exit 4 = a legacy branch whose tracker cannot be recovered: ask
+  the user which tracker it belongs to and rerun with `--tracker REF` (the answer is retained) —
+  never assume the current default. Exit 3 = the branch names no issue; use the commit scan below.
+- **Stage branch** (`stages[i]` → `stages[i+1]`), or any further issue a feature branch resolves:
+  scan the commits.
+  ```
+  git -C "$WT" log <target>..HEAD --oneline
+  ```
+  Record the issues actually *resolved* (judgment — a mention is not a resolution). Commits and
+  merges name them qualified (`feat(FJ-12): …`, `Merge branch 'feature/fj-12-…'`); history from
+  before the repo moved to named trackers names a bare `#12`. Resolve each one:
+  ```
+  ISSUE="$("$ISSUE_IDENTITY" from-history --ref "FJ-12")"      # or --ref "#12"
+  ```
+  A bare `#12` from history belongs to the tracker the repo migrated from — never to whichever is
+  the default now. But PR bodies written since the migration still say `Closes #12` for the code
+  repo's own tracker, so when that tracker is not the migrated one the helper cannot tell them
+  apart and exits 4. Exit 4 always means "ask": ask the user which tracker the reference means and
+  rerun with `--tracker REF`. A merged branch name can go through
+  `from-branch` instead.
 
-Record the `#N` that are actually *resolved* by this branch (judgment — a mention isn't a
-resolution). These drive the PR's `$KEYWORD #N` lines (see Step 4) and the test-plan block.
+For each identity keep `ISSUE` and
+`TRACKER="$(jq -r .tracker <<<"$ISSUE")"`, `NUMBER="$(jq -r .number <<<"$ISSUE")"` (native: `17`,
+or `PROJ-17` on Jira), `QUALIFIED="$(jq -r .qualified <<<"$ISSUE")"`. Every later issue and label
+call passes `--tracker "$TRACKER" --number "$NUMBER"`.
 
 ## Step 3: Test plans and deferrals (pr hops) — HALT if missing
 
-For each resolved `#N`, fetch the issue **and its comments** and draft a user-visible test plan.
+For each resolved identity, fetch the issue **and its comments** and draft a user-visible test plan.
 Scope corrections and acceptance changes live in the thread, and the work-ledger comments say
 what was actually built — the plan must test *that*, not the original body:
 
 ```
-flight issues get      --number N
-flight issues comments --number N
+flight issues get      --tracker "$TRACKER" --number "$NUMBER"
+flight issues comments --tracker "$TRACKER" --number "$NUMBER"
 ```
 
 Write one plan per issue (numbered steps + an `Expected:` line; or `- no user surface — verify
@@ -154,23 +185,24 @@ records as deliberately not done is a deferral, however it happens to be phrased
 *examples of the shape*, not a list to grep for — `TODO: handle the multi-tenant case` is exactly
 what this rule exists to catch, and it matches none of them.
 
-Every deferred item needs a **live tracker** — an `#N` you have verified *open*, or an issue you
-file right then. `issues get` reports state as field 3, normalized to `open`/`closed` on every
-backend (#205):
+Every deferred item needs a **live tracker** — an issue you have verified *open*, or one you
+file right then — written by its qualified id (`FJ-31`, `GH-8`) so it names one issue however
+many trackers the repo has. `issues get` reports state as field 3, normalized to `open`/`closed`
+on every backend (#205), and a qualified id routes to its own tracker:
 
 ```
-IFS=$'\t' read -r _ _ STATE <<<"$(flight issues get --number "<N>")"
+IFS=$'\t' read -r _ _ STATE <<<"$(flight issues get --number "FJ-31")"
 [ "$STATE" = open ]              # true → open, deferral is tracked; false → HALT
 ```
 
-A number that doesn't exist makes `issues get` exit non-zero and leaves `$STATE` empty, so an
-invented `#N` halts on the same test rather than slipping through.
+An issue that doesn't exist makes `issues get` exit non-zero and leaves `$STATE` empty, so an
+invented id halts on the same test rather than slipping through.
 
-A closed `#N` is a failure, not a pass. And **an issue this PR resolves does not count as the
+A closed issue is a failure, not a pass. And **an issue this PR resolves does not count as the
 tracker** — not even on a `Ready #N` hop where it stays open for now. It closes when the work
 reaches a closing stage and takes the note with it, leaving the item recorded only in a merged PR
 body nobody has a reason to open again. Being open *today* is not the test; surviving the work is.
-**Halt if any deferred item has no live tracker** — file the successor issues, put their numbers
+**Halt if any deferred item has no live tracker** — file the successor issues, put their qualified ids
 in the body, then open the PR.
 
 ## Step 4: Promote
@@ -228,7 +260,7 @@ repo that has not opted in, and their promotions are unchanged.
 ```
 PREFLIGHT="$(flight config '.code.preflight // empty')"
 if [ -n "$PREFLIGHT" ]; then
-    # $SAFE_BRANCH, not $BRANCH — Step 1 flattened the slash. A raw `feature/<N>-<slug>`
+    # $SAFE_BRANCH, not $BRANCH — Step 1 flattened the slash. A raw `feature/<prefix>-<slug>`
     # here names a directory that does not exist, so the redirection fails *before* the
     # gate runs and a PASSING gate is reported red with no output to explain it.
     PFLOG="$SCRATCH/preflight-$SAFE_BRANCH.log"
@@ -327,10 +359,13 @@ forking from the remote would silently drop those commits — STOP and report in
 > abort with "fatal: '<target>' is already checked out at …".
 
 **`pr` hop:** open a PR into the target stage and watch CI. Assemble the body in a scratchpad
-file (Summary + the `## Test plans` block + `$KEYWORD #N` lines — `Closes` when the target
-stage closes issues, else `Ready`). Run the Step 3 **deferral scan** over that file before it is
-posted: every "known gap" / "out of scope" item needs a verified-open `#N`, and an issue this PR
-resolves doesn't count. Then:
+file (Summary + the `## Test plans` block + one issue line per resolved issue from `pr-reference`
+below). The PR lives on the code forge, which may be public while an issue tracker is private:
+**do not paste issue bodies, comments, work-ledger entries or tracker URLs into it** — describe
+the change and write the test steps in your own words, and name issues only by the lines
+`pr-reference` prints. Run the Step 3 **deferral scan** over that file before it is posted: every
+"known gap" / "out of scope" item needs a verified-open issue, and an issue this PR resolves
+doesn't count. Then:
 
 Resolve whether the **target stage** closes issues (drives the PR keyword *and* Step 5). `<i>` is
 the target stage's index:
@@ -340,9 +375,15 @@ LAST_IDX=$(( $(flight config '.code.stages | length') - 1 ))
 CLOSES="$(flight config ".code.stages[<i>].closesIssues // null")"
 if [ "$CLOSES" = "null" ]; then [ "<i>" -eq "$LAST_IDX" ] && CLOSES=true || CLOSES=false; fi
 ISSUE_STATUS="$(flight config ".code.stages[<i>].issueStatus // empty")"
-# PR issue keyword: Closes only if the target stage closes issues, else Ready (keeps issue open).
-KEYWORD=Ready; [ "$CLOSES" = true ] && KEYWORD=Closes
+# One line per retained identity from Step 2:
+"$ISSUE_IDENTITY" pr-reference --identity "$ISSUE" --closes "$CLOSES" >> "$SCRATCH/pr-body.md"
 ```
+
+The forge acts on `Closes #N` against the PR's **own** repository, so `pr-reference` writes
+`Closes #12` (closing stage) or `Ready #12` only when the issue's tracker *is* the code repository —
+same backend, same api host, same owner/repo. For any other tracker it writes `Tracks GH-12`,
+which no forge acts on: a cross-tracker PR can never close the code repository's unrelated issue
+12. Step 5 then updates the issue on its own tracker explicitly, whichever line was written.
 
 The PR is built from the **pushed** branch tip, not your local working copy — so **run the Step
 4b preflight gate here**, before `pr open`. A red gate stops the promotion with no PR opened;
@@ -420,17 +461,19 @@ flight pr merge --number "$PR_NUM" --strategy "$STRATEGY"
 ## Step 5: Drive linked-issue lifecycle from the target stage
 
 After the merge into `<target>` succeeds, the **target stage** decides what happens to each
-resolved `#N` — the *same* rule at every hop, `direct` or `pr`. Reuse `CLOSES` / `ISSUE_STATUS`
+resolved identity — the *same* rule at every hop, `direct` or `pr`. Reuse `CLOSES` / `ISSUE_STATUS`
 from the resolution block in Step 4 (for a `direct` hop, which skips that `pr`-only block, compute
-them now with the same snippet). For each resolved `#N`:
+them now with the same snippet). For each identity retained in Step 2 — on **its own** tracker, via
+`--tracker "$TRACKER" --number "$NUMBER"`, which maps the status role through that tracker's label
+map and closes through that tracker's backend (for Jira, the native key):
 
 - `ISSUE_STATUS` non-empty → set the stage's status atomically:
   ```
-  flight issues set-status --number N --status "$ISSUE_STATUS"
+  flight issues set-status --tracker "$TRACKER" --number "$NUMBER" --status "$ISSUE_STATUS"
   ```
 - `CLOSES` is `true` → close it; otherwise leave it **open** so a later promotion handles it:
   ```
-  flight issues close --number N
+  flight issues close --tracker "$TRACKER" --number "$NUMBER"
   ```
 
 Once the merge has landed, the branch itself is leftovers — **cleaning-up-branches** finds it
@@ -482,6 +525,11 @@ you would for a diverged target in Step 4a.
 - Using `Closes #N` when promoting into a stage that does **not** close issues (a non-terminal
   stage, or one with `closesIssues: false`) — that auto-closes before later verification. Use
   `Ready #N`; `Closes #N` is only for a stage whose effective `closesIssues` is true.
+- Writing `Closes #N` / `Ready #N` by hand for an issue on another tracker. The forge reads it as
+  the code repository's issue N and closes an unrelated issue. Use `pr-reference`'s line.
+- Re-resolving a bare issue number at promotion time. If the default tracker changed since the
+  work started, `12` now means a different issue; the branch (or a qualified commit reference)
+  is the identity.
 - Hand-merging in `working-an-issue` instead of letting this skill own the hop.
 - Running a bare `git merge` / `git push` / `git switch` here. A promotion always spans two
   checkouts; anchor every command with `-C "$MAIN"` or `-C "$WT"` so it cannot act on whichever

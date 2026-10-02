@@ -16,14 +16,14 @@ mkdir -p "$SANDBOX/.flightdirector"
 
 # Seed the sandbox config; every test starts from a known shape.
 seed() {
-	printf '%s\n' "$1" >"$CFG"
+	printf '%s\n' "$1" | jq '.code = ({backend:"forgejo",api:"https://local.invalid/api",owner:"x",repo:"y"} * (.code // {}))' >"$CFG"
 }
 
-# --- fresh config: schema 2, stamp nested under the plugin, unknown keys kept ---
+# --- fresh config: schema 3, stamp nested under the plugin, unknown keys kept ---
 seed '{"custom":{"preserve":true},"code":{"backend":"forgejo"}}'
 
 (cd "$SANDBOX" && "$DISP" reconcile --harness codex)
-[ "$(jq -r '.schemaVersion' "$CFG")" = 2 ]
+[ "$(jq -r '.schemaVersion' "$CFG")" = 3 ]
 [ "$(jq -r --arg p "$EXPECTED_PLUGIN" '.harnesses.codex.plugins[$p].reconciledWith' "$CFG")" = "$EXPECTED_VERSION" ]
 [ "$(jq -r '.harnesses.codex.reconciledWith // "absent"' "$CFG")" = absent ]
 [ "$(jq -r '.custom.preserve' "$CFG")" = true ]
@@ -42,7 +42,7 @@ fi
 # --- migration: a legacy (schema 1) bare stamp moves into plugins.flight ---
 seed '{"schemaVersion":1,"custom":{"preserve":true},"harnesses":{"codex":{"reconciledWith":"0.9.0"},"claude":{"reconciledWith":"0.9.0"}}}'
 (cd "$SANDBOX" && "$DISP" reconcile --harness codex)
-[ "$(jq -r '.schemaVersion' "$CFG")" = 2 ]
+[ "$(jq -r '.schemaVersion' "$CFG")" = 3 ]
 [ "$(jq -r '.harnesses.codex.plugins.flight.reconciledWith' "$CFG")" = "$EXPECTED_VERSION" ]
 [ "$(jq -r '.harnesses.codex.reconciledWith // "absent"' "$CFG")" = absent ]
 [ "$(jq -r '.custom.preserve' "$CFG")" = true ]
@@ -71,9 +71,11 @@ seed '{"schemaVersion":2,"harnesses":{"codex":{"plugins":{"multiclaude":{"reconc
 (cd "$SANDBOX" && "$DISP" reconcile --harness codex)
 [ "$(jq -r --arg p "$EXPECTED_PLUGIN" '.harnesses.codex.plugins[$p].reconciledWith' "$CFG")" = "$EXPECTED_VERSION" ]
 
-# --- a newer schemaVersion is never rolled back ---
+# --- a newer schemaVersion is rejected and never rolled back ---
 seed '{"schemaVersion":7,"harnesses":{}}'
-(cd "$SANDBOX" && "$DISP" reconcile --harness codex)
+if (cd "$SANDBOX" && "$DISP" reconcile --harness codex) 2>/dev/null; then
+	exit 1
+fi
 [ "$(jq -r '.schemaVersion' "$CFG")" = 7 ]
 
 printf 'reconcile tests passed\n'

@@ -25,6 +25,117 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   `flight config worker-model --harness claude|codex`. `setting-up-a-repo` now asks for the list. With no setting, the default is
   `["sonnet", "luna"]`, so Codex gets a default worker model too (it used to be `sonnet` only).
 
+- **A repo can have several named issue trackers** (#197; ships together with #198's
+  tracker-aware work lifecycle and #199's tracker setup). Config schema 3 replaces the single
+  `issues` object and top-level `labels` map with an `issueTrackers` array: each tracker has a
+  stable `ref` (`GH`, `FJ`, or a Jira project key), optional aliases, its own coordinates, its
+  own credential and its own label map, and exactly one is the default. `code` still owns code,
+  PRs, CI and the stage pipeline. Several trackers may share a backend. The dispatcher routes
+  every issue and label verb to one tracker: a bare number means the default; `GH-12`, `GH12`,
+  `GH#12` or a Jira key such as `PROJ-7` name their tracker; `--tracker REF` selects explicitly.
+  Ambiguous or unknown refs fail with suggestions — flight never guesses where to write. New
+  dispatcher verbs: `issues resolve` (the canonical `{tracker, number, qualified, branchPrefix}`
+  identity), `issues tracker` (the selected entry), `issues list --all-trackers` (every tracker,
+  each row prefixed with its qualified id; a tracker that cannot be reached is reported and fails
+  the listing instead of looking empty), and `auth check --tracker REF`.
+
+  **Migration is automatic.** The next `flight reconcile` (every skill runs it first) converts
+  the repo: the old issue settings, inherited code coordinates and the complete label map
+  (including a `new` starting status as a string, `false`, or absent) become one default
+  tracker; a legacy `config.local.json` override and the gitignored `secrets.json` are converted
+  on each machine — onto the tracker the repo migrated from (`legacyIssueTracker`), even if the
+  default has changed since — without local values reaching the committed file and without
+  printing a token; pre-schema-3 `feature/<N>-…` branches and batch manifests are recorded in
+  `.flightdirector/batches/work-items/identities.json` (already gitignored by setup) as belonging
+  to the tracker that was the default at migration, so changing the default later never
+  re-points old work. The migration runs every check before its first write (a refusal leaves
+  every file untouched), writes the committed config last, and is safe to re-run; a repeat run
+  changes nothing.
+
+  **Compatibility:**
+  - **Update every clone and harness together.** Commit the migrated `config.json` only once
+    everyone uses a Flight with schema-3 support. Older Flight versions do not know schema 3;
+    migration leaves an `issues.backend: "requires-newer-flight"` stub so they stop with a
+    "no 'issues' adapter" error instead of acting on the code repository, but they cannot use
+    the trackers. This Flight in turn refuses any config newer than schema 3.
+  - **Issues on the code host keep sharing the code token** — the code repository or a sibling
+    repository on the same backend and api host — including `LS_TOKEN` / `FLIGHT_TOKEN` /
+    `FORGEJO_TOKEN` environment overrides, so CI and env-token setups work unchanged (the
+    tracker gets `credentialRef: "code"`). A tracker that had its own issue token, or one on
+    another host, gets its own credential under `secrets.issueTrackers.<REF>`, which environment
+    tokens never override; the issue token is moved there, and the code token is never copied.
+    On another host with no issue token, reconcile says the tracker needs one.
+  - **A `config.local.json` that only overrides `code` coordinates no longer steers the issue
+    tracker.** Before, the issues axis followed a local code `api`/`owner` override; now the
+    tracker keeps its committed coordinates and reconcile says so once. To point a tracker at a
+    local route, put a complete `issueTrackers` array in `config.local.json` (arrays replace
+    wholesale — a local array missing a tracker hides it, and every tracker-routed command warns).
+  - A clone whose legacy local override or issue credential cannot be attached safely — the
+    config has no `legacyIssueTracker`, it names no configured tracker, or the credential was
+    used with another host — is refused with a repairable error, nothing changed.
+  - `issues list` without `--all-trackers`, and every existing unqualified command, keep their
+    exact output and act on the default tracker. `auth check --axis issues` checks the default
+    tracker.
+  - Anything that read `.labels` or `.issues` through `flight config` must read the tracker
+    instead, e.g. `flight issues tracker | jq -r '.labels.status["to-test"]'`; the bundled
+    skills are updated by #198/#199.
+
+- **Issue work stays attached to the tracker it started on** (#198; ships with #197 and #199).
+  Every workflow skill resolves the issue you name **once** — `12` means the default tracker,
+  `GH-12` / `PROJ-7` name theirs — and then passes that tracker and native id on every later
+  write: comments, the work ledger, model labels, status changes, assignment and close. Changing
+  the default tracker mid-work therefore redirects nothing, and two trackers' issue 12 never
+  collide:
+  - **New branches and worktrees always carry the tracker**, the default's included:
+    `feature/fj-12-<slug>` in `.worktrees/fj-12-<slug>`, and `feature/proj-7-<slug>` for Jira.
+    Commits are written `feat(FJ-12): …`. Existing `feature/12-…` branches keep working: they
+    belong to the tracker the repo migrated from (the bindings #197's migration records), and a
+    legacy branch whose tracker cannot be recovered makes the skill **ask** instead of assuming
+    the current default.
+  - **Promotion only writes `Closes #N` / `Ready #N` for an issue in the code repository
+    itself** (same backend, host and owner/repo) — a PR can no longer close the code repo's
+    unrelated issue 12 because a different tracker's issue 12 was worked. Other trackers' issues
+    get a non-linking `Tracks GH-12` line and are updated on their own tracker by the promotion.
+    Issue bodies, comments, ledgers and tracker URLs are not copied into PRs.
+  - Triage, filing's duplicate scan and queue planning list **every** tracker (`FJ-12`, `JIR-7`)
+    and filter each by its own status labels; a tracker that cannot be reached is reported as
+    unavailable, not shown as an empty backlog.
+  - `flight branches list` reports the qualified issue (`FJ-12`, `unbound`, or `error` with the
+    reason on stderr when the lookup fails) in its issue column, and batch manifests record full identities (`batch-manifest groups` prints
+    `zone⇥FJ-7,GH-12`); manifests written before the upgrade keep working through the same
+    bindings. Both behave exactly as before on a config that has not migrated yet.
+  - New helper `scripts/issue-identity.sh` (the one place branch names, manifest entries and
+    history references become an identity), used by the scripts and skills alike. A bare `#12`
+    found in history maps to the tracker the repo migrated from only while that is also the
+    code repo's own tracker (or there is none); otherwise it is ambiguous and the promotion asks
+    which tracker it means.
+
+- **New `add-an-issue-tracker` skill, and setup writes named trackers** (#199; ships with #197
+  and #198). Say "add an issue tracker", "connect Jira" or "track issues on GitHub too" to add a
+  second (or tenth) tracker beside the first: it collects the coordinates, proposes a stable
+  ref — the Jira project key for a Jira project, otherwise `FJ` / `GH` / `GL` — and asks for
+  another when that ref or an alias is already taken, instead of suffixing one silently. A
+  tracker on the code repository shares the code token (`credentialRef: "code"`, so env tokens
+  and CI keep working); any other gets its own token under `secrets.issueTrackers.<REF>`,
+  checked with `flight auth check --tracker <REF>`. It then reconciles **that tracker's** labels
+  on their own — adopting the names it already uses, creating only what is missing after one
+  preview, never renaming or deleting a label — and records the full role map in the tracker's
+  entry. Adding a tracker never moves the default; changing it is an explicit request.
+  `setting-up-a-repo` keeps the code coordinates, stage pipeline and repo preferences (worker
+  model, prompt ledger, preflight gate) and hands the first tracker to the new skill, which
+  makes it the default. A fresh setup now writes a schema-3 config (with the
+  `requires-newer-flight` stub, so an older Flight stops loudly rather than acting on the wrong
+  repository); an existing repo is converted by `flight reconcile`, never by hand.
+  - **The starting-status question moved into tracker setup and is asked per tracker** — one
+    tracker can use `status/new` while another declines. An existing answer carries over
+    unchanged through migration: a label name stays configured, `false` stays declined, and a
+    tracker that was never asked is asked on the next setup re-run.
+  - **Re-running setup preserves everything already answered** — trackers, refs, credentials,
+    label names and the default — and asks each tracker only the questions it has no answer for
+    yet (a migrated tracker is typically offered aliases).
+  - The breadcrumb setup writes into `AGENTS.md` now names the trackers and the
+    tracker-qualified branch form (`feature/fj-12-…`); re-run setup to refresh an existing one.
+
 ### Changed
 
 - **Docs: why GitHub uses a repo-scoped token, not your `gh` login** (#243). `backends.md` now
@@ -54,14 +165,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   records a declined offer as `"preflight": false`, which behaves exactly like leaving it out, so
   an existing repo picks the question up on its next setup re-run.
 
-- **A repo can nominate a starting status for newly filed issues** (#193). `setting-up-a-repo`
-  now offers it: a freshly filed issue gets a `status/*` label so a board can tell "nobody has
+- **A repo can nominate a starting status for newly filed issues** (#193). Setup offers it — per
+  tracker, from `add-an-issue-tracker` (#199), which `setting-up-a-repo` runs for the first one: a
+  freshly filed issue gets a `status/*` label so a board can tell "nobody has
   looked at this yet" apart from "someone forgot the label", and "what is untriaged?" becomes a
   label query. The suggested name is `status/new`, but like every other status role it is
   **mappable** — point the role at whatever you already call that state (`status/triage`,
   `status/open`, `status/backlog`), and an equivalent label you already have is adopted rather
-  than duplicated. **Opt-in and off unless asked for**: with no `labels.status.new` in the config
-  nothing changes, which is every repo configured before this. When it is on, `flight issues
+  than duplicated. **Opt-in and off unless asked for**: with no `labels.status.new` on a tracker
+  nothing changes for it, which is every repo configured before this. When it is on, `flight issues
   create` applies the label; passing a `status/*` label of your own leaves it alone, and
   `--no-status` skips it for one issue. It is an ordinary status, so the first `set-status` —
   normally when `working-an-issue` starts — removes it, and `triaging-issues` deliberately does
