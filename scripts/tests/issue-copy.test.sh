@@ -264,7 +264,7 @@ set +e
 OUT="$(cd "$D" && "$DISP" issues copy --from FJ-12 --to GH --tracker GH 2>&1)"; RC=$?
 set -e
 check "--tracker is refused (the trackers are --from and --to)" "$([ "$RC" = 1 ] && grep -q -- '--from/--to' <<<"$OUT" && echo 1 || echo 0)" "rc=$RC out=$OUT"
-check "the capability token is advertised" "$("$DISP" capabilities | grep -qx issues-copy && echo 1 || echo 0)"
+check "the capability token is advertised" "$(grep -qx issues-copy <<<"$("$DISP" capabilities)" && echo 1 || echo 0)"
 
 [ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
 printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
