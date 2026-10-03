@@ -15,6 +15,14 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Added
 
+- **Copy issues between trackers** (FJ-200). `flight issues copy --from FJ-12 --to GH` copies an
+  issue to another configured tracker. The body, comments (with their original author and date),
+  name-matched labels and the status (mapped by role) are copied by default and each can be
+  turned off; an optional "Copied from" footer and "Copied to" back-link are off by default.
+  `flight issues resync` later brings over comments added to the source. A local ledger
+  (`.flightdirector/copies.jsonl`) refuses accidental second copies and lets a copy that failed
+  partway finish. The new `copying-an-issue` skill adds a duplicate scan and a dry-run preview.
+  Capability token: `issues-copy`.
 - **Cursor paging for `issues list --json`** (#262). `--per-page M` returns one page and a
   `next` cursor, and `--cursor C` fetches the page after it, so a "Load more" button no longer
   re-downloads the whole list with a growing `--limit`. Pages run newest created first, ties by

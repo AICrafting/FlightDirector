@@ -278,6 +278,31 @@ Safety is in the verb, not in the caller:
 - Stage branches, `archived/*`, and any branch checked out in the main checkout or a worktree
   outside `.worktrees/` are protected regardless of the patterns.
 
+### `issues copy` / `issues resync` (dispatcher-owned)
+
+Copy one issue to another configured tracker, and later bring that copy up to date with source
+comments. Like `branches`, these live in the dispatcher (`scripts/issue-copy`) rather than in an
+adapter: they read and write each side back through the dispatcher with that tracker's own
+credential and label map, so every backend pair works.
+
+| Verb | Args | stdout |
+|---|---|---|
+| `copy` | `--from ID --to TRACKER` `[--no-body] [--no-comments] [--no-labels] [--no-status] [--footer] [--back-link] [--force] [--dry-run]` | the copy's display id; skipped labels/status on stderr. `--dry-run`: the plan, nothing written |
+| `resync` | `--from ID --to TRACKER [--dry-run]` | the number of comments posted (`0` = up to date) |
+
+- Title always; body, comments, labels and status by default. Labels match **by exact name**
+  and are never created on the target. Status maps by **role** (the source's label → its role →
+  the target's label for it). Comments are posted oldest-first under an attribution line
+  (`**author** commented on YYYY-MM-DD:`). Assignees, open/closed state and attachments are
+  never copied, and the source is never closed.
+- The source ↔ copy link is recorded in `.flightdirector/copies.jsonl` (see
+  [flight-setup.md](flight-setup.md)). `copy` refuses a source already recorded for that
+  tracker (`already-copied`; `--force` overrides). `resync` posts the source comments the
+  record doesn't list and touches nothing else. A record is written after each step, so a copy
+  that fails partway is finished by `resync`.
+- `--tracker` is refused: the two trackers are `--from` (any id `issues resolve` accepts) and
+  `--to` (a ref or alias). `--to` the source's own tracker is a usage error. Requires config schema 3.
+
 ## Notes
 
 - `--body-file` exists alongside `--body` precisely so multi-line markdown / fenced code (PR

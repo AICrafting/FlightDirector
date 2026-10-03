@@ -7,7 +7,7 @@
 > called `lightspeed` during initial development/testing — see the [CHANGELOG](CHANGELOG.md)
 > for the migration notes.
 
-Nine skills for running an issue + code workflow from Claude Code or Codex using one shared package.
+Ten skills for running an issue + code workflow from Claude Code or Codex using one shared package.
 Everything goes through the **flight dispatcher** — `flight <group> <verb>` — which calls
 the backend's REST API with `curl`. Skills resolve its installed path rather than requiring Codex
 to inject the plugin's `bin/` directory into `PATH`.
@@ -21,6 +21,7 @@ server to install.
 | Skill | Triggers on | Does |
 |---|---|---|
 | `filing-issues` | "file an issue", "open a ticket", "track this", "log a bug", `/issue …` | Dedupe-check → write → label → create; or confirm-then-update an existing issue |
+| `copying-an-issue` | "copy FJ-12 to GH", "pull GH-3 into Forgejo", "resync the copy" | Copies one issue to another configured tracker (title, plus optional body, comments, labels, status) after a duplicate scan and a dry-run preview; later resyncs comments added to the source; never closes the source |
 | `triaging-issues` | "what should I work on", "what's next", "quick wins", "show open issues" | Lists and filters open issues for selection (read-only) |
 | `working-an-issue` | "let's work on #N", "start issue #N", "this is ready to test", "merge #N" | Per-issue worktree → status-label → test → promote (delegated) → finish lifecycle, with a human gate before merge |
 | `promoting-a-branch` | "promote this", "promote to qa", "open a PR for this branch", "this branch is ready" | Advances the current branch one stage up the pipeline (feature → develop → qa → main), with the hop's merge strategy, gate, test-plan halt, and CI watch |

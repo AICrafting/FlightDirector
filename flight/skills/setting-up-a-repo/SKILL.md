@@ -183,8 +183,10 @@ and [flight-setup.md](../../references/flight-setup.md) for the config schema. T
    `queue-batches`' per-run batch manifests **and** the retained work identities under
    `batches/work-items/` (which tracker each branch's issue belongs to) — local, durable state
    (not secrets) that must be ignored so it doesn't appear as untracked content, and that must
-   not be deleted wholesale. Add `.flightdirector/prompt-log.jsonl` too if the user opts into
-   the prompt ledger in Step 4 (it holds prompt text).
+   not be deleted wholesale. Add `.flightdirector/copies.jsonl` too: `flight issues copy`
+   records there which issue was copied to which tracker, and on a public repo those links
+   would reveal private issue ids. Add `.flightdirector/prompt-log.jsonl` too if the user opts
+   into the prompt ledger in Step 4 (it holds prompt text).
 3. Write `.flightdirector/secrets.json` — or, on a re-run, merge into it, keeping every
    `issueTrackers` credential and unknown key:
    ```json

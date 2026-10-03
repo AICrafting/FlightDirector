@@ -19,7 +19,7 @@ has() { grep -qF -- "$2" "$1" && echo 1 || echo 0; }
 
 LIFECYCLE="$SK/working-an-issue/SKILL.md $SK/filing-issues/SKILL.md $SK/triaging-issues/SKILL.md
 $SK/queue-batches/SKILL.md $SK/queue-batches/templates/agent-prompt.md $SK/promoting-a-branch/SKILL.md
-$SK/promoting-branches/SKILL.md $SK/cleaning-up-branches/SKILL.md"
+$SK/promoting-branches/SKILL.md $SK/cleaning-up-branches/SKILL.md $SK/copying-an-issue/SKILL.md"
 
 # shellcheck disable=SC2086  # word-split file list
 hits="$(grep -nE "config '\.labels|config \"\.labels" $LIFECYCLE || true)"
@@ -86,6 +86,12 @@ check "the adapter contract documents the branches error value" \
 	"$(has "$REPO_ROOT/flight/references/adapter-contract.md" '`error` when the identity lookup itself failed')"
 hits="$(grep -rn 'work-items\.json\|bind-legacy-default' "$REPO_ROOT/flight" "$REPO_ROOT/.gitignore" || true)"
 check "nothing uses the retired work-items.json path or a second legacy binder" "$(none "$hits")" "$hits"
+
+C="$SK/copying-an-issue/SKILL.md"
+check "copying-an-issue resolves the source once" "$(has "$C" 'ISSUE="$(flight issues resolve --number "$INPUT")"')"
+check "copying-an-issue previews with --dry-run before copying" "$(has "$C" 'flight issues copy --from "$QUALIFIED" --to "$DST_T" --dry-run')"
+check "copying-an-issue scans the target for duplicates" "$(has "$C" 'flight issues list --tracker "$DST_T" --state open --limit 100')"
+check "filing-issues points copy requests at copying-an-issue" "$(has "$SK/filing-issues/SKILL.md" 'copying-an-issue')"
 
 [ "$fail" -gt 0 ] && colour=$'\033[0;31m' || colour=''
 printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$colour" "$pass" "$fail"
