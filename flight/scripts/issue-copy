@@ -195,6 +195,32 @@ copy_issue() {
 		"status:$WANT_STATUS" "footer:$WANT_FOOTER" "back-link:$WANT_BACKLINK" \
 		| jq -R -s -c 'split("\n") | map(select(endswith(":1")) | rtrimstr(":1"))')"
 
+	if [ "$DRY" = 1 ]; then
+		local n_comments=0
+		if [ "$WANT_COMMENTS" = 1 ]; then n_comments="$(jq 'length' <<<"$COMMENTS")"; fi
+		RESULT="$(jq -cn --arg s "$SRC_Q" --argjson split "$split" --argjson n "$n_comments" \
+			--argjson body "$WANT_BODY" --argjson footer "$WANT_FOOTER" --argjson back "$WANT_BACKLINK" \
+			--arg st "$applied_status" --arg skst "$skip_status" '
+			{source: $s, target: null, dryRun: true,
+			 copied: {body: ($body == 1), comments: $n, labels: $split.apply,
+			          status: (if $st == "" then null else $st end), footer: ($footer == 1), backLink: ($back == 1)},
+			 skipped: {labels: $split.skip, status: (if $skst == "" then null else $skst end)}}')"
+		if [ -n "${LS_JSON:-}" ]; then printf '%s\n' "$RESULT"; return 0; fi
+		jq -r --arg title "$(jq -r '.title' <<<"$issue")" --arg to "$DST_T" --arg label "$status_label" '
+			def yn: if . then "yes" else "no" end;
+			"copy \(.source) → \($to) (dry run, nothing written)",
+			"  title      \($title)",
+			"  body       \(.copied.body | yn)",
+			"  comments   \(.copied.comments)",
+			"  labels     \(if (.copied.labels | length) > 0 then .copied.labels | join(", ") else "none" end)",
+			"  status     \(if .copied.status then "\(.copied.status) → \($label)" else "none" end)",
+			"  footer     \(.copied.footer | yn)",
+			"  back-link  \(.copied.backLink | yn)",
+			(if (.skipped.labels | length) > 0 then "  skipped    labels \($to) does not have: \(.skipped.labels | join(", "))" else empty end),
+			(if .skipped.status then "  skipped    status \(.skipped.status) (\($to) has no label for that role)" else empty end)' <<<"$RESULT"
+		return 0
+	fi
+
 	local args=(issues create --tracker "$DST_T" --title "$(jq -r '.title' <<<"$issue")" --body-file "$TMP/body.md")
 	while IFS= read -r l; do
 		if [ -n "$l" ]; then args+=(--label "$l"); fi
@@ -229,7 +255,25 @@ copy_issue() {
 	report "$RESULT" "$DST_D"
 }
 
+resync_issue() {
+	local rec n
+	rec="$(ledger_find "$SRC_Q" "$DST_T")"
+	[ -n "$rec" ] || fail not-found "no copy of $SRC_D on $DST_T in this clone's ledger ($LEDGER) — copies made on another machine are not recorded here"
+	DST_Q="$(jq -r '.target' <<<"$rec")"
+	COMPONENTS="$(jq -c '.components // []' <<<"$rec")"
+	COMMENTS="$(fl issues comments --number "$SRC_Q")"
+	if [ "$DRY" = 1 ]; then
+		n="$(jq --argjson h "$(jq -c '.comments // []' <<<"$rec")" '[.[] | select(.id as $i | $h | any(.[]; . == $i) | not)] | length' <<<"$COMMENTS")"
+		RESULT="$(jq -cn --arg s "$SRC_Q" --arg t "$DST_Q" --argjson n "$n" '{source:$s, target:$t, dryRun:true, copied:{comments:$n}, skipped:{}}')"
+		report "$RESULT" "resync $SRC_Q → $DST_Q (dry run, nothing written): $n comment(s) to post"
+		return 0
+	fi
+	post_comments "$DST_Q" "$(jq -c '.comments // []' <<<"$rec")"
+	RESULT="$(jq -cn --arg s "$SRC_Q" --arg t "$DST_Q" --argjson n "$POSTED" '{source:$s, target:$t, copied:{comments:$n}, skipped:{}}')"
+	report "$RESULT" "$POSTED"
+}
+
 case "$VERB" in
 	copy) copy_issue ;;
-	resync) die "resync is not implemented yet" ;;
+	resync) resync_issue ;;
 esac

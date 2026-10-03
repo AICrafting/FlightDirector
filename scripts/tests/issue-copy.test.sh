@@ -166,6 +166,63 @@ check "an unknown target tracker fails before anything is written" \
 hc copy --from FJ-12
 check "--to is required" "$([ "$RC" = 1 ] && grep -q usage <<<"$ERR" && echo 1 || echo 0)" "rc=$RC err=$ERR"
 
+section "resync"
+fixture
+hc copy --from FJ-12 --to GH
+jq '. + [{id:"503", author:"dave", created:"2026-09-22T09:00:00Z", body:"Fixed upstream."}]' "$STATE/FJ/12.comments.json" >"$SANDBOX/c" \
+	&& mv "$SANDBOX/c" "$STATE/FJ/12.comments.json"
+hc resync --from FJ-12 --to GH
+check "resync posts only the new source comment" \
+	"$([ "$RC" = 0 ] && [ "$OUT" = 1 ] && jq -e 'length == 3 and (.[2].body | contains("Fixed upstream."))' <<<"$(posted GH 100)" >/dev/null && echo 1 || echo 0)" "rc=$RC out=$OUT err=$ERR"
+check "…and records it" "$(yes jq -e '.comments == ["501","502","503"] and .target == "GH-100"' <<<"$(last_ledger)")" "$(last_ledger)"
+hc resync --from FJ-12 --to GH
+check "an up-to-date copy posts nothing" \
+	"$([ "$RC" = 0 ] && [ "$OUT" = 0 ] && jq -e 'length == 3' <<<"$(posted GH 100)" >/dev/null && echo 1 || echo 0)" "rc=$RC out=$OUT"
+hc resync --from FJ-13 --to GH
+check "resync without a recorded copy is not-found" \
+	"$([ "$RC" = 1 ] && grep -q 'no copy of FJ-13 on GH' <<<"$ERR" && echo 1 || echo 0)" "rc=$RC err=$ERR"
+hc resync --from FJ-12 --to GH --no-body
+check "copy-only flags are refused on resync" "$([ "$RC" = 1 ] && grep -q "applies to 'issues copy' only" <<<"$ERR" && echo 1 || echo 0)" "rc=$RC err=$ERR"
+
+section "resync after --no-comments"
+fixture
+hc copy --from FJ-12 --to GH --no-comments
+jq '. + [{id:"503", author:"dave", created:"2026-09-22T09:00:00Z", body:"Fixed upstream."}]' "$STATE/FJ/12.comments.json" >"$SANDBOX/c" \
+	&& mv "$SANDBOX/c" "$STATE/FJ/12.comments.json"
+hc resync --from FJ-12 --to GH
+check "only comments added after the copy are brought over" \
+	"$([ "$OUT" = 1 ] && jq -e 'length == 1 and (.[0].body | contains("Fixed upstream."))' <<<"$(posted GH 100)" >/dev/null && echo 1 || echo 0)" "out=$OUT $(posted GH 100)"
+
+section "a copy that fails partway is finished by resync"
+fixture
+export FAIL_COMMENT_AT=2   # exported, not a prefix: a prefix on a function call need not reach the stub
+hc copy --from FJ-12 --to GH
+unset FAIL_COMMENT_AT
+check "the failure says how to finish" "$([ "$RC" = 1 ] && grep -q "after 1 of 2" <<<"$ERR" && grep -q 'issues resync --from FJ-12 --to GH' <<<"$ERR" && echo 1 || echo 0)" "rc=$RC err=$ERR"
+check "the ledger holds exactly what was posted" "$(yes jq -e '.comments == ["501"]' <<<"$(last_ledger)")" "$(last_ledger)"
+hc resync --from FJ-12 --to GH
+check "resync posts the rest, nothing twice" \
+	"$([ "$OUT" = 1 ] && jq -e 'length == 2 and (.[0].body | contains("Repro")) and (.[1].body | contains("Same with"))' <<<"$(posted GH 100)" >/dev/null && echo 1 || echo 0)" "out=$OUT $(posted GH 100)"
+
+section "dry run"
+fixture
+hc copy --from FJ-12 --to GH --dry-run
+check "copy --dry-run prints a plan" "$([ "$RC" = 0 ] && grep -q '(dry run' <<<"$OUT" && grep -q 'area/app' <<<"$OUT" && echo 1 || echo 0)" "rc=$RC out=$OUT err=$ERR"
+check "…and writes nothing" \
+	"$([ ! -e "$LEDGER" ] && ! grep -qE 'issues (create|comment) ' "$STATE/calls.log" && echo 1 || echo 0)" "$(cat "$STATE/calls.log")"
+set +e
+OUT="$(cd "$R" && FLIGHT_REPO_ROOT="$R" FLIGHT_SELF="$STUB" LS_JSON=1 "$HELPER" copy --from FJ-12 --to GH --dry-run 2>/dev/null)"
+set -e
+check "copy --dry-run --json is the result shape, marked as a dry run" \
+	"$(yes jq -e '.dryRun == true and .target == null and .copied.comments == 2 and .copied.labels == ["bug"] and .copied.status == "to-test" and .skipped.labels == ["area/app"]' <<<"$OUT")" "$OUT"
+hc copy --from FJ-12 --to GH
+jq '. + [{id:"503", author:"dave", created:"2026-09-22T09:00:00Z", body:"x"}]' "$STATE/FJ/12.comments.json" >"$SANDBOX/c" \
+	&& mv "$SANDBOX/c" "$STATE/FJ/12.comments.json"
+before="$(wc -l <"$LEDGER")"
+hc resync --from FJ-12 --to GH --dry-run
+check "resync --dry-run counts what it would post and writes nothing" \
+	"$([ "$RC" = 0 ] && grep -q '1 comment' <<<"$OUT" && [ "$(wc -l <"$LEDGER")" = "$before" ] && jq -e 'length == 2' <<<"$(posted GH 100)" >/dev/null && echo 1 || echo 0)" "rc=$RC out=$OUT"
+
 section "routing through the real dispatcher"
 D="$SANDBOX/disp"; mkdir -p "$D/.flightdirector"; git -C "$D" init -q
 jq -n '{schemaVersion: 3,
