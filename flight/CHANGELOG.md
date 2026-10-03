@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.17.1] - 2026-10-03
+
 ### Added
 
 - **Copy issues between trackers** (FJ-200). `flight issues copy --from FJ-12 --to GH` copies an
