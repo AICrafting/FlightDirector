@@ -233,6 +233,13 @@ code credential; any other gets its own token under `secrets.issueTrackers.<REF>
 the credential with `flight auth check --tracker <REF>` and reconciles that tracker's labels on
 their own.
 
+**Copied issues.** `flight issues copy` (and the `copying-an-issue` skill) records each copy in
+`.flightdirector/copies.jsonl`: one JSON line per step, `{source, target, at, components,
+comments}`, with the latest line for a source and target tracker winning. It is git-ignored
+along with the rest of `.flightdirector/`, so it belongs to this clone. `copy` uses it to refuse
+a second copy, and `resync` uses it to know which comments are already across. Deleting it
+forgets the links; it never affects the issues themselves.
+
 Two top-level keys should be left alone once present:
 
 - **`issues: { "backend": "requires-newer-flight", … }`** — written by migration and by

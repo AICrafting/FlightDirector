@@ -156,6 +156,20 @@ touching the others; the default only changes if you ask. Then `GH-12` or `KAN-7
 on that tracker, `#12` still means the default, and `flight issues list --all-trackers` lists every
 tracker at once.
 
+**Copying an issue to another tracker.** Say *"copy GH-3 into Forgejo"*, and
+**`copying-an-issue`** checks the target for an existing copy, shows a preview, and copies it. Or
+run it yourself:
+
+```
+flight issues copy --from GH-3 --to FJ --dry-run      # preview
+flight issues copy --from GH-3 --to FJ                # copy (prints e.g. FJ-271)
+flight issues resync --from GH-3 --to FJ              # later: bring over new comments
+```
+
+Body, comments, labels and status come along unless you pass `--no-body`, `--no-comments`,
+`--no-labels` or `--no-status`. Nothing names the source on the copy unless you add `--footer`
+or `--back-link`, which matters when copying from a private tracker to a public one.
+
 ---
 
 ## The workflow at a glance
@@ -171,6 +185,7 @@ tracker at once.
 | "clean up the branches", "delete merged branches", "what branches can go" | **cleaning-up-branches** | Find branches already merged into a stage, cross-check their issues, then delete refs + worktrees on your go-ahead |
 | "set up flight", "bootstrap labels" | **setting-up-a-repo** | First-run setup (above); re-run after an upgrade to answer new questions |
 | "add an issue tracker", "connect Jira", "track issues on GitHub too" | **add-an-issue-tracker** | Add or complete one named tracker — ref, credential, starting status, labels — keeping the default |
+| "copy GH-3 into Forgejo", "resync the copy" | **copying-an-issue** | Duplicate scan → dry-run preview → copy to another tracker; later, bring over new comments |
 
 You never type the underlying commands — you talk to Claude, and the skills drive the forge for
 you.

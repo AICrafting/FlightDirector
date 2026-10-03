@@ -7,7 +7,7 @@
 > called `lightspeed` during initial development/testing — see the [CHANGELOG](CHANGELOG.md)
 > for the migration notes.
 
-Nine skills for running an issue + code workflow from Claude Code or Codex using one shared package.
+Ten skills for running an issue + code workflow from Claude Code or Codex using one shared package.
 Everything goes through the **flight dispatcher** — `flight <group> <verb>` — which calls
 the backend's REST API with `curl`. Skills resolve its installed path rather than requiring Codex
 to inject the plugin's `bin/` directory into `PATH`.

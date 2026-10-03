@@ -39,6 +39,7 @@ $ flight capabilities --json
 | `write-json` | `issues create`, `issues comment` and `issues set-status` take `--json` |
 | `issues-json` | `issues list`, `issues get` and `issues comments` take `--json`, and `issues list` takes `--status ROLE` |
 | `issues-paging` | `issues list --json` pages with `--per-page M [--cursor C]` (below) |
+| `issues-copy` | `issues copy` and `issues resync` exist |
 
 ## Which verbs take `--json`
 
@@ -58,6 +59,8 @@ their own meaning: `prompt-log summary --json` predates this and is unchanged.
 | `issues create` | the new issue object |
 | `issues comment` | the new comment object |
 | `issues set-status` | `{number, tracker, qualified, status, label}` |
+| `issues copy` | `{source, target, copied: {body, comments, labels, status, footer, backLink}, skipped: {labels, status}}`; with `--dry-run`, `target` is null and `dryRun` is true |
+| `issues resync` | `{source, target, copied: {comments}, skipped: {}}`; `dryRun: true` with `--dry-run` |
 | `labels list` | an array of label objects |
 | `labels statuses` | an array of status roles |
 
@@ -186,6 +189,7 @@ stderr still carries the human sentence, as without `--json`. `message` is for d
 | `network` | the server couldn't be reached (curl itself failed) |
 | `backend` | the server answered with any other error (5xx, an unexpected 4xx), or the call failed in a way nothing classified |
 | `usage` | bad flags or arguments, or `--json` on a verb without a JSON form |
+| `already-copied` | `issues copy`: the ledger already records a copy of this issue on that tracker; use `issues resync`, or `--force` for a second copy |
 
 The code is decided where the cause is known, and never by matching message text. The dispatcher
 classifies config, usage and ref resolution. Each adapter's `_api` maps HTTP status and curl
