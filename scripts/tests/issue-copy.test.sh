@@ -64,7 +64,11 @@ case "$group/$verb" in
 	issues/comment)
 		posted=$(( $(cat "$S/posted-count" 2>/dev/null || echo 0) + 1 )); echo "$posted" >"$S/posted-count"
 		if [ "${FAIL_COMMENT_AT:-0}" = "$posted" ]; then echo "stub: comment failed" >&2; exit 1; fi
-		jq -cn --rawfile b "$body_file" '{body:$b}' >>"$S/$tracker/$number.posted.jsonl" ;;
+		jq -cn --rawfile b "$body_file" '{body:$b}' >>"$S/$tracker/$number.posted.jsonl"
+		# A posted comment joins the issue's thread, as on a real tracker.
+		c="$S/$tracker/$number.comments.json"; [ -f "$c" ] || echo '[]' >"$c"
+		jq --arg id "c$posted" --rawfile b "$body_file" '. + [{id:$id, author:"bot", created:"2026-10-03T00:00:00Z", body:$b}]' "$c" >"$c.tmp" && mv "$c.tmp" "$c"
+		jq -cn --arg id "c$posted" '{id:$id}' ;;
 	*) echo "stub: unexpected $group $verb" >&2; exit 2 ;;
 esac
 SH
@@ -142,7 +146,7 @@ check "the copy succeeds" "$([ "$RC" = 0 ] && echo 1 || echo 0)" "rc=$RC err=$ER
 check "only the footer is in the body" "$(yes jq -e '.body == "Copied from FJ-12\n"' <<<"$(created 100)")" "$(created 100)"
 check "no labels are passed (the target's own starting status is left to the dispatcher)" "$(yes jq -e '.labels == []' <<<"$(created 100)")" "$(created 100)"
 check "no comments are posted" "$(yes jq -e 'length == 0' <<<"$(posted GH 100)")" "$(posted GH 100)"
-check "the existing comments are recorded as handled" "$(yes jq -e '.comments == ["501","502"] and .components == ["footer","back-link"]' <<<"$(last_ledger)")" "$(last_ledger)"
+check "the existing comments and the back-link are recorded as handled" "$(yes jq -e '.comments == ["501","502","c1"] and .components == ["footer","back-link"]' <<<"$(last_ledger)")" "$(last_ledger)"
 check "the back-link is posted on the source" "$(yes jq -e 'length == 1 and (.[0].body | startswith("Copied to GH-100"))' <<<"$(posted FJ 12)")" "$(posted FJ 12)"
 
 section "copy: status the target can't hold, empty bodies, bad targets"
@@ -184,6 +188,13 @@ check "resync without a recorded copy is not-found" \
 hc resync --from FJ-12 --to GH --no-body
 check "copy-only flags are refused on resync" "$([ "$RC" = 1 ] && grep -q "applies to 'issues copy' only" <<<"$ERR" && echo 1 || echo 0)" "rc=$RC err=$ERR"
 
+section "resync after --back-link"
+fixture
+hc copy --from FJ-12 --to GH --back-link
+hc resync --from FJ-12 --to GH
+check "the back-link on the source is never resynced onto the copy" \
+	"$([ "$RC" = 0 ] && [ "$OUT" = 0 ] && jq -e 'length == 2' <<<"$(posted GH 100)" >/dev/null && echo 1 || echo 0)" "rc=$RC out=$OUT $(posted GH 100)"
+
 section "resync after --no-comments"
 fixture
 hc copy --from FJ-12 --to GH --no-comments
@@ -222,6 +233,19 @@ before="$(wc -l <"$LEDGER")"
 hc resync --from FJ-12 --to GH --dry-run
 check "resync --dry-run counts what it would post and writes nothing" \
 	"$([ "$RC" = 0 ] && grep -q '1 comment' <<<"$OUT" && [ "$(wc -l <"$LEDGER")" = "$before" ] && jq -e 'length == 2' <<<"$(posted GH 100)" >/dev/null && echo 1 || echo 0)" "rc=$RC out=$OUT"
+
+section "the ledger stays out of git"
+fixture
+git -C "$R" init -q
+hc copy --from FJ-12 --to GH
+check "a copy warns when the ledger is not git-ignored" "$(grep -q 'not git-ignored' <<<"$ERR" && echo 1 || echo 0)" "$ERR"
+echo '.flightdirector/copies.jsonl' >"$R/.gitignore"
+hc copy --from FJ-12 --to GH --force
+check "…and stays quiet once it is" "$(grep -q 'not git-ignored' <<<"$ERR" && echo 0 || echo 1)" "$ERR"
+rm -rf "$R/.git" "$R/.gitignore"
+check "this repo ignores the ledger" "$(grep -qxF '.flightdirector/copies.jsonl' "$REPO_ROOT/.gitignore" && echo 1 || echo 0)"
+check "setting-up-a-repo ignores the ledger" \
+	"$(grep -qF '.flightdirector/copies.jsonl' "$REPO_ROOT/flight/skills/setting-up-a-repo/SKILL.md" && echo 1 || echo 0)"
 
 section "routing through the real dispatcher"
 D="$SANDBOX/disp"; mkdir -p "$D/.flightdirector"; git -C "$D" init -q

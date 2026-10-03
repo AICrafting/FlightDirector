@@ -99,8 +99,18 @@ ledger_find() {
 }
 
 # ledger_write TARGET_Q HANDLED_JSON — append the pair's current state (COMPONENTS is global).
+# The ledger maps issues across trackers (private → public included), so it must never be
+# committed: warn once per run when git would pick it up.
+LEDGER_CHECKED=0
 ledger_write() {
 	mkdir -p "$(dirname "$LEDGER")"
+	if [ "$LEDGER_CHECKED" = 0 ]; then
+		LEDGER_CHECKED=1
+		if git -C "$FLIGHT_REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+			&& ! git -C "$FLIGHT_REPO_ROOT" check-ignore -q "$LEDGER" 2>/dev/null; then
+			echo "flight issues $VERB: warning — .flightdirector/copies.jsonl is not git-ignored; add it to .gitignore (it records which issues were copied where)" >&2
+		fi
+	fi
 	jq -cn --arg s "$SRC_Q" --arg t "$1" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 		--argjson c "$COMPONENTS" --argjson ids "$2" \
 		'{source:$s, target:$t, at:$at, components:$c, comments:$ids}' >>"$LEDGER"
@@ -240,9 +250,14 @@ copy_issue() {
 
 	if [ "$WANT_BACKLINK" = 1 ]; then
 		printf 'Copied to %s\n' "$DST_D" >"$TMP/back-link.md"
-		"$FLIGHT_SELF" issues comment --number "$SRC_Q" --body-file "$TMP/back-link.md" \
-			${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} >/dev/null \
+		local back
+		back="$("$FLIGHT_SELF" issues comment --number "$SRC_Q" --body-file "$TMP/back-link.md" \
+			${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} --json)" \
 			|| fail backend "the copy $DST_D was made, but posting the back-link on $SRC_D failed"
+		# The back-link is now a comment on the source: mark it handled, or the next resync
+		# would carry it onto the copy.
+		HANDLED="$(jq -c --arg id "$(jq -r '.id // empty' <<<"$back")" 'if $id == "" then . else . + [$id] end' <<<"$HANDLED")"
+		ledger_write "$DST_Q" "$HANDLED"
 	fi
 
 	RESULT="$(jq -cn --arg s "$SRC_Q" --arg t "$DST_Q" --argjson split "$split" --argjson n "$POSTED" \

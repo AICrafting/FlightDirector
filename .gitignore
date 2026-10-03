@@ -28,6 +28,9 @@ AGENTS.local.md
 # flight queue-batches run manifests (transient local state)
 .flightdirector/batches/
 
+# flight issues copy ledger (which issue was copied where; local only)
+.flightdirector/copies.jsonl
+
 # Environment files
 .env
 .env.*
