@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+#
+# flight `issues copy` / `issues resync` — copy one issue from a named tracker to another, and
+# later post the source comments its copy is missing (FJ-200).
+#
+#   flight issues copy   --from ID --to TRACKER [--no-body] [--no-comments] [--no-labels]
+#                        [--no-status] [--footer] [--back-link] [--force] [--dry-run] [--model ID]
+#   flight issues resync --from ID --to TRACKER [--dry-run] [--model ID]
+#
+# Dispatcher-owned, like `branches`: every read and write goes back through the dispatcher
+# ($FLIGHT_SELF), each call naming its own tracker, so each side uses its own coordinates,
+# credential and label map and every backend pair works without adapter changes. Links live in
+# the git-ignored ledger .flightdirector/copies.jsonl under the main checkout: append-only, one
+# record per step, the latest record for a source and target tracker wins. Under --json
+# (LS_JSON=1) the result is one JSON object and a failure is recorded in FLIGHT_ERROR_FILE.
+# Invoked by the dispatcher, which exports FLIGHT_REPO_ROOT and FLIGHT_SELF.
+#
+# Design: docs/superpowers/specs/2026-10-03-copy-issues-between-trackers-design.md
+set -euo pipefail
+
+# Windows shims (jq CRLF, path form); a no-op elsewhere.
+# shellcheck source-path=SCRIPTDIR source=_portable.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+
+: "${FLIGHT_REPO_ROOT:?FLIGHT_REPO_ROOT not set (dispatcher must export it)}"
+: "${FLIGHT_SELF:?FLIGHT_SELF not set (dispatcher must export it)}"
+
+VERB="${1:-}"; [ $# -eq 0 ] || shift
+case "$VERB" in copy|resync) ;; *) echo "flight issues: unknown copy verb '$VERB' (expected: copy resync)" >&2; exit 1 ;; esac
+LEDGER="$FLIGHT_REPO_ROOT/.flightdirector/copies.jsonl"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/flight-copy.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+
+# fail CODE MESSAGE — one sentence on stderr, plus the --json envelope when one was asked for.
+fail() {
+	echo "flight issues $VERB: $2" >&2
+	if [ -n "${FLIGHT_ERROR_FILE:-}" ]; then
+		jq -cn --arg c "$1" --arg m "flight issues $VERB: $2" '{error:{code:$c, message:$m}}' \
+			>"$FLIGHT_ERROR_FILE" 2>/dev/null || true
+	fi
+	exit 1
+}
+die() { fail usage "$*"; }
+
+# fl ARGS… — one --json dispatcher call. Prints its output, or stops with the code it reported.
+# Always assign its output on a line of its own (never `local x="$(fl …)"`), so a failure stops
+# the script.
+fl() {
+	local out rc=0 code msg
+	out="$("$FLIGHT_SELF" "$@" --json)" || rc=$?
+	if [ "$rc" -ne 0 ]; then
+		code="$(jq -r '.error.code // empty' <<<"$out" 2>/dev/null || true)"
+		msg="$(jq -r '.error.message // empty' <<<"$out" 2>/dev/null || true)"
+		fail "${code:-backend}" "${msg:-flight $1 $2 failed (exit $rc)}"
+	fi
+	printf '%s\n' "$out"
+}
+
+FROM=""; TO=""; DRY=0; FORCE=0; MODEL_ARGS=()
+WANT_BODY=1; WANT_COMMENTS=1; WANT_LABELS=1; WANT_STATUS=1; WANT_FOOTER=0; WANT_BACKLINK=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--from)  [ $# -ge 2 ] || die "--from needs an issue id"; FROM="$2"; shift 2 ;;
+		--to)    [ $# -ge 2 ] || die "--to needs a tracker ref"; TO="$2"; shift 2 ;;
+		--model) [ $# -ge 2 ] || die "--model needs a model id"; MODEL_ARGS=(--model "$2"); shift 2 ;;
+		--dry-run) DRY=1; shift ;;
+		--no-body|--no-comments|--no-labels|--no-status|--footer|--back-link|--force)
+			[ "$VERB" = copy ] || die "$1 applies to 'issues copy' only"
+			case "$1" in
+				--no-body) WANT_BODY=0 ;;
+				--no-comments) WANT_COMMENTS=0 ;;
+				--no-labels) WANT_LABELS=0 ;;
+				--no-status) WANT_STATUS=0 ;;
+				--footer) WANT_FOOTER=1 ;;
+				--back-link) WANT_BACKLINK=1 ;;
+				--force) FORCE=1 ;;
+			esac
+			shift ;;
+		*) die "unknown argument '$1'" ;;
+	esac
+done
+[ -n "$FROM" ] && [ -n "$TO" ] || die "usage: flight issues $VERB --from ID --to TRACKER …"
+
+# ledger_find SOURCE_Q TRACKER_REF — the latest ledger record of SOURCE copied to that tracker,
+# or nothing. Lines that don't parse are skipped with a warning; the file is never rewritten.
+ledger_find() {
+	[ -f "$LEDGER" ] || return 0
+	local line
+	while IFS= read -r line || [ -n "$line" ]; do
+		[ -n "$line" ] || continue
+		if jq -e 'type == "object"' >/dev/null 2>&1 <<<"$line"; then
+			printf '%s\n' "$line"
+		else
+			echo "flight issues $VERB: warning — skipping an unreadable line in $LEDGER" >&2
+		fi
+	done <"$LEDGER" | jq -c -s --arg s "$1" --arg t "$2" '
+		[.[] | select(.source == $s and ((.target // "") | split("-")[0] | ascii_downcase) == ($t | ascii_downcase))]
+		| last // empty'
+}
+
+# ledger_write TARGET_Q HANDLED_JSON — append the pair's current state (COMPONENTS is global).
+ledger_write() {
+	mkdir -p "$(dirname "$LEDGER")"
+	jq -cn --arg s "$SRC_Q" --arg t "$1" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		--argjson c "$COMPONENTS" --argjson ids "$2" \
+		'{source:$s, target:$t, at:$at, components:$c, comments:$ids}' >>"$LEDGER"
+}
+
+# attributed COMMENT_JSON — the comment as it is posted on the copy: who wrote it and when (the
+# copy is posted by the target token's user), then the original text, untouched.
+attributed() {
+	jq -r '"**\(.author // "someone")** commented\(if (.created // "") != "" then " on \(.created[0:10])" else "" end):\n\n\(.body // "")"' <<<"$1"
+}
+
+# post_comments TARGET_Q HANDLED_JSON — post every source comment (COMMENTS) not in HANDLED to
+# TARGET, oldest first, recording each in the ledger as it lands. Sets POSTED and HANDLED.
+post_comments() {
+	local target="$1" c id total
+	HANDLED="$2"; POSTED=0
+	total="$(jq --argjson h "$HANDLED" '[.[] | select(.id as $i | $h | any(.[]; . == $i) | not)] | length' <<<"$COMMENTS")"
+	while IFS= read -r c; do
+		[ -n "$c" ] || continue
+		id="$(jq -r '.id' <<<"$c")"
+		attributed "$c" >"$TMP/comment.md"
+		"$FLIGHT_SELF" issues comment --number "$target" --body-file "$TMP/comment.md" \
+			${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} >/dev/null \
+			|| fail backend "posting source comment $id to $target failed after $POSTED of $total — run 'flight issues resync --from $SRC_Q --to $DST_T' to post the rest"
+		HANDLED="$(jq -c --arg id "$id" '. + [$id]' <<<"$HANDLED")"
+		ledger_write "$target" "$HANDLED"
+		POSTED=$((POSTED + 1))
+	done < <(jq -c --argjson h "$HANDLED" '.[] | select(.id as $i | $h | any(.[]; . == $i) | not)' <<<"$COMMENTS")
+}
+
+# report RESULT_JSON TEXT — the --json object, or TEXT on stdout with any skips on stderr.
+report() {
+	if [ -n "${LS_JSON:-}" ]; then printf '%s\n' "$1"; return 0; fi
+	printf '%s\n' "$2"
+	jq -r --arg v "$VERB" --arg t "$DST_T" '
+		(.skipped.labels // []) as $l | (.skipped.status // null) as $s
+		| (if ($l | length) > 0 then "flight issues \($v): skipped labels \($t) does not have: \($l | join(", "))" else empty end),
+		  (if $s != null then "flight issues \($v): skipped status \($s) — \($t) has no label for that role" else empty end)' <<<"$1" >&2
+}
+
+# Both ends, resolved once. Refs compare case-insensitively; DST_T is the canonical ref.
+SRC="$(fl issues resolve --number "$FROM")"
+SRC_Q="$(jq -r '.qualified' <<<"$SRC")"; SRC_D="$(jq -r '.display' <<<"$SRC")"; SRC_T="$(jq -r '.tracker' <<<"$SRC")"
+SRC_TRACKER="$(fl issues tracker --tracker "$SRC_T")"
+DST_TRACKER="$(fl issues tracker --tracker "$TO")"
+DST_T="$(jq -r '.ref' <<<"$DST_TRACKER")"
+[ "$(printf '%s' "$SRC_T" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "$DST_T" | tr '[:upper:]' '[:lower:]')" ] \
+	|| die "$SRC_D is already on tracker $DST_T — --to must name another tracker"
+DST_Q=""; DST_D=""; COMMENTS='[]'; COMPONENTS='[]'; HANDLED='[]'; POSTED=0
+
+copy_issue() {
+	local existing issue dst_labels split='{"apply":[],"skip":[]}' role status_label="" skip_status="" applied_status="" l
+	existing="$(ledger_find "$SRC_Q" "$DST_T")"
+	if [ -n "$existing" ] && [ "$FORCE" = 0 ]; then
+		fail already-copied "$SRC_D was already copied to $(jq -r '.target' <<<"$existing") — run 'flight issues resync --from $SRC_Q --to $DST_T' to bring it up to date, or pass --force for a second copy"
+	fi
+	issue="$(fl issues get --number "$SRC_Q")"
+	COMMENTS="$(fl issues comments --number "$SRC_Q")"
+
+	# Body, then the optional footer (ref + id only — never a URL).
+	if [ "$WANT_BODY" = 1 ]; then jq -j '.body // ""' <<<"$issue" >"$TMP/body.md"; else : >"$TMP/body.md"; fi
+	if [ "$WANT_FOOTER" = 1 ]; then
+		if [ -s "$TMP/body.md" ]; then printf '\n\n' >>"$TMP/body.md"; fi
+		printf 'Copied from %s\n' "$SRC_D" >>"$TMP/body.md"
+	fi
+
+	if [ "$WANT_LABELS" = 1 ] || [ "$WANT_STATUS" = 1 ]; then
+		dst_labels="$(fl labels list --tracker "$DST_T")"
+		dst_labels="$(jq -c '[.[].name]' <<<"$dst_labels")"
+	fi
+	# Plain labels only: the source's status labels travel through the status mapping. A name
+	# the target doesn't have is skipped — labels are never created on the target.
+	if [ "$WANT_LABELS" = 1 ]; then
+		split="$(jq -c --argjson src "$SRC_TRACKER" --argjson have "$dst_labels" '
+			[($src.labels.status // {})[] | strings] as $status
+			| [(.labels // [])[] | select(. as $l | $status | any(.[]; . == $l) | not)]
+			| {apply: map(select(. as $l | $have | any(.[]; . == $l))),
+			   skip:  map(select(. as $l | $have | any(.[]; . == $l) | not))}' <<<"$issue")"
+	fi
+	# Status by role: source label → role → the target's label for that role (if it exists there).
+	role="$(jq -r '.status // empty' <<<"$issue")"
+	if [ "$WANT_STATUS" = 1 ] && [ -n "$role" ]; then
+		status_label="$(jq -r --arg r "$role" '.labels.status[$r] // empty | strings' <<<"$DST_TRACKER")"
+		if [ -n "$status_label" ] && jq -e --arg l "$status_label" 'any(.[]; . == $l)' <<<"$dst_labels" >/dev/null; then
+			applied_status="$role"
+		else
+			status_label=""; skip_status="$role"
+		fi
+	fi
+
+	COMPONENTS="$(printf '%s\n' "body:$WANT_BODY" "comments:$WANT_COMMENTS" "labels:$WANT_LABELS" \
+		"status:$WANT_STATUS" "footer:$WANT_FOOTER" "back-link:$WANT_BACKLINK" \
+		| jq -R -s -c 'split("\n") | map(select(endswith(":1")) | rtrimstr(":1"))')"
+
+	local args=(issues create --tracker "$DST_T" --title "$(jq -r '.title' <<<"$issue")" --body-file "$TMP/body.md")
+	while IFS= read -r l; do
+		if [ -n "$l" ]; then args+=(--label "$l"); fi
+	done < <(jq -r '.apply[]' <<<"$split")
+	if [ -n "$status_label" ]; then args+=(--label "$status_label"); fi
+	NEW="$(fl "${args[@]}" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"})"
+	DST_Q="$(jq -r '.qualified' <<<"$NEW")"
+	DST_D="$(fl issues resolve --number "$DST_Q")"
+	DST_D="$(jq -r '.display' <<<"$DST_D")"
+
+	# Record the link before anything else can fail. --no-comments marks today's comments
+	# handled, so a later resync only brings comments added after the copy.
+	if [ "$WANT_COMMENTS" = 1 ]; then HANDLED='[]'; else HANDLED="$(jq -c '[.[].id]' <<<"$COMMENTS")"; fi
+	ledger_write "$DST_Q" "$HANDLED"
+	POSTED=0
+	if [ "$WANT_COMMENTS" = 1 ]; then post_comments "$DST_Q" "$HANDLED"; fi
+
+	if [ "$WANT_BACKLINK" = 1 ]; then
+		printf 'Copied to %s\n' "$DST_D" >"$TMP/back-link.md"
+		"$FLIGHT_SELF" issues comment --number "$SRC_Q" --body-file "$TMP/back-link.md" \
+			${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} >/dev/null \
+			|| fail backend "the copy $DST_D was made, but posting the back-link on $SRC_D failed"
+	fi
+
+	RESULT="$(jq -cn --arg s "$SRC_Q" --arg t "$DST_Q" --argjson split "$split" --argjson n "$POSTED" \
+		--argjson body "$WANT_BODY" --argjson footer "$WANT_FOOTER" --argjson back "$WANT_BACKLINK" \
+		--arg st "$applied_status" --arg skst "$skip_status" '
+		{source: $s, target: $t,
+		 copied: {body: ($body == 1), comments: $n, labels: $split.apply,
+		          status: (if $st == "" then null else $st end), footer: ($footer == 1), backLink: ($back == 1)},
+		 skipped: {labels: $split.skip, status: (if $skst == "" then null else $skst end)}}')"
+	report "$RESULT" "$DST_D"
+}
+
+case "$VERB" in
+	copy) copy_issue ;;
+	resync) die "resync is not implemented yet" ;;
+esac

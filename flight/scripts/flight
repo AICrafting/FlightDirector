@@ -44,7 +44,7 @@ plugin_manifest() {
 # Feature tokens a consumer can detect with `flight capabilities --json` (#254)
 # instead of comparing versions. A token is added here in the same change that
 # ships the feature, and never renamed or removed once released.
-CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json issues-paging)
+CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json issues-paging issues-copy)
 
 # `flight --version [--json]` and `flight capabilities [--json]` (#254) — answered
 # before anything else: no repo, config, token or network needed, so a consumer
@@ -102,7 +102,7 @@ trap cleanup EXIT
 # it, and handed on as LS_JSON=1. Only the verbs in JSON_VERBS accept it; on any
 # other issues/labels verb it is a usage error. Other groups keep their own
 # meaning of the flag (`prompt-log summary --json` predates this).
-JSON_VERBS=(issues/resolve issues/tracker issues/list issues/get issues/comments labels/list labels/statuses issues/create issues/comment issues/set-status)
+JSON_VERBS=(issues/resolve issues/tracker issues/list issues/get issues/comments labels/list labels/statuses issues/create issues/comment issues/set-status issues/copy issues/resync)
 json_mode=0
 case "${1:-}" in
 	issues|labels)
@@ -118,7 +118,7 @@ case "${1:-}" in
 			else
 				json_args+=("$json_arg")
 				case "$json_arg" in
-					--no-status|--no-signature|--all-trackers) ;;
+					--no-status|--no-signature|--all-trackers|--no-body|--no-comments|--no-labels|--footer|--back-link|--force|--dry-run) ;;
 					--*) json_value_next=1 ;;
 				esac
 			fi
@@ -408,7 +408,7 @@ if [ -f "$cfg" ] && [ "$group" != "prompt-log" ]; then
 	[ "$runtime_schema" -le "$TRACKER_SCHEMA" ] || die_code not-configured "config uses schema $runtime_schema, newer than this Flight understands (schema $TRACKER_SCHEMA); update the Flight plugin"
 	if [ "$runtime_schema" -lt "$TRACKER_SCHEMA" ] && {
 		[ -n "$tracker_selector" ] || [ "$all_trackers" = 1 ] \
-			|| { [ "$group" = issues ] && { [ "$verb" = resolve ] || [ "$verb" = tracker ]; }; }
+			|| { [ "$group" = issues ] && { [ "$verb" = resolve ] || [ "$verb" = tracker ] || [ "$verb" = copy ] || [ "$verb" = resync ]; }; }
 	}; then
 		die_code not-configured "named tracker routing needs config schema $TRACKER_SCHEMA; run flight reconcile --harness claude|codex first"
 	fi
@@ -912,6 +912,16 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 		[ $# -eq 0 ] || die "usage: flight issues tracker [--tracker REF]"
 		tracker_coded not-found select --config "$cfg" ${tracker_selector:+--tracker "$tracker_selector"}
 		exit 0
+	fi
+
+	# `issues copy|resync --from ID --to TRACKER` (FJ-200) — dispatcher-owned, like `branches`:
+	# the helper reads and writes both trackers back through this dispatcher, one tracker per
+	# call, so no adapter is involved here. Links live in .flightdirector/copies.jsonl.
+	if [ "$group" = issues ] && { [ "$verb" = copy ] || [ "$verb" = resync ]; }; then
+		[ -z "$tracker_selector" ] || die "issues $verb: name the trackers with --from/--to, not --tracker"
+		json_finish=""; json_tracker=""
+		export FLIGHT_REPO_ROOT="$repo_root" FLIGHT_SELF="$SELF_DIR/flight"
+		handoff "$SELF_DIR/issue-copy" "$verb" "$@"
 	fi
 
 	# An issue id picks the tracker (and becomes the adapter's native id) unless an
