@@ -348,6 +348,32 @@ cp "$T/stale-state.json" "$STATE_FILE"	# the state the racing hook read comes ba
 invoke prompt "$(jq -nc --arg cwd "$R" '{session_id:"session-main",cwd:$cwd,hook_event_name:"UserPromptSubmit",prompt:"next turn"}')" "$R" "$S"
 check "a logged turn's leftover state does not swallow the next prompt" "$([ "$(jq -r .turn_id "$STATE_FILE")" != "$(jq -r .turn_id "$T/stale-state.json")" ] && [ "$(jq -r .prompt "$STATE_FILE")" = "next turn" ] && echo 1 || echo 0)"
 
+# the next prompt landing between the Stop's row and its state cleanup (FJ-276): the Stop
+# must not delete the new turn's state, or that whole turn is missing from the ledger
+R="$T/gap"; S="$T/state-gap"; make_repo "$R" true; LOG="$R/.flightdirector/prompt-log.jsonl"
+invoke prompt "$(jq -nc --arg cwd "$R" '{session_id:"session-main",cwd:$cwd,hook_event_name:"UserPromptSubmit",prompt:"main prompt"}')" "$R" "$S"; backdate_state "$S"
+GAP_FIRST="$(jq -r .turn_id "$S"/state-*.json)"
+STOP_GAP="$(jq -nc --arg cwd "$R" --arg path "$FIXTURES/claude-main.jsonl" '{session_id:"session-main",cwd:$cwd,hook_event_name:"Stop",transcript_path:$path}')"
+NEXT_GAP="$(jq -nc --arg cwd "$R" '{session_id:"session-main",cwd:$cwd,hook_event_name:"UserPromptSubmit",prompt:"next turn"}')"
+env -u ANTHROPIC_API_KEY -u FLIGHT_CLAUDE_AUTH_TOKEN -u FLIGHT_CLAUDE_AUTH_MODE \
+	FLIGHT_REPO_ROOT="$R" FLIGHT_PROMPT_LOG_STATE_DIR="$S" python3 - "$ROOT/flight/scripts/prompt-logger" "$STOP_GAP" "$NEXT_GAP" 2>/dev/null <<'EOF'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import claude
+written = claude.append_record
+def append_then_prompt(*args, **kwargs):
+	written(*args, **kwargs)
+	claude.save_prompt(json.loads(sys.argv[3]))	# the user's next prompt fires here
+claude.append_record = append_then_prompt
+claude.finish(json.loads(sys.argv[2]), delegated=False)
+EOF
+check "the Stop logs its own turn" "$([ "$(wc -l <"$LOG")" -eq 1 ] && [ "$(jq -r .turn_id "$LOG")" = "$GAP_FIRST" ] && echo 1 || echo 0)"
+check "the next turn's state, written mid-Stop, survives the Stop's cleanup" "$(ls "$S"/state-*.json >/dev/null 2>&1 && [ "$(jq -r .turn_id "$S"/state-*.json)" != "$GAP_FIRST" ] && [ "$(jq -r .prompt "$S"/state-*.json)" = "next turn" ] && echo 1 || echo 0)"
+backdate_state "$S" 2>/dev/null || true
+invoke stop "$STOP_GAP" "$R" "$S" 2>/dev/null || true
+check "…and the following Stop logs that turn's row" "$([ "$(wc -l <"$LOG")" -eq 2 ] && jq -se '.[1].prompt=="next turn" and .[1].turn_id!=.[0].turn_id' "$LOG" >/dev/null && echo 1 || echo 0)"
+check "a Stop still clears its own turn's state" "$(ls "$S"/state-*.json >/dev/null 2>&1 && echo 0 || echo 1)"
+
 # Summary: plain when nothing failed, red when something did (#123).
 [ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
 printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"

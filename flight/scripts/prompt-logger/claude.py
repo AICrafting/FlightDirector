@@ -389,7 +389,12 @@ def finish(event: dict[str, Any], delegated: bool) -> None:
 		append_increment(repo_root, record)
 	else:
 		append_record(repo_root, record, record_key)
-		remove_state(record["session_id"], ACTIVE)
+		# The user's next prompt can land between the row and this cleanup, and save_prompt
+		# then writes a new turn to the same slot (the logged one is closed). Remove the
+		# state only while it is still this turn's, or that next turn goes unlogged (FJ-276).
+		state = read_state(record["session_id"], ACTIVE)
+		if state is not None and state.get("turn_id") == record["turn_id"]:
+			remove_state(record["session_id"], ACTIVE)
 
 
 def main() -> int:
