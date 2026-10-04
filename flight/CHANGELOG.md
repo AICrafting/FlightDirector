@@ -39,6 +39,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Fixed
 
+- **`scripts/bump-version.sh` rolls a CRLF changelog** (FJ-225). On a Windows checkout, where
+  markdown keeps native line endings, it never found `## [Unreleased]`. It still reported
+  success, after bumping the manifests and leaving the changelog unrolled. It now matches the
+  heading regardless of `\r` and writes the new lines with the file's own ending. If the heading
+  is missing, it stops before changing anything.
+
 - **`flight ci watch` no longer reports a cancelled run as a failure** (FJ-281). A run stopped
   before it finished (most often because a newer push superseded it) used to count as `failed`,
   so the watch ended on `status=failure` while `ci log` found no failed job to show. Cancelled

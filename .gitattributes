@@ -24,6 +24,9 @@
 *.htm text
 *.css text
 *.less text
+# Markdown stays NATIVE on purpose (FJ-225): it is prose people edit with their platform's
+# own tools, so a Windows checkout gets CRLF. Anything that reads it, tests included, must
+# tolerate a trailing \r (see CONTRIBUTING.md, "Adding a check or test").
 *.md text
 *.txt text
 *.text text

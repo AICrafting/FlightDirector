@@ -132,6 +132,22 @@ under `$HOME` or the repo, and never `git config --global`. The runner runs file
 concurrently, so a test that reaches outside its sandbox will fail intermittently and
 blame whichever test it collided with. `run-tests.test.sh` covers the runner itself.
 
+**Markdown may be CRLF.** `.gitattributes` gives `*.md` native line endings on purpose, so on
+a Windows checkout every line of a `SKILL.md`, reference or changelog ends in `\r`. A test or
+script that reads markdown must strip it before matching: `tr -d '\r'` on a stream, or
+`sub(/\r$/, "")` first thing in an `awk` program. The usual casualties are exact-line
+comparisons (`$0 == marker`) and end-anchored patterns (`^name: foo$`, `/^```$/`). They
+pass on Linux and macOS and fail only on the Windows leg, looking like plain false asserts. To
+check locally, run the suite on a scratch copy of your committed `HEAD` with every `.md`
+converted to CRLF:
+
+```bash
+D="$(mktemp -d)" && git archive HEAD | tar -x -C "$D" && cd "$D" && git init -q \
+  && find . -name '*.md' -exec sed -i 's/\r\?$/\r/' {} + && ./scripts/run-tests.sh
+```
+
+(`sed -i` without a suffix is GNU sed. On macOS, use `sed -i ''`.)
+
 **Executable bit — important.** This repo has `core.fileMode = false`, so a plain
 `chmod +x` is **not** recorded by git; a fresh clone would get a `644` file and
 directly-run scripts (and the pre-push hook) would break. Commit the bit explicitly:

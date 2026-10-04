@@ -30,8 +30,11 @@ section() { printf '\033[1m── %s ──\033[0m\n' "$1"; }
 ok() { if "$@" >/dev/null 2>&1; then echo 1; else echo 0; fi; }
 
 # block <file> <marker> — the fenced block that follows `<!-- marker -->`.
+# Markdown keeps native line endings (.gitattributes), so a Windows checkout reads CRLF:
+# drop the \r first, or no marker or closing fence ever matches and every block is empty.
 block() {
 	awk -v marker="<!-- $2 -->" '
+		{ sub(/\r$/, "") }
 		$0 == marker { found = 1; next }
 		found && !fence && /^```/ { fence = 1; next }
 		fence && /^```$/ { exit }
@@ -285,7 +288,7 @@ check "a tracker added after the switch does not take the default" \
 section "skill contract (prose)"
 says() { grep -Fq -- "$2" "$1"; }
 check "add-an-issue-tracker is a packaged skill with its own name" \
-	"$(ok grep -q '^name: add-an-issue-tracker$' "$TRACKER_SKILL")"
+	"$(tr -d '\r' <"$TRACKER_SKILL" | grep -q '^name: add-an-issue-tracker$' && echo 1 || echo 0)"   # CRLF-safe
 check "add-an-issue-tracker starts with the runtime preflight" \
 	"$(ok says "$TRACKER_SKILL" 'follow [runtime preflight](../../references/runtime.md)')"
 check "its triggers cover adding / connecting a tracker" \

@@ -58,6 +58,10 @@ done
 OLD="$(grep -m1 '"version"' "$PLUGIN_JSON" | sed 's/.*"version": *"\([^"]*\)".*/\1/')"
 [ -n "$OLD" ] || die "could not read current version from $PLUGIN_JSON"
 [ "$OLD" != "$NEW" ] || die "$PLUGIN is already at version $NEW — nothing to bump"
+# Check the changelog can be rolled BEFORE touching any manifest, so a missing heading
+# never leaves the versions bumped and the changelog not. (\r-tolerant: see below.)
+awk '{ sub(/\r$/, "") } /^## \[Unreleased\]$/ { found = 1 } END { exit !found }' "$CHANGELOG" \
+	|| die "no ## [Unreleased] heading found in $CHANGELOG — nothing was changed"
 
 # --- plugin.json: the single top-level version field ------------------------
 awk -v new="$NEW" '
@@ -83,31 +87,37 @@ awk -v want="\"name\": \"$PLUGIN\"" -v new="$NEW" '
 # --- CHANGELOG.md: roll [Unreleased] into a dated version -------------------
 # Warn (don't block) if the Unreleased section has no real content — rolling an
 # empty section produces a dated version that just says "_Nothing yet._".
+# Markdown keeps native line endings (.gitattributes), so on a Windows checkout every line
+# of the changelog ends in \r. Match on the line without it, and write any new lines with
+# the file's own ending, or the heading is never found and the roll silently does nothing.
 unreleased_body="$(awk '
-	/^## \[Unreleased\]$/ { grab=1; next }
-	grab && /^## / { exit }
+	{ line = $0; sub(/\r$/, "", line) }
+	line ~ /^## \[Unreleased\]$/ { grab=1; next }
+	grab && line ~ /^## / { exit }
 	grab {
-		if ($0 ~ /^[[:space:]]*$/) next
-		if ($0 ~ /^_Nothing yet\._[[:space:]]*$/) next
-		print
+		if (line ~ /^[[:space:]]*$/) next
+		if (line ~ /^_Nothing yet\._[[:space:]]*$/) next
+		print line
 	}
 ' "$CHANGELOG")"
 [ -n "$unreleased_body" ] || printf '\033[0;33mbump-version: warning — %s'\''s [Unreleased] section is empty; %s will have nothing to show.\033[0m\n' "$PLUGIN" "$NEW" >&2
 
 TODAY="$(date -u +%F)"
 awk -v ver="$NEW" -v date="$TODAY" '
-	!rolled && $0 ~ /^## \[Unreleased\]$/ {
-		print "## [Unreleased]"
-		print ""
-		print "_Nothing yet._"
-		print ""
-		print "## [" ver "] - " date
+	{ line = $0; eol = (sub(/\r$/, "", line) ? "\r" : "") }
+	!rolled && line ~ /^## \[Unreleased\]$/ {
+		print "## [Unreleased]" eol
+		print eol
+		print "_Nothing yet._" eol
+		print eol
+		print "## [" ver "] - " date eol
 		rolled = 1
 		next
 	}
 	{ print }
 	END { if (!rolled) { print "bump-version: no ## [Unreleased] heading found in " FILENAME > "/dev/stderr"; exit 1 } }
-' "$CHANGELOG" >"$CHANGELOG.tmp" && mv "$CHANGELOG.tmp" "$CHANGELOG"
+' "$CHANGELOG" >"$CHANGELOG.tmp" || { rm -f "$CHANGELOG.tmp"; die "could not roll $CHANGELOG (manifests are already at $NEW)"; }
+mv "$CHANGELOG.tmp" "$CHANGELOG"
 
 printf '\033[0;32mBumped %s %s → %s\033[0m (%s/.claude-plugin/plugin.json, marketplace.json, %s/CHANGELOG.md)\n' "$PLUGIN" "$OLD" "$NEW" "$SRC" "$SRC"
 printf 'Reminder: refresh the dev-marketplace cache manually — see docs/plugin-marketplace-dogfooding.md\n'
