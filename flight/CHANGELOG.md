@@ -41,6 +41,21 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Fixed
 
+- **`issues list --all-trackers --status ROLE` no longer fails on a tracker without that role**
+  (FJ-277). A tracker that never defined the role, or declined it (`false`), used to show up as
+  `tracker X unavailable`. Under `--json` it landed in `errors[]`, and in text mode the command
+  exited non-zero. Such a tracker now contributes zero rows, with one stderr note naming the
+  tracker and the role. Asking one tracker directly (`--tracker REF`, or the default) for a role
+  it lacks is still a usage error.
+- **The secrets migration no longer drops a legacy issue token** (FJ-278). Suppose
+  `secrets.json` held a legacy `issues.token` that differed from the code token, and the target
+  tracker already had an `issueTrackers.<REF>` entry. The schema-3 secrets migration then kept
+  the entry and silently threw away the legacy token. It now refuses, naming both fields, and
+  asks you to remove one and rerun. Nothing is changed. A legacy token equal to the code token
+  is still dropped quietly, and with no existing entry the legacy token still moves. (`flight
+  reconcile` already refused such a file up front as mixed tracker secrets. The migration helper
+  now refuses it as well.)
+
 - **A message sent mid-turn no longer drops the turn's earlier usage from the prompt log**
   (FJ-269). Claude Code fires `UserPromptSubmit` for a message sent while a turn is running, and
   the prompt hook used to start a new turn there. The one `Stop` then counted only the requests

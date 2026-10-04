@@ -406,6 +406,24 @@ R="$(repo mixed-secrets)"
 printf '%s\n' '{"code":{"backend":"forgejo","api":"https://forge.example.com"}}' >"$R/.flightdirector/config.json"
 printf '%s\n' '{"issues":{"token":"a"},"issueTrackers":{"FJ":{"token":"b"}}}' >"$R/.flightdirector/secrets.json"
 check "mixed secrets are refused" "$(refuses mixed-secrets 'mixed tracker secrets' && echo 1 || echo 0)" "$(cat "$R/err")"
+# FJ-278: the helper itself refuses rather than dropping a differing legacy token when
+# the tracker already has a credential entry, whoever calls it.
+TC="$REPO_ROOT/flight/scripts/tracker-config.sh"
+MS="$SANDBOX/migrate-secrets"; mkdir -p "$MS"
+printf '%s\n' '{"schemaVersion":3,"code":{"backend":"forgejo"},"issueTrackers":[{"ref":"FJ","name":"One","default":true,"backend":"forgejo","labels":{}}]}' >"$MS/config.json"
+printf '%s\n' '{"code":{"token":"c"},"issues":{"token":"a"},"issueTrackers":{"FJ":{"token":"b"}}}' >"$MS/secrets.json"
+if "$TC" migrate-secrets --config "$MS/config.json" --secrets "$MS/secrets.json" --out "$MS/out.json" --ref FJ 2>"$MS/err"; then rc=0; else rc=$?; fi
+check "migrate-secrets refuses a differing legacy token when issueTrackers.FJ exists" \
+	"$([ "$rc" != 0 ] && grep -q 'mixed tracker secrets: .*issues.token.*issueTrackers.FJ.*remove one' "$MS/err" && echo 1 || echo 0)" "rc=$rc $(cat "$MS/err")"
+check "…writes nothing and never prints a token" "$([ ! -s "$MS/out.json" ] && ! grep -Eq '"(a|b|c)"' "$MS/err" && echo 1 || echo 0)" "$(cat "$MS/err")"
+printf '%s\n' '{"code":{"token":"c"},"issues":{"token":"c"},"issueTrackers":{"FJ":{"token":"b"}}}' >"$MS/secrets.json"
+"$TC" migrate-secrets --config "$MS/config.json" --secrets "$MS/secrets.json" --out "$MS/out.json" --ref FJ 2>"$MS/err" || true
+check "…but a legacy token equal to the code token is still dropped quietly" \
+	"$(jqt '(has("issues") | not) and .issueTrackers.FJ.token == "b"' "$MS/out.json")" "$(cat "$MS/out.json" "$MS/err")"
+printf '%s\n' '{"code":{"token":"c"},"issues":{"token":"a"}}' >"$MS/secrets.json"
+"$TC" migrate-secrets --config "$MS/config.json" --secrets "$MS/secrets.json" --out "$MS/out.json" --ref FJ 2>"$MS/err" || true
+check "…and with no existing entry the legacy token still moves" \
+	"$(jqt '(has("issues") | not) and .issueTrackers.FJ.token == "a"' "$MS/out.json")" "$(cat "$MS/out.json" "$MS/err")"
 R="$(repo nobackend)"
 printf '%s\n' '{"code":{"stages":[{"name":"main"}]}}' >"$R/.flightdirector/config.json"
 check "a config with no tracker backend is refused" "$(refuses nobackend 'neither issues.backend nor code.backend' && echo 1 || echo 0)" "$(cat "$R/err")"
