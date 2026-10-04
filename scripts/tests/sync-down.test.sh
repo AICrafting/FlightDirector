@@ -40,7 +40,7 @@ case "$group $verb" in
 		printf '%s\t%s\n' "$head" "$base" >"${STUB_LOG%.log}.pr"
 		printf '7\thttps://example.invalid/acme/widget/pulls/7\n' ;;
 	"ci watch")
-		printf 'ci runs=1 pending=0 failed=%s skipped=%s status=%s\n' "${STUB_CI_FAILED:-0}" "${STUB_CI_SKIPPED:-0}" "${STUB_CI_STATUS:-success}"
+		printf 'ci runs=1 pending=0 failed=%s skipped=%s cancelled=%s status=%s\n' "${STUB_CI_FAILED:-0}" "${STUB_CI_SKIPPED:-0}" "${STUB_CI_CANCELLED:-0}" "${STUB_CI_STATUS:-success}"
 		exit "${STUB_CI_RC:-0}" ;;
 	"pr merge")
 		IFS=$'\t' read -r head base <"${STUB_LOG%.log}.pr"
@@ -249,6 +249,14 @@ check "all-skipped CI → exit non-zero" "$([ "$rc" != 0 ] && echo 1 || echo 0)"
 check "row says the CI ran nothing, PR left open" "$(grep -q $'^develop\tstopped\tPR #7 left open.*ran nothing' < <(line develop) && echo 1 || echo 0)" "$(out)"
 check "pr merge was NOT called on a skipped verdict" "$(grep -q '^pr merge' "$STUB_LOG" && echo 0 || echo 1)"
 check "origin/develop untouched by a skipped verdict" "$([ "$(osha develop)" = "$dev_before" ] && echo 1 || echo 0)"
+
+# A cancelled run (FJ-281) is not a failure either, but it never finished — the
+# cascade stops on it and says why, rather than merging on a check that was cut short.
+STUB_CI_STATUS=cancelled STUB_CI_CANCELLED=1 run --from qa; rc=$?
+check "cancelled CI → exit non-zero" "$([ "$rc" != 0 ] && echo 1 || echo 0)"
+check "row says a CI run was cancelled, PR left open" "$(grep -q $'^develop\tstopped\tPR #7 left open.*cancelled' < <(line develop) && echo 1 || echo 0)" "$(out)"
+check "pr merge was NOT called on a cancelled verdict" "$(grep -q '^pr merge' "$STUB_LOG" && echo 0 || echo 1)"
+check "origin/develop untouched by a cancelled verdict" "$([ "$(osha develop)" = "$dev_before" ] && echo 1 || echo 0)"
 
 # ── 8. dirty checkout: merge in a throwaway worktree, push, report behind ────
 echo "── direct: dirty checkout"

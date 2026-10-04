@@ -229,7 +229,9 @@ PR="$("$DISP" pr open --head "$INT" --base "$BASE" --title "Batch: <zone> (FJ-18
 # it exits 0 on any terminal verdict. status=failure → record the group FAILED ("$DISP" ci log --pr "<pr#>"
 # shows why) and move on;
 # status=skipped → nothing ran, so the group is NOT verified: report that to the user and leave the PR
-# open rather than treating not-failed as passed; status=success → merge on the gate, using stages[0]'s
+# open rather than treating not-failed as passed; status=cancelled → a run was stopped before it
+# finished (usually a newer push; a --pr watch says so on stderr): not a failure and not verified —
+# watch again if the head moved, else report it and leave the PR open; status=success → merge on the gate, using stages[0]'s
 # configured strategy (default "merge" — never hard-code one):
 "$DISP" pr merge --number "<pr#>" --strategy "$("$DISP" config '.code.stages[0].strategy // "merge"')"
 git -C "$MAIN" worktree remove "$SCRATCH/int-<zone>"

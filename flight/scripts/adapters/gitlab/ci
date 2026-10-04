@@ -10,13 +10,15 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 verb="${1:-}"; shift || true
 
 # GitLab pipeline statuses that mean "still going" vs. a clean pass. Anything
-# terminal that isn't a clean pass (failed, canceled) counts as a failure.
+# terminal that isn't a clean pass or a cancellation (failed) counts as a failure.
 # _SKIPPED is a subset of _PASSED: a skipped pipeline is not a failure, but
 # nothing in it executed, so it is scored on its own axis rather than folded
-# into the pass side (#150).
-_PENDING='["created","waiting_for_resource","preparing","pending","running","scheduled"]'
+# into the pass side (#150). _CANCELED is its own axis too (FJ-281): neither a
+# pass nor a failure. `canceling` is still on its way there, so it is pending.
+_PENDING='["created","waiting_for_resource","preparing","pending","running","scheduled","canceling"]'
 _PASSED='["success","skipped","manual"]'
 _SKIPPED='["skipped"]'
+_CANCELED='["canceled"]'
 
 case "$verb" in
   # Stream one line per CI state change for a commit, exit on a terminal state.
@@ -49,6 +51,21 @@ case "$verb" in
       printf '{"sha":"%s","status":"%s"}\n' "$sha" "$1" >"$status_file"
     }
 
+    # A verdict is for the SHA resolved at the start. If the MR's head moved
+    # while we watched (a push mid-run, which is also what usually cancels the
+    # run), say so on stderr: this verdict is for a commit the MR no longer
+    # points at, and the next step is to watch the new head (FJ-281). Best
+    # effort: an unreadable MR prints nothing.
+    _head_moved() {
+      [ -n "$pr" ] || return 0
+      local now_sha
+      now_sha="$(_api GET "/merge_requests/${pr}" 2>/dev/null | jq -r '.sha // .diff_refs.head_sha // empty' 2>/dev/null || true)"
+      if [ -n "$now_sha" ] && [ "$now_sha" != "$sha" ]; then
+        echo "ci watch: the head of MR !${pr} moved to ${now_sha:0:12} during the watch; this verdict is for ${sha:0:12} — watch again for the new head" >&2
+      fi
+      return 0
+    }
+
     poll="${LS_CI_POLL_SECONDS:-10}"
     start="$(date +%s)"; seen=0; last_sig=""
     # Two clocks (#171): `timeout` bounds EXECUTION, `queue_timeout` bounds time
@@ -60,14 +77,16 @@ case "$verb" in
         "${PROJECT_API}/pipelines?sha=${sha}&per_page=20" 2>/dev/null || true)"
       # Aggregate over ALL pipelines for this SHA: keep watching while any is
       # pending; once none are pending the verdict is failure if any failed,
-      # skipped if every pipeline was skipped, else success.
+      # cancelled if any was canceled (FJ-281), skipped if every pipeline was
+      # skipped, else success.
       # Superseded pipelines don't count (#43): job retries mutate the pipeline
       # in place (same id), so per-source only the latest pipeline is scored; a
       # newest `web` pipeline (manual "run pipeline") supersedes ALL earlier
       # pipelines for the sha — a human explicitly re-ran it. A missing source
       # falls back to the pipeline's own id, i.e. no collapse.
       metrics="$(printf '%s' "$body" | jq -r \
-        --argjson pend "$_PENDING" --argjson pass "$_PASSED" --argjson skip "$_SKIPPED" '
+        --argjson pend "$_PENDING" --argjson pass "$_PASSED" --argjson skip "$_SKIPPED" \
+        --argjson canc "$_CANCELED" '
         [.[]?]
         | (if length == 0 then []
            elif (max_by(.id).source // "") == "web" then [max_by(.id)]
@@ -75,27 +94,33 @@ case "$verb" in
         | ($r|length) as $total
         | ([$r[] | select(.status as $s | $pend | index($s))] | length) as $pending
         | ([$r[] | select(.status as $s | ($pend | index($s)) | not)
-                 | select(.status as $s | ($pass | index($s)) | not)] | length) as $failed
+                 | select(.status as $s | ($pass | index($s)) | not)
+                 | select(.status as $s | ($canc | index($s)) | not)] | length) as $failed
         | ([$r[] | select(.status as $s | $skip | index($s))] | length) as $skipped
-        | "\($total) \($pending) \($failed) \($skipped)"' 2>/dev/null || true)"
-      read -r total pending failed skipped <<<"$metrics" || true
+        | ([$r[] | select(.status as $s | $canc | index($s))] | length) as $cancelled
+        | "\($total) \($pending) \($failed) \($skipped) \($cancelled)"' 2>/dev/null || true)"
+      read -r total pending failed skipped cancelled <<<"$metrics" || true
       total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"; skipped="${skipped:-0}"
+      cancelled="${cancelled:-0}"
       if [ "$total" -gt 0 ]; then
         seen=1
-        # Verdict order matters: pending wins, then failure, then an all-skipped
-        # run (#150) — which is its own terminal outcome, NOT a pass, because
-        # nothing in it executed. A partial skip still passes; the skipped count
-        # on the line is what tells the human how much was actually verified.
+        # Verdict order matters: pending wins, then failure, then a cancelled
+        # run (FJ-281), then an all-skipped run (#150). Cancelled and all-skipped
+        # are their own terminal outcomes, neither a pass nor a failure: nothing
+        # failed, but the cancelled run verified nothing, and usually a newer
+        # push superseded it. A partial skip still passes; the skipped count on
+        # the line is what tells the human how much was actually verified.
         if [ "$pending" -gt 0 ]; then agg=pending
         elif [ "$failed" -gt 0 ]; then agg=failure
+        elif [ "$cancelled" -gt 0 ]; then agg=cancelled
         elif [ "$skipped" -eq "$total" ]; then agg=skipped
         else agg=success; fi
-        sig="${total}/${pending}/${failed}/${skipped}"
+        sig="${total}/${pending}/${failed}/${skipped}/${cancelled}"
         if [ "$sig" != "$last_sig" ]; then
-          echo "ci runs=${total} pending=${pending} failed=${failed} skipped=${skipped} status=${agg}"
+          echo "ci runs=${total} pending=${pending} failed=${failed} skipped=${skipped} cancelled=${cancelled} status=${agg}"
           last_sig="$sig"; _write "$agg"
         fi
-        [ "$pending" -eq 0 ] && exit 0
+        [ "$pending" -eq 0 ] && { _head_moved; exit 0; }
       fi
 
       # Queued or executing? The pipeline-level status alone cannot say. GitLab
