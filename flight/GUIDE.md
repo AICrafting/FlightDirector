@@ -299,7 +299,8 @@ If you give flight your repo's check command, it runs it first:
 "code": { "preflight": "./scripts/run-checks.sh" }
 ```
 
-**promoting-a-branch** runs it from the branch's worktree just before the merge (or before
+**working-an-issue** runs it before moving an issue to `to-test`, and a red result keeps the
+issue `in-progress`. **promoting-a-branch** runs it from the branch's worktree just before the merge (or before
 opening the PR, on a `pr` hop). Only the exit code counts: zero carries on, anything else stops
 the promotion and shows you the failing output. **promoting-branches** depends on the hop: on a
 `direct` hop it runs it per branch, so one red branch is skipped while the clean ones still
