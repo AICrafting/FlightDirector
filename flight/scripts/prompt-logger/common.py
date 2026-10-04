@@ -130,6 +130,15 @@ def ledger_path(repo_root: Path) -> Path:
 	return repo_root / LEDGER_RELPATH
 
 
+def _done_path(repo_root: Path, record_key: str) -> Path:
+	return state_directory() / f"done-{stable_key(ledger_path(repo_root), record_key)}"
+
+
+def record_logged(repo_root: Path, record_key: str) -> bool:
+	"""Whether append_record has already written the row for `record_key`."""
+	return _done_path(repo_root, record_key).exists()
+
+
 def append_record(repo_root: Path, record: dict[str, Any], record_key: str) -> bool:
 	missing = REQUIRED_RECORD_FIELDS.difference(record)
 	if missing:
@@ -138,7 +147,7 @@ def append_record(repo_root: Path, record: dict[str, Any], record_key: str) -> b
 	log_path = ledger_path(repo_root)
 	log_path.parent.mkdir(parents=True, exist_ok=True)
 	lock_path = state_directory() / f"ledger-{stable_key(log_path)}.lock"
-	done_path = state_directory() / f"done-{stable_key(log_path, record_key)}"
+	done_path = _done_path(repo_root, record_key)
 
 	with lock_path.open("a", encoding="utf-8") as lock:
 		_lock_exclusive(lock)

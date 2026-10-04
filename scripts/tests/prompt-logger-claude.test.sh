@@ -321,6 +321,33 @@ check "a legacy multi-model row (no per-model usage) keeps its logged cost" "$(j
 check "summary --as-logged adds up the stored costs instead" "$(cd "$R" && "$DISP" prompt-log summary --session R1 --json --as-logged | jq -e '(.cost_usd*1e6|round)==5175000 and (.unpriced_models|length)==1' >/dev/null && echo 1 || echo 0)"
 check "re-pricing is quiet (no per-row warnings on stderr)" "$( (cd "$R" && "$DISP" prompt-log summary --session R1 >/dev/null 2>"$T/reprice.err"); [ ! -s "$T/reprice.err" ] && echo 1 || echo 0)"
 
+# ---------------------------------------------------------------------------
+# 8. a message sent while a turn is running (FJ-269): Claude Code fires
+#    UserPromptSubmit again inside the same turn, so the turn keeps its id and its
+#    start and the prompts accumulate; the one Stop then covers the whole turn
+# ---------------------------------------------------------------------------
+R="$T/midturn"; S="$T/state-midturn"; make_repo "$R" true; LOG="$R/.flightdirector/prompt-log.jsonl"
+invoke prompt "$(jq -nc --arg cwd "$R" '{session_id:"session-main",cwd:$cwd,hook_event_name:"UserPromptSubmit",prompt:"main prompt"}')" "$R" "$S"; backdate_state "$S"
+FIRST_TURN="$(jq -r .turn_id "$S"/state-*.json)"
+invoke prompt "$(jq -nc --arg cwd "$R" '{session_id:"session-main",cwd:$cwd,hook_event_name:"UserPromptSubmit",prompt:"also check the docs"}')" "$R" "$S"
+invoke stop "$(jq -nc --arg cwd "$R" --arg path "$FIXTURES/claude-main.jsonl" '{session_id:"session-main",cwd:$cwd,hook_event_name:"Stop",transcript_path:$path}')" "$R" "$S" 2>/dev/null
+check "one row for the turn" "$([ "$(wc -l <"$LOG")" -eq 1 ] && echo 1 || echo 0)"
+assert_jq "the turn keeps the first prompt's id" ".turn_id==\"$FIRST_TURN\"" "$LOG"
+assert_jq "the row counts the turn from its first prompt, not from the queued one" '.input_tokens == (10+1000+20000)+(5+500+21000) and .output_tokens==500' "$LOG"
+assert_jq "both prompts are kept, in order, and the queued one is counted" '(.prompt|startswith("main prompt")) and (.prompt|endswith("also check the docs")) and .queued_prompts==1' "$LOG"
+assert_jq "a turn with one prompt has no queued_prompts field" '.queued_prompts==null and .prompt=="main prompt"' "$T/main/.flightdirector/prompt-log.jsonl"
+invoke prompt "$(jq -nc --arg cwd "$R" '{session_id:"session-main",cwd:$cwd,hook_event_name:"UserPromptSubmit",prompt:"next turn"}')" "$R" "$S"
+check "after the Stop, the next prompt starts a new turn" "$([ "$(jq -r .turn_id "$S"/state-*.json)" != "$FIRST_TURN" ] && [ "$(jq -r .prompt "$S"/state-*.json)" = "next turn" ] && echo 1 || echo 0)"
+
+# a turn already logged is closed even if its state outlived the Stop (a Stop racing the hook)
+R="$T/stale"; S="$T/state-stale"; make_repo "$R" true; LOG="$R/.flightdirector/prompt-log.jsonl"
+invoke prompt "$(jq -nc --arg cwd "$R" '{session_id:"session-main",cwd:$cwd,hook_event_name:"UserPromptSubmit",prompt:"main prompt"}')" "$R" "$S"; backdate_state "$S"
+STATE_FILE="$(ls "$S"/state-*.json)"; cp "$STATE_FILE" "$T/stale-state.json"
+invoke stop "$(jq -nc --arg cwd "$R" --arg path "$FIXTURES/claude-main.jsonl" '{session_id:"session-main",cwd:$cwd,hook_event_name:"Stop",transcript_path:$path}')" "$R" "$S" 2>/dev/null
+cp "$T/stale-state.json" "$STATE_FILE"	# the state the racing hook read comes back
+invoke prompt "$(jq -nc --arg cwd "$R" '{session_id:"session-main",cwd:$cwd,hook_event_name:"UserPromptSubmit",prompt:"next turn"}')" "$R" "$S"
+check "a logged turn's leftover state does not swallow the next prompt" "$([ "$(jq -r .turn_id "$STATE_FILE")" != "$(jq -r .turn_id "$T/stale-state.json")" ] && [ "$(jq -r .prompt "$STATE_FILE")" = "next turn" ] && echo 1 || echo 0)"
+
 # Summary: plain when nothing failed, red when something did (#123).
 [ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
 printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"

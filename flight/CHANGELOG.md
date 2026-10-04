@@ -15,6 +15,13 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Fixed
 
+- **A message sent mid-turn no longer drops the turn's earlier usage from the prompt log**
+  (FJ-269). Claude Code fires `UserPromptSubmit` for a message sent while a turn is running, and
+  the prompt hook used to start a new turn there. The one `Stop` then counted only the requests
+  after that message. Now the open turn keeps its id and start, the prompts accumulate
+  (`queued_prompts` counts the extras), and the row covers the whole turn. An interrupted turn,
+  which gets no `Stop`, is now counted in the next turn's row instead of being lost.
+
 - **Prompt-log pricing matches the published Claude rates** (FJ-270). Claude Opus 5.5 was priced
   at Claude Opus 5 rates ($5/$25, cache reads $0.50); it is now $4/$20 with $0.20 cache reads.
   Claude Sonnet 5 and 5.5 were priced at $3/$15; they are now $2/$10 with $0.20 cache reads.
