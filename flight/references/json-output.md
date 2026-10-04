@@ -115,7 +115,8 @@ Every key is present on every backend. Notes:
   row count when the backend reports one (Forgejo, GitLab), otherwise null.
 - **Filters:** `--state open|closed|all`, `--label NAME` (repeatable) and `--limit N` work as
   without `--json`. **`--status ROLE`** filters by a status role, mapped to this tracker's label
-  name. An unconfigured or declined role is a `usage` error.
+  name. On a tracker you selected (the default or `--tracker REF`), an unconfigured or declined
+  role is a `usage` error.
 - **`errors`** is always `[]` for a single tracker.
 
 **`--all-trackers --json`** lists every configured tracker into the same object:
@@ -127,8 +128,10 @@ Every key is present on every backend. Notes:
 - A tracker that fails adds `{"tracker": "GH", "code": "auth", "reason": "…"}` to `errors`, is also
   named on stderr, and the command still exits 0 with the others' rows. Only when every tracker
   fails is the result the error envelope of the first failure.
-- `--status ROLE` is mapped per tracker. A tracker without that role reports a `usage` error
-  entry.
+- `--status ROLE` is mapped per tracker. A tracker that has no label for the role (never
+  defined, or declined as `false`) contributes zero rows and a `total` of 0, with a note on
+  stderr naming the tracker and the role. It is not an `errors` entry. The text form behaves the
+  same way and still exits 0.
 
 ### Paging: `issues list --json --per-page M [--cursor C]`
 

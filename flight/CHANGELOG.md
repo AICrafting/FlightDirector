@@ -15,6 +15,13 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Fixed
 
+- **`issues list --all-trackers --status ROLE` no longer fails on a tracker without that role**
+  (FJ-277). A tracker that never defined the role, or declined it (`false`), used to show up as
+  `tracker X unavailable`. Under `--json` it landed in `errors[]`, and in text mode the command
+  exited non-zero. Such a tracker now contributes zero rows, with one stderr note naming the
+  tracker and the role. Asking one tracker directly (`--tracker REF`, or the default) for a role
+  it lacks is still a usage error.
+
 - **A message sent mid-turn no longer drops the turn's earlier usage from the prompt log**
   (FJ-269). Claude Code fires `UserPromptSubmit` for a message sent while a turn is running, and
   the prompt hook used to start a new turn there. The one `Stop` then counted only the requests

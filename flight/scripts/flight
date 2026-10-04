@@ -851,7 +851,7 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 		: >"$agg_dir/ok"; : >"$agg_dir/failed"
 		while IFS= read -r list_ref; do
 			[ -n "$list_ref" ] || continue
-			if "$SELF_DIR/flight" issues list --tracker "$list_ref" --json "$@" >"$agg_dir/out" 2>"$agg_dir/err"; then
+			if FLIGHT_ALL_TRACKERS_CHILD=1 "$SELF_DIR/flight" issues list --tracker "$list_ref" --json "$@" >"$agg_dir/out" 2>"$agg_dir/err"; then
 				cat "$agg_dir/out" >>"$agg_dir/ok"; printf '\n' >>"$agg_dir/ok"
 				sed -e 's/^flight: //' -e "s/^/flight: tracker $list_ref: /" "$agg_dir/err" >&2
 			else
@@ -881,7 +881,7 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 		list_err="$(mktemp "${TMPDIR:-/tmp}/flight-list-err.XXXXXX")"
 		while IFS= read -r list_ref; do
 			[ -n "$list_ref" ] || continue
-			if "$SELF_DIR/flight" issues list --tracker "$list_ref" "$@" >"$list_out" 2>"$list_err"; then
+			if FLIGHT_ALL_TRACKERS_CHILD=1 "$SELF_DIR/flight" issues list --tracker "$list_ref" "$@" >"$list_out" 2>"$list_err"; then
 				awk -v ref="$list_ref" -v bare="$list_unprefixed" 'BEGIN { FS = OFS = "\t" } NF {
 					n = $1; sub(/^.*-/, "", n)
 					if (bare == "true") print ($1 ~ /^[0-9]+$/ ? "#" $1 : $1), $0
@@ -985,13 +985,22 @@ fi
 
 # `issues list --status ROLE` (#253) — a status ROLE filter, mapped through the
 # selected tracker's label map to its label name. Dispatcher-owned, so one call can
-# ask every tracker for "to-test" however each one spells it.
+# ask every tracker for "to-test" however each one spells it. A tracker with no
+# spelling for the role (never defined, or declined as `false`) has no issues in it:
+# as one tracker of --all-trackers (FJ-277) it answers zero rows with a stderr note,
+# so it is neither "unavailable" nor an `errors[]` entry. Asked directly, it is
+# still a usage error — that tracker cannot answer the question it was asked.
 if [ "$group/$verb" = issues/list ]; then
 	st_args=()
 	while [ $# -gt 0 ]; do case "$1" in
 		--status)
 			[ $# -ge 2 ] || die "issues list: --status needs a role"
 			st_label="$(jq -r --arg r "$2" '.status[$r] // empty | strings' <<<"$LS_LABELS_JSON")"
+			if [ -z "$st_label" ] && [ "${FLIGHT_ALL_TRACKERS_CHILD:-}" = 1 ]; then
+				echo "flight: issues list: status role '$2' is not configured for this tracker — no rows from it (see flight labels statuses)" >&2
+				[ "$json_mode" != 1 ] || jq -cn '{issues: [], truncated: false, total: 0, errors: []}'
+				exit 0
+			fi
 			[ -n "$st_label" ] || die "issues list: status role '$2' is not configured for this tracker (see flight labels statuses)"
 			st_args+=(--label "$st_label"); shift 2 ;;
 		*) st_args+=("$1"); shift ;;
