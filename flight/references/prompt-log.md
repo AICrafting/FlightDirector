@@ -71,6 +71,8 @@ producers may add the optional extras at the end.
   // "parent_agent_id": "a1b2…", Claude Code: the agent that launched this one (absent when the main loop did)
   // "spawn_depth": 2,           Claude Code: 1 = launched by the main loop, 2 = by that agent, 3 = the deepest
   // "interrupted": true,        the turn was interrupted; usage is whatever had been reported
+  // "queued_prompts": 1,        Claude Code: messages the user sent while the turn was running; `prompt`
+  //                              holds them all, in order, separated by a blank line
   // "usage_missing": "no-usage", only on a row whose token fields are null — why:
   //                              "no-path" (payload named no transcript) | "unreadable" | "no-usage"
   // "models": {"m1": 123, …}   a turn that spanned models — output tokens per model; `model` is the dominant one
@@ -174,8 +176,16 @@ pricing lookup, atomic state files, a locked and de-duplicated append). Turn sta
 prompt and stop hooks lives under `$TMPDIR/flight-prompt-logger/` (`FLIGHT_PROMPT_LOG_STATE_DIR`
 overrides it — the tests use that).
 
-Claude Code has no `Interrupt` hook: an interrupted turn produces no row until the next `Stop`,
-which then covers everything since the last prompt. Its `SubagentStop` payload names the
+**A turn runs from its first prompt to its `Stop`.** A message the user sends while a turn is
+running is delivered into that turn, and Claude Code fires `UserPromptSubmit` for it as well. So
+the prompt hook keeps a turn that no `Stop` has closed yet: the turn keeps its id and its start, the
+new prompt is appended, and `queued_prompts` counts it. Before FJ-269 the hook replaced the turn
+instead, and the turn's earlier requests, from the first prompt up to the queued message, were never
+logged. A turn whose row is already written counts as closed, even if its state outlived the
+`Stop`.
+
+Claude Code has no `Interrupt` hook either, so an interrupted turn also stays open. It gets no row
+of its own; the next prompt joins it, and the next `Stop` covers both. Its `SubagentStop` payload names the
 subagent's transcript (`agent_transcript_path`); the producer sums every assistant request in it
 and prices per model, since subagents often run a different model than the main loop. A payload
 with no `agent_transcript_path` falls back to the parent `transcript_path`, counting only the
