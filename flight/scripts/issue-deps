@@ -112,6 +112,15 @@ text_links() {
 		| to_entries[] | select(.value) | .key' <<<"$1"
 }
 
+# has_status_record COMMENTS_JSON ID — does the latest signed "Blocked by ID" marker also carry
+# the `(was <role>)` status record? (A rerun after a partial failure must not record it twice.)
+has_status_record() {
+	jq -e --arg id "$2" '
+		[.[] | select(.signature != null)
+		 | select(((.body // "") | split("\n")[0] | sub("\r$"; "")) | test("^(\\*\\*)?(Blocked by|No longer blocked by) \($id)(\\*\\*)?(:.*)?$"; "i"))]
+		| last | (.body // "") | contains("(was ")' <<<"$1" >/dev/null
+}
+
 # collect blockers|blocking — this issue's links as [{id, title, state, via}]: the native rows
 # first (skipped when the backend has none), then the text record's ids not already listed.
 collect() {
@@ -129,7 +138,8 @@ collect() {
 		if jq -e --arg i "$id" 'any(.[]; (.id | ascii_upcase) == $i)' <<<"$rows" >/dev/null; then continue; fi
 		got="$(fl_try issues get --number "$id")"
 		case "$got" in
-			'!'*) rows="$(jq -c --arg i "$id" '. + [{id: $i, title: null, state: null, via: "text"}]' <<<"$rows")" ;;
+			'!not-found'*) rows="$(jq -c --arg i "$id" '. + [{id: $i, title: null, state: null, via: "text"}]' <<<"$rows")" ;;
+			'!'*) fail "$(err_code "$got")" "$(err_msg "$got")" ;;
 			*) rows="$(jq -c --arg i "$id" --argjson g "$got" '. + [{id: ($g.qualified // $i), title: $g.title, state: $g.state, via: "text"}]' <<<"$rows")" ;;
 		esac
 	done < <(text_links "$comments" "$side")
@@ -158,11 +168,11 @@ BLOCKER="$(fl issues resolve --number "$BY")"
 BQ="$(jq -r '.qualified' <<<"$BLOCKER")"; BT="$(jq -r '.tracker' <<<"$BLOCKER")"; BN="$(jq -r '.number' <<<"$BLOCKER")"
 UBQ="$(upper "$BQ")"
 [ "$UBQ" != "$UQ" ] || die "an issue cannot block itself ($Q)"
-ISSUE_J="$(fl issues get --number "$Q")"
-BY_J="$(fl issues get --number "$BQ")"
 ROLES="{}"; [ "$WANT_STATUS" = 0 ] || ROLES="$(status_roles "$T")"
 
 if [ "$VERB" = block ]; then
+	ISSUE_J="$(fl issues get --number "$Q")"
+	BY_J="$(fl issues get --number "$BQ")"
 	VIA=text
 	if [ "$(upper "$BT")" = "$(upper "$T")" ]; then
 		R="$(fl_try issues dep-add --number "$Q" --by "$BN")"
@@ -185,13 +195,17 @@ if [ "$VERB" = block ]; then
 
 	RECORDED=0
 	if [ "$VIA" = text ]; then
-		LINKS="$(text_links "$(fl issues comments --number "$Q")" blocked)"
-		if ! grep -Fxq -- "$UBQ" <<<"$LINKS"; then
+		QC="$(fl issues comments --number "$Q")"
+		LINKS="$(text_links "$QC" blocked)"
+		if grep -Fxq -- "$UBQ" <<<"$LINKS"; then
+			if [ -n "$SET_TO" ] && has_status_record "$QC" "$BQ"; then RECORDED=1; fi
+		else
 			BODY="**Blocked by $BQ**: $(jq -r '.title' <<<"$BY_J")"
 			if [ -n "$SET_TO" ]; then BODY="$BODY"$'\n\n'"Status: blocked (was $WAS)"; RECORDED=1; fi
 			post "$Q" "$BODY"
 		fi
-		MIRROR="$(text_links "$(fl issues comments --number "$BQ")" mirror)"
+		BC="$(fl issues comments --number "$BQ")"
+		MIRROR="$(text_links "$BC" mirror)"
 		if ! grep -Fxq -- "$UQ" <<<"$MIRROR"; then
 			post "$BQ" "**Blocks $Q**: $(jq -r '.title' <<<"$ISSUE_J")"
 		fi
@@ -223,21 +237,31 @@ if [ "$(upper "$BT")" = "$(upper "$T")" ]; then
 			fi ;;
 	esac
 fi
-LINKS="$(text_links "$(fl issues comments --number "$Q")" blocked)"
+QC="$(fl issues comments --number "$Q")"
+LINKS="$(text_links "$QC" blocked)"
 if grep -Fxq -- "$UBQ" <<<"$LINKS"; then
 	post "$Q" "**No longer blocked by $BQ**"
 	REMOVED+=(text)
 fi
-MIRROR="$(text_links "$(fl issues comments --number "$BQ")" mirror)"
+# A blocker that no longer exists has no comments to mirror onto: skip, don't stop.
+BC="$(fl_try issues comments --number "$BQ")"
+MIRROR=""
+case "$BC" in
+	'!not-found'*) ;;
+	'!'*) fail "$(err_code "$BC")" "$(err_msg "$BC")" ;;
+	*) MIRROR="$(text_links "$BC" mirror)" ;;
+esac
 if grep -Fxq -- "$UQ" <<<"$MIRROR"; then
 	post "$BQ" "**No longer blocks $Q**"
 	case " ${REMOVED[*]-} " in *" text "*) ;; *) REMOVED+=(text) ;; esac
 fi
 
-RESTORED=""
+RESTORED=""; REMAINING="[]"
+# Assigned on its own line (not inside a condition) so a failed read stops the verb.
+if [ "${#REMOVED[@]}" != 0 ] && [ "$WANT_STATUS" = 1 ]; then REMAINING="$(collect blockers)"; fi
 if [ "${#REMOVED[@]}" = 0 ]; then
 	note "$Q was not blocked by $BQ"
-elif [ "$WANT_STATUS" = 1 ] && [ "$(collect blockers)" = "[]" ]; then
+elif [ "$WANT_STATUS" = 1 ] && [ "$REMAINING" = "[]" ]; then
 	CURRENT="$(fl issues get --number "$Q")"
 	if [ "$(jq -r '.status // ""' <<<"$CURRENT")" = blocked ]; then
 		WAS="$(fl issues comments --number "$Q" | jq -r '[.[] | select(.signature != null) | (.body // "")

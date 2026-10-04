@@ -27,7 +27,7 @@ cat >"$STUB" <<'SH'
 # deps.json ([[blocked, blocker], …] native pairs), and an `unsupported` file that makes the
 # dep-* verbs fail as a backend without native links would. $STATE/trackers.json holds each
 # tracker's config entry. FAIL_COMMENT_ON=REF-n makes comments on that issue fail. Every call
-# is logged to $STATE/calls.log.
+# is logged to $STATE/calls.log. FAIL_DEP=CODE makes the dep-* verbs fail with that error code.
 set -euo pipefail
 S="${STATE:?}"; printf '%s\n' "$*" >>"$S/calls.log"
 group="$1" verb="$2"; shift 2
@@ -52,7 +52,8 @@ case "$number" in
 	*) ref="$(up "${tracker:-FJ}")"; n="${number#\#}" ;;
 esac
 D="$S/$ref"; [ -d "$D" ] || err not-found "no tracker $ref"
-[ -f "$D/$n.json" ] || err not-found "$ref-$n does not exist"
+# `resolve` is local in the real dispatcher: it names an issue without looking it up.
+if [ "$verb" != resolve ]; then [ -f "$D/$n.json" ] || err not-found "$ref-$n does not exist"; fi
 issue() { jq -c --arg r "$ref" --arg n "$1" '. + {number: $n, tracker: $r, qualified: "\($r)-\($n)"}' "$D/$1.json"; }
 deps() { [ -f "$D/deps.json" ] || echo '[]' >"$D/deps.json"; cat "$D/deps.json"; }
 rows() { while IFS= read -r m; do [ -n "$m" ] && issue "$m"; done | jq -sc 'map({number, title, state})'; }
@@ -74,6 +75,7 @@ case "$verb" in
 	clear-status) jq -c '.status = null' "$D/$n.json" >"$D/$n.new" && mv "$D/$n.new" "$D/$n.json" ;;
 	dep-add|dep-remove|dep-list|dep-blocking)
 		[ ! -f "$D/unsupported" ] || err unsupported "$ref has no native dependencies"
+		[ -z "${FAIL_DEP:-}" ] || err "$FAIL_DEP" "$verb failed on $ref"
 		case "$verb" in
 			dep-add) deps | jq -c --arg a "$n" --arg b "$by" 'if any(.[]; . == [$a, $b]) then . else . + [[$a, $b]] end' >"$D/deps.new"; mv "$D/deps.new" "$D/deps.json" ;;
 			dep-remove) deps | jq -c --arg a "$n" --arg b "$by" 'map(select(. != [$a, $b]))' >"$D/deps.new"; mv "$D/deps.new" "$D/deps.json" ;;
@@ -160,6 +162,28 @@ RC=0; FAIL_COMMENT_ON=GH-2 FLIGHT_SELF="$STUB" FLIGHT_REPO_ROOT="$SANDBOX" "$HEL
 check "the failure is reported" "$([ "$RC" = 1 ] && grep -q 'GH-2' "$SANDBOX/err" && echo 1 || echo 0)" "rc=$RC $(cat "$SANDBOX/err")"
 hd block --number FJ-6 --by GH-2 --no-status
 check "the rerun posts only the mirror" "$([ "$RC" = 0 ] && [ "$(ncomments FJ 6)" = 1 ] && [ "$(ncomments GH 2)" = 1 ] && echo 1 || echo 0)" "$(ncomments FJ 6)/$(ncomments GH 2)"
+
+section "a rerun after a partial failure, status on"
+fresh; mk FJ 17 "Feature" in-progress; mk GH 3 "Upstream"
+RC=0; FAIL_COMMENT_ON=GH-3 FLIGHT_SELF="$STUB" FLIGHT_REPO_ROOT="$SANDBOX" "$HELPER" block --number FJ-17 --by GH-3 >/dev/null 2>"$SANDBOX/err" || RC=$?
+check "the first run fails on the mirror" "$([ "$RC" = 1 ] && echo 1 || echo 0)" "rc=$RC"
+hd block --number FJ-17 --by GH-3
+check "the rerun records the status once, ends blocked, and posts the mirror once" \
+	"$([ "$RC" = 0 ] && [ "$(status_of FJ 17)" = blocked ] && [ "$(ncomments FJ 17)" = 1 ] && [ "$(ncomments GH 3)" = 1 ] && comments FJ 17 | jq -e '[.[] | select(.body | contains("(was "))] | length == 1' >/dev/null && echo 1 || echo 0)" "rc=$RC $(comments FJ 17) / $(ncomments GH 3)"
+
+section "a native failure other than unsupported stops the verb"
+fresh; mk FJ 18 "Feature" in-progress; mk FJ 19 "Groundwork"
+RC=0; rm -f "$SANDBOX/env.json"
+FAIL_DEP=network LS_JSON=1 FLIGHT_ERROR_FILE="$SANDBOX/env.json" FLIGHT_SELF="$STUB" FLIGHT_REPO_ROOT="$SANDBOX" "$HELPER" block --number FJ-18 --by FJ-19 >/dev/null 2>&1 || RC=$?
+check "block stops with the backend's code and posts nothing" \
+	"$([ "$RC" = 1 ] && jq -e '.error.code == "network"' "$SANDBOX/env.json" >/dev/null && [ "$(ncomments FJ 18)" = 0 ] && [ "$(ncomments FJ 19)" = 0 ] && [ "$(status_of FJ 18)" = in-progress ] && echo 1 || echo 0)" "rc=$RC"
+
+section "a deleted blocker can still be unblocked"
+fresh; mk FJ 20 "Feature" blocked
+jq -n '[{id:"1", body:"**Blocked by FJ-404**: gone\n\nStatus: blocked (was in-progress)", signature:{plugin:"flight"}}]' >"$STATE/FJ/20.comments.json"
+hd unblock --number FJ-20 --by FJ-404
+check "unblock succeeds, records it, and restores the status" \
+	"$([ "$RC" = 0 ] && [ "$OUT" = "FJ-20 no longer blocked by FJ-404" ] && [ "$(status_of FJ 20)" = in-progress ] && [ "$(comments FJ 20 | jq -r '.[-1].body')" = "**No longer blocked by FJ-404**" ] && echo 1 || echo 0)" "rc=$RC out=$OUT err=$ERR"
 
 section "what the text record does not count"
 fresh; mk FJ 7 "Feature"; mk GH 1 "Upstream"; mk FJ 8 "Other"
