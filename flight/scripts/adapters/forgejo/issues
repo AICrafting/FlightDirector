@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Forgejo issues adapter — verbs: list get comments create update comment attach
-# set-status clear-status label-add label-remove assign unassign close reopen.
+# set-status clear-status label-add label-remove assign unassign close reopen
+# dep-add dep-remove dep-list dep-blocking.
 # See ../../../references/adapter-contract.md.
 set -euo pipefail
 ADAPTER_NAME="forgejo/issues"
@@ -347,5 +348,46 @@ case "$verb" in
     _api PATCH "/issues/${number}" "$(jq -n '{state:"open"}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add label-remove assign unassign close reopen)" ;;
+  dep-add|dep-remove|dep-list|dep-blocking)
+    # Issue dependencies (FJ-271): "N is blocked by M", both issues in this repo. A repo with
+    # dependencies switched off answers these endpoints with 404, which would read as a missing
+    # issue, so the repo setting is checked first and reported as `unsupported`.
+    number=""; by=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --by) by="$2"; shift 2 ;;
+      *) die "issues $verb: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues $verb: --number required"
+    case "$verb" in
+      dep-add|dep-remove)
+        case "$by" in ''|*[!0-9]*) die "issues $verb: --by needs an issue number" ;; esac ;;
+    esac
+    enabled="$(_api GET "" | jq -r '.internal_tracker.enable_issue_dependencies // false')"
+    [ "$enabled" = true ] || fail unsupported "issue dependencies are switched off for ${LS_OWNER}/${LS_REPO}"
+    # Only links whose other end is in this repo: the caller names issues by this tracker. One
+    # page of 50 is enough; an issue with more blockers than that is not worth paging for.
+    same_repo='[.[] | select((.repository.owner // "" | ascii_downcase) == ($o | ascii_downcase)
+        and (.repository.name // "" | ascii_downcase) == ($r | ascii_downcase))
+      | {number: (.number | tostring), title: (.title // ""),
+         state: (if .state == "closed" then "closed" else "open" end)}]'
+    case "$verb" in
+      dep-list|dep-blocking)
+        path=dependencies; [ "$verb" = dep-blocking ] && path=blocks
+        _api GET "/issues/${number}/${path}?limit=50" \
+          | jq -c --arg o "$LS_OWNER" --arg r "$LS_REPO" "$same_repo" | dep_emit
+        ;;
+      *)
+        linked="$(_api GET "/issues/${number}/dependencies?limit=50" \
+          | jq -r --arg o "$LS_OWNER" --arg r "$LS_REPO" --arg b "$by" "$same_repo"' | map(select(.number == $b)) | length')"
+        if [ "$verb" = dep-add ] && [ "$linked" != 0 ]; then exit 0; fi
+        if [ "$verb" = dep-remove ] && [ "$linked" = 0 ]; then exit 0; fi
+        method=POST; [ "$verb" = dep-remove ] && method=DELETE
+        _api "$method" "/issues/${number}/dependencies" \
+          "$(jq -cn --arg o "$LS_OWNER" --arg r "$LS_REPO" --argjson i "$by" '{owner: $o, repo: $r, index: $i}')" >/dev/null
+        ;;
+    esac
+    ;;
+
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add label-remove assign unassign close reopen dep-add dep-remove dep-list dep-blocking)" ;;
 esac

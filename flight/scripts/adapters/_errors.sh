@@ -16,6 +16,7 @@
 #   network         the server could not be reached (curl itself failed)
 #   backend         the server answered with any other error
 #   usage           bad arguments (the default for a plain `die`)
+#   unsupported     the backend cannot do this here (a feature switched off, or not in its tier)
 
 # fail CODE MESSAGE… — report and exit 1.
 fail() {
