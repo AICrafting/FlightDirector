@@ -123,6 +123,72 @@ check "dep-add of an existing link sends nothing" "$([ "$RC" = 0 ] && [ "$(sent 
 run github dep-remove --number 5 --by 7
 check "dep-remove deletes by database id" "$([ "$(sent 'DELETE https://forge.invalid/api/v1/repos/o/r/issues/5/dependencies/blocked_by/4141')" = 1 ] && echo 1 || echo 0)" "$(cat "$CURL_LOG")"
 
+section "gitlab"
+reset
+route GET '/projects/o%2Fr$' 200 '{"id":77}'
+route GET '/issues/5/links$' 200 '[{"iid":7,"title":"Seven","state":"opened","project_id":77,"link_type":"is_blocked_by","issue_link_id":301},{"iid":8,"title":"Related","state":"opened","project_id":77,"link_type":"relates_to","issue_link_id":302},{"iid":9,"title":"Other project","state":"opened","project_id":12,"link_type":"is_blocked_by","issue_link_id":303},{"iid":10,"title":"Ten","state":"closed","project_id":77,"link_type":"blocks","issue_link_id":304}]'
+run gitlab dep-list --number 5
+check "dep-list: is_blocked_by links in this project only, opened → open" "$([ "$OUT" = "$(printf '7\tSeven\topen')" ] && echo 1 || echo 0)" "$OUT"
+run gitlab dep-blocking --number 5
+check "dep-blocking: blocks links" "$([ "$OUT" = "$(printf '10\tTen\tclosed')" ] && echo 1 || echo 0)" "$OUT"
+: >"$CURL_LOG"
+route POST '/issues/5/links$' 201 '{}'
+run gitlab dep-add --number 5 --by 11
+check "dep-add posts an is_blocked_by link" "$([ "$RC" = 0 ] && [ "$(sent '{"target_project_id":77,"target_issue_iid":"11","link_type":"is_blocked_by"}')" = 1 ] && echo 1 || echo 0)" "$(cat "$CURL_LOG")"
+: >"$CURL_LOG"
+run gitlab dep-add --number 5 --by 7
+check "dep-add of an existing link sends nothing" "$([ "$RC" = 0 ] && [ "$(sent POST)" = 0 ] && echo 1 || echo 0)"
+: >"$CURL_LOG"
+route DELETE '/issues/5/links/301$' 200 '{}'
+run gitlab dep-remove --number 5 --by 7
+check "dep-remove deletes the link by its id" "$([ "$(sent 'DELETE https://forge.invalid/api/v1/projects/o%2Fr/issues/5/links/301')" = 1 ] && echo 1 || echo 0)" "$(cat "$CURL_LOG")"
+reset
+route GET '/projects/o%2Fr$' 200 '{"id":77}'
+route GET '/issues/5/links$' 200 '[]'
+route POST '/issues/5/links$' 403 '{"message":"403 Forbidden"}'
+run gitlab dep-add --number 5 --by 11
+check "a refused blocking link (Free tier) → unsupported" "$([ "$RC" = 1 ] && [ "$(code)" = unsupported ] && echo 1 || echo 0)" "rc=$RC code=$(code)"
+reset
+route GET '/projects/o%2Fr$' 200 '{"id":77}'
+route GET '/issues/5/links$' 200 '[]'
+route POST '/issues/5/links$' 500 '{"message":"boom"}'
+run gitlab dep-add --number 5 --by 11
+check "any other error stays a backend error" "$([ "$RC" = 1 ] && [ "$(code)" = backend ] && echo 1 || echo 0)" "rc=$RC code=$(code)"
+
+section "jira"
+LINKS='{"key":"ACME-5","fields":{"issuelinks":[
+	{"id":"501","type":{"id":"10000"},"inwardIssue":{"key":"ACME-7","fields":{"summary":"Seven","status":{"statusCategory":{"key":"new"}}}}},
+	{"id":"502","type":{"id":"10000"},"outwardIssue":{"key":"ACME-9","fields":{"summary":"Nine","status":{"statusCategory":{"key":"done"}}}}},
+	{"id":"503","type":{"id":"10000"},"inwardIssue":{"key":"OTHER-1","fields":{"summary":"Elsewhere","status":{"statusCategory":{"key":"new"}}}}},
+	{"id":"504","type":{"id":"10001"},"inwardIssue":{"key":"ACME-8","fields":{"summary":"Clone","status":{"statusCategory":{"key":"new"}}}}}]}}'
+reset
+route GET '/rest/api/3/issueLinkType$' 200 '{"issueLinkTypes":[{"id":"10001","name":"Cloners","inward":"is cloned by","outward":"clones"},{"id":"10000","name":"Depends","inward":"Is Blocked By","outward":"blocks"}]}'
+route GET '/rest/api/3/issue/ACME-5' 200 "$LINKS"
+route POST '/rest/api/3/issueLink$' 201 ''
+route DELETE '/rest/api/3/issueLink/501$' 204 ''
+run jira dep-list --number ACME-5
+check "dep-list: inward links of the renamed type, this project only" "$([ "$OUT" = "$(printf 'ACME-7\tSeven\topen')" ] && echo 1 || echo 0)" "$OUT"
+run jira dep-blocking --number ACME-5
+check "dep-blocking: outward links, done → closed" "$([ "$OUT" = "$(printf 'ACME-9\tNine\tclosed')" ] && echo 1 || echo 0)" "$OUT"
+: >"$CURL_LOG"
+run jira dep-add --number ACME-5 --by ACME-6
+check "dep-add: the blocker is the inward issue, the type by id" "$([ "$(sent '{"type":{"id":"10000"},"inwardIssue":{"key":"ACME-6"},"outwardIssue":{"key":"ACME-5"}}')" = 1 ] && echo 1 || echo 0)" "$(cat "$CURL_LOG")"
+: >"$CURL_LOG"
+run jira dep-add --number ACME-5 --by ACME-7
+check "dep-add of an existing link sends nothing" "$([ "$RC" = 0 ] && [ "$(sent POST)" = 0 ] && echo 1 || echo 0)"
+: >"$CURL_LOG"
+run jira dep-remove --number ACME-5 --by ACME-7
+check "dep-remove deletes the link by id" "$([ "$(sent 'DELETE https://forge.invalid/api/v1/rest/api/3/issueLink/501')" = 1 ] && echo 1 || echo 0)" "$(cat "$CURL_LOG")"
+reset
+route GET '/rest/api/3/issueLinkType$' 200 '{"issueLinkTypes":[{"id":"10001","name":"Cloners","inward":"is cloned by","outward":"clones"}]}'
+run jira dep-list --number ACME-5
+check "no blocking link type on the site → unsupported" "$([ "$RC" = 1 ] && [ "$(code)" = unsupported ] && echo 1 || echo 0)" "rc=$RC code=$(code)"
+reset
+route GET '/rest/api/3/issueLinkType$' 200 '{"issueLinkTypes":[{"id":"10002","name":"Blocks","inward":"waits on","outward":"holds up"}]}'
+route GET '/rest/api/3/issue/ACME-5' 200 '{"fields":{"issuelinks":[]}}'
+run jira dep-list --number ACME-5
+check "a type named Blocks is used when no inward text matches" "$([ "$RC" = 0 ] && echo 1 || echo 0)" "rc=$RC code=$(code)"
+
 [ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
 printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]
