@@ -42,6 +42,35 @@ got="$(jq -nc '{type:"doc",version:1,content:[
 check "a heading followed by a paragraph stays a separate block" \
 	"$([ "$got" = $'## Acceptance\n\nit works' ] && echo 1 || echo 0)" "got: $got"
 
+section "write path: a leading # line becomes an ADF heading"
+for level in 1 2 3 6; do
+	hashes="$(printf '%*s' "$level" '' | tr ' ' '#')"
+	adf="$(printf '%s Test plans\n' "$hashes" | to_adf)"
+	check "'$hashes Test plans' becomes a level-$level heading node" \
+		"$(jq -e --argjson l "$level" '.content == [{type:"heading",attrs:{level:$l},content:[{type:"text",text:"Test plans"}]}]' <<<"$adf" >/dev/null && echo 1 || echo 0)" "$adf"
+done
+adf="$(printf '####### seven\n' | to_adf)"
+check "seven #s is not a heading (markdown stops at six)" \
+	"$(jq -e '.content[0].type == "paragraph"' <<<"$adf" >/dev/null && echo 1 || echo 0)" "$adf"
+adf="$(printf 'intro line\n## Acceptance\n- one\n' | to_adf)"
+check "a heading ends the paragraph above it and starts its own block" \
+	"$(jq -e '[.content[].type] == ["paragraph","heading","bulletList"]' <<<"$adf" >/dev/null && echo 1 || echo 0)" "$adf"
+adf="$(printf '## Summary   \n' | to_adf)"
+check "trailing whitespace is trimmed from the heading text" \
+	"$(jq -e '.content[0].content[0].text == "Summary"' <<<"$adf" >/dev/null && echo 1 || echo 0)" "$adf"
+
+section "round trip: md_to_adf then adf_to_text preserves the section anchors"
+# (A blank line follows the --- because every ADF block is joined with one on read.)
+body=$'## Summary\n\nWhat changed.\n\n## Acceptance\n\n- [ ] it round-trips\n- [ ] tests exist\n\n## Test plans\n\n1. run it\n\n```\n## not a heading, just code\n```\n\n---\n\nsigned'
+back="$(printf '%s' "$body" | to_adf | to_text)"
+check "the body comes back unchanged" "$([ "$back" = "$body" ] && echo 1 || echo 0)" "got: $back"
+for anchor in '## Summary' '## Acceptance' '## Test plans'; do
+	check "'$anchor' survives as its own line" "$(grep -qx -- "$anchor" <<<"$back" && echo 1 || echo 0)" "got: $back"
+done
+adf="$(printf '%s' "$body" | to_adf)"
+check "a '##' inside a fenced code block is not turned into a heading" \
+	"$(jq -e '[.content[] | select(.type=="heading")] | length == 3' <<<"$adf" >/dev/null && echo 1 || echo 0)" "$adf"
+
 section "regression: paragraphs, code blocks, lists and rules convert as before"
 md=$'para one\nline two\n\n#hashtag, not a heading\n\n```\n# a shell comment\nx\n```\n\n- a\n- b\n\n1. one\n2. two\n\n---\ntail\n'
 # The ADF this markdown produced before FJ-178 — any drift here is a behaviour change.

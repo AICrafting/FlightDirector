@@ -13,6 +13,13 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Changed
+
+- **flight writes real headings to Jira** (FJ-178). On Jira, a body or comment line starting
+  with `#`…`######` and a space now becomes an ADF heading at that level, so the `##` sections
+  flight writes render as headings in the Jira UI rather than as literal `## ` text — and read back
+  intact. `#` lines inside fenced code blocks, and `#word` with no space, are left alone.
+
 ### Fixed
 
 - **Jira headings survive a read** (FJ-178). `flight issues get` and `issues comments` on Jira

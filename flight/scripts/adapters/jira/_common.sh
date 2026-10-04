@@ -153,8 +153,8 @@ _offset_get() {
 
 # --- Minimal ADF shim ------------------------------------------------------
 # Jira stores rich text as Atlassian Document Format (ADF) JSON. This is a
-# DELIBERATELY minimal converter: paragraphs, headings (read back as `#`-prefixed
-# lines, FJ-178), fenced code blocks, bullet/ordered lists, and a `---` rule (the
+# DELIBERATELY minimal converter: paragraphs, headings (a leading `#`…`######` +
+# space, both ways — FJ-178), fenced code blocks, bullet/ordered lists, and a `---` rule (the
 # dispatcher's signature separator) — enough for issue bodies and comments. Inline marks (bold,
 # links, …) are carried as plain text, not styled. See adapter-contract.md.
 #
@@ -179,6 +179,9 @@ def md_to_adf:
         elif ($l|test("^```")) then (flush | .mode="code" | .buf=[])
         elif ($l|test("^[[:space:]]*$")) then flush
         elif ($l|test("^[[:space:]]*-{3,}[[:space:]]*$")) then (flush | .blocks += [{type:"rule"}])
+        elif ($l|test("^#{1,6}[[:space:]]+")) then
+          ($l|capture("^(?<h>#{1,6})[[:space:]]+(?<t>.*)$")) as $m
+          | flush | .blocks += [{type:"heading", level:($m.h|length), text:($m.t|sub("[[:space:]]+$";""))}]
         elif ($l|test("^[[:space:]]*[-*][[:space:]]+")) then
           (if .mode=="bullet" then . else flush end)
           | .mode="bullet" | .buf += [($l|sub("^[[:space:]]*[-*][[:space:]]+";""))]
@@ -193,6 +196,8 @@ def md_to_adf:
   | {type:"doc", version:1, content: [
       $blocks[] |
       if .type=="rule" then {type:"rule"}
+      elif .type=="heading" then
+        {type:"heading", attrs:{level:.level}, content: (if .text=="" then [] else [{type:"text", text:.text}] end)}
       elif .type=="code" then
         {type:"codeBlock", content: (if .text=="" then [] else [{type:"text", text:.text}] end)}
       elif .type=="bullet" then
