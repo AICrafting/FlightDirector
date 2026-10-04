@@ -87,6 +87,11 @@ the whole lifecycle into the session:
 2. That's it — no server to run. The skills activate automatically when you say things that match
    them (see the workflow below).
 
+3. To check which flight the session loaded, run **`/flight:version`**. It prints the plugin's
+   version from the installed copy's own manifest, the install it came from (e.g.
+   `flight@flightdirector`), its root, and the `flight` CLI on `PATH` — with a note when that CLI
+   is a different version (say, after an upgrade before the session restarted).
+
 ## Install in Codex
 
 1. Add the same marketplace, then install the plugin — from the shell:
@@ -104,6 +109,10 @@ the whole lifecycle into the session:
 
 3. Invoke skills by name with `$filing-issues`, `$working-an-issue`, `$queue-batches`, …, or just
    describe what you want — the same natural-language triggers work in both harnesses.
+
+Codex plugins carry skills and hooks but no slash commands, so there is no `/flight:version`
+there. The same report comes from the script behind it — `bash <plugin root>/scripts/plugin-version.sh`
+(add `--json` for a machine-readable copy) — and `flight --version` gives the CLI's version.
 
 Allow the configured forge hostname when Codex requests network permission. Parallel queues
 (`queue-batches`) require Codex multi-agent support; every other workflow runs without it.

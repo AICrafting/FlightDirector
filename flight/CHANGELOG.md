@@ -13,6 +13,18 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+
+- **`/flight:version` shows which flight the session loaded** (FJ-257). The plugin's first
+  command (alongside the skills) prints the version from the loaded install's own manifest, the
+  install it came from (`flight@flightdirector-dev`, or `unknown` when the path doesn't say), the
+  plugin root, and the `flight` dispatcher on `PATH` — with a note when that dispatcher is a
+  different version or missing. `flight --version` alone can't answer this: it reports the CLI on
+  `PATH`, which in a dev checkout or after an un-refreshed bump is not the copy the skills and
+  hooks run from. Codex plugins have no commands, so on Codex run
+  `scripts/plugin-version.sh` from the plugin root (`--json` for a machine-readable report), or
+  `flight --version` for the CLI.
+
 ### Changed
 
 - **`working-an-issue` runs the repo's `code.preflight` gate before moving an issue to `to-test`**
