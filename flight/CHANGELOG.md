@@ -50,7 +50,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   blocked issue's status moves to `blocked` and back to what it was; `--no-status` skips that.
   `issues get --json` gains `blocked_by`, and `working-an-issue` warns before starting an issue
   with an open blocker. Capability token: `issues-deps`. GitLab's native (Premium) path is
-  untested live: the test rig is on the Free tier and exercises the comment fallback.
+  untested live: the test rig is on the Free tier and exercises the comment fallback. GitLab
+  allows one link per issue pair, so a pair that already shares a `relates_to` (or any other)
+  link falls back to the comment record, and `issues block` says which link is in the way
+  instead of aborting on GitLab's 409 (FJ-275).
 
 ### Fixed
 

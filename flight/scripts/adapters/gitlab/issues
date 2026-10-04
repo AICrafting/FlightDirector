@@ -384,6 +384,11 @@ case "$verb" in
       dep-blocking) rows blocks | jq -c 'map(del(.link))' | dep_emit ;;
       dep-add)
         [ "$(rows is_blocked_by | jq --arg b "$by" 'map(select(.number == $b)) | length')" = 0 ] || exit 0
+        # GitLab allows one link per issue pair (FJ-275): a pair already joined by relates_to (or
+        # linked the other way) cannot take is_blocked_by too, so say which link is in the way.
+        other="$(jq -r --argjson p "$project_id" --arg b "$by" '[.[] | select(.project_id == $p
+          and (.iid | tostring) == $b) | .link_type] | first // empty' <<<"$links")"
+        [ -z "$other" ] || fail unsupported "issues $number and $by already share a GitLab '$other' link, and GitLab allows one link per issue pair; cannot add is_blocked_by"
         tmp="$(mktemp)"
         code="$(_api_try POST "/issues/${number}/links" \
           "$(jq -cn --argjson p "$project_id" --arg b "$by" '{target_project_id: $p, target_issue_iid: $b, link_type: "is_blocked_by"}')" "$tmp")"
@@ -391,6 +396,7 @@ case "$verb" in
         rm -f "$tmp"
         case "$code" in
           2??) ;;
+          409) fail unsupported "GitLab refused an is_blocked_by link (HTTP 409${msg:+: $msg}); the pair likely already has a link of another type" ;;
           400|403|422) fail unsupported "GitLab refused an is_blocked_by link (HTTP $code${msg:+: $msg}); blocking links need GitLab Premium or Ultimate" ;;
           *) http_fail "$code" "POST /issues/${number}/links → HTTP $code${msg:+: $msg}" ;;
         esac

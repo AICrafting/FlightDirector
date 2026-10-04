@@ -142,12 +142,26 @@ check "dep-add of an existing link sends nothing" "$([ "$RC" = 0 ] && [ "$(sent 
 route DELETE '/issues/5/links/301$' 200 '{}'
 run gitlab dep-remove --number 5 --by 7
 check "dep-remove deletes the link by its id" "$([ "$(sent 'DELETE https://forge.invalid/api/v1/projects/o%2Fr/issues/5/links/301')" = 1 ] && echo 1 || echo 0)" "$(cat "$CURL_LOG")"
+: >"$CURL_LOG"
+run gitlab dep-add --number 5 --by 8
+check "dep-add over a pair's existing relates_to link → unsupported, nothing sent (FJ-275)" "$([ "$RC" = 1 ] && [ "$(code)" = unsupported ] && [ "$(sent POST)" = 0 ] && echo 1 || echo 0)" "rc=$RC code=$(code) $(cat "$CURL_LOG")"
+check "the refusal quotes the existing link type" "$(jq -e '.error.message | test("relates_to")' "$SANDBOX/err.json" >/dev/null 2>&1 && echo 1 || echo 0)" "$(cat "$SANDBOX/err.json" 2>/dev/null)"
+: >"$CURL_LOG"
+run gitlab dep-add --number 5 --by 10
+check "dep-add over a pair already linked the other way (blocks) → unsupported" "$([ "$RC" = 1 ] && [ "$(code)" = unsupported ] && [ "$(sent POST)" = 0 ] && echo 1 || echo 0)" "rc=$RC code=$(code)"
 reset
 route GET '/projects/o%2Fr$' 200 '{"id":77}'
 route GET '/issues/5/links$' 200 '[]'
 route POST '/issues/5/links$' 403 '{"message":"403 Forbidden"}'
 run gitlab dep-add --number 5 --by 11
 check "a refused blocking link (Free tier) → unsupported" "$([ "$RC" = 1 ] && [ "$(code)" = unsupported ] && echo 1 || echo 0)" "rc=$RC code=$(code)"
+reset
+route GET '/projects/o%2Fr$' 200 '{"id":77}'
+route GET '/issues/5/links$' 200 '[]'
+route POST '/issues/5/links$' 409 '{"message":"Issue(s) already assigned"}'
+run gitlab dep-add --number 5 --by 11
+check "a 409 from the links endpoint → unsupported (FJ-275)" "$([ "$RC" = 1 ] && [ "$(code)" = unsupported ] && echo 1 || echo 0)" "rc=$RC code=$(code)"
+check "the 409 refusal carries GitLab's message" "$(jq -e '.error.message | test("already assigned")' "$SANDBOX/err.json" >/dev/null 2>&1 && echo 1 || echo 0)" "$(cat "$SANDBOX/err.json" 2>/dev/null)"
 reset
 route GET '/projects/o%2Fr$' 200 '{"id":77}'
 route GET '/issues/5/links$' 200 '[]'
