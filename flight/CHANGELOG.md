@@ -13,6 +13,18 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Changed
+
+- **`working-an-issue` runs the repo's `code.preflight` gate before moving an issue to `to-test`**
+  (FJ-221). The interactive path was the one place a branch changed state without consulting the
+  gate, looser than the batch path. A red gate now leaves the issue `in-progress` and shows the
+  failing output; with no gate configured nothing changes.
+
+- **flight writes real headings to Jira** (FJ-178). On Jira, a body or comment line starting
+  with `#`…`######` and a space now becomes an ADF heading at that level, so the `##` sections
+  flight writes render as headings in the Jira UI rather than as literal `## ` text — and read back
+  intact. `#` lines inside fenced code blocks, and `#word` with no space, are left alone.
+
 ### Fixed
 
 - **`flight ci watch` no longer reports a cancelled run as a failure** (FJ-281). A run stopped
@@ -31,12 +43,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   branch's commit, and the push, the PR body and `pr open` run only inside a guard that reads it;
   otherwise the group is reported skipped, with the reason, and the other groups carry on.
 
-### Changed
-
-- **`working-an-issue` runs the repo's `code.preflight` gate before moving an issue to `to-test`**
-  (FJ-221). The interactive path was the one place a branch changed state without consulting the
-  gate, looser than the batch path. A red gate now leaves the issue `in-progress` and shows the
-  failing output; with no gate configured nothing changes.
+- **Jira headings survive a read** (FJ-178). `flight issues get` and `issues comments` on Jira
+  now render an ADF heading as `#`-prefixed markdown at its own level (`## Acceptance`), instead
+  of flattening it into a plain paragraph — so the `## Acceptance` / `## Test plans` anchors the
+  skills look for are still there when an issue was written or edited in the Jira web UI.
 
 ## [0.17.2] - 2026-10-04
 
