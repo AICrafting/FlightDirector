@@ -13,7 +13,13 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **A red preflight gate now really stops a `pr`-hop group in `promoting-branches`** (FJ-231).
+  The red-gate handler ended in a `continue` with no shell loop around it, so a literal run fell
+  through to the push. The gate now writes its verdict to a file stamped with the integration
+  branch's commit, and the push, the PR body and `pr open` run only inside a guard that reads it;
+  otherwise the group is reported skipped, with the reason, and the other groups carry on.
 
 ## [0.17.2] - 2026-10-04
 
