@@ -440,7 +440,7 @@ flight ci watch --pr "$PR_NUM" \
 ```
 
 Read the verdict off the `status=` field of the last line, **not** off the exit code — `ci watch`
-exits 0 on every terminal verdict and non-zero only on a timeout. There are three:
+exits 0 on every terminal verdict and non-zero only on a timeout. There are four:
 
 - `status=failure` — `ci log --pr "$PR_NUM"` (every failed run on the PR's head commit — the same
   commit `ci watch --pr` just judged), fix, push, re-watch.
@@ -450,6 +450,13 @@ exits 0 on every terminal verdict and non-zero only on a timeout. There are thre
   not a failure: say **"CI ran nothing for #$PR_NUM (all N runs skipped) — nothing was verified."**
   Don't merge on it, and don't treat it as a red either; it usually means a path filter matched
   nothing or a `needs:` dependency was skipped. The user decides whether that is acceptable here.
+- `status=cancelled` — a run was stopped before it finished and none failed, so CI verified
+  nothing for that run. It is not a red: `ci log` finds no failed job, so don't go hunting for one.
+  The usual cause is a newer push to the branch, and a `--pr` watch says so on stderr
+  (*"the head of PR #N moved to … during the watch"*). In that case, watch again: `ci watch --pr
+  "$PR_NUM"` resolves the new head. If the head did not move, someone cancelled the run: say
+  **"CI for #$PR_NUM was cancelled before it finished — nothing was verified"** and let the user
+  decide whether to re-run it. Don't merge on it either way.
 
 On a green verdict, merge only on the user's go-ahead (`pre-merge` gate) or
 per your `post-merge-qa` policy. Use the `$STRATEGY` resolved in Step 1 — the stage's configured

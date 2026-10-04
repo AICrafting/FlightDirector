@@ -44,7 +44,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$url" in
-  */pulls/*|*/merge_requests/*) body="$(cat "$FAKE_RESP/pr.json")" ;;
+  */pulls/*|*/merge_requests/*)
+    # PR_SWITCH=1 + pr-after.json: the first read sees pr.json, every later one
+    # pr-after.json — a head that moved during the watch (FJ-281).
+    body="$(cat "$FAKE_RESP/pr.json")"
+    if [ "${PR_SWITCH:-0}" = 1 ] && [ -f "$FAKE_RESP/pr-after.json" ]; then
+      if [ -f "$FAKE_RESP/pr-calls" ]; then body="$(cat "$FAKE_RESP/pr-after.json")"; fi
+      : >"$FAKE_RESP/pr-calls"
+    fi ;;
   # Per-run / per-pipeline job list (#171): how the adapter tells a run that is
   # really executing from one whose every leg is still waiting for a runner.
   # Matched before the list endpoints, which these URLs also glob onto.
@@ -112,7 +119,8 @@ printf '{"head":{"sha":"%s"},"sha":"%s"}\n' "$REMOTE_SHA" "$REMOTE_SHA" >"$RESP/
 
 # run_obj <backend> <kind> <id> <sha> [<ident>] [<event>] — a single run/pipeline
 # JSON object. kind: ok (finished success) | fail (finished failure) | run (still
-# running) | skip (finished, but nothing executed). <ident> is the dedupe
+# running) | skip (finished, but nothing executed) | cancel (stopped before it
+# finished — usually a newer push superseded it). <ident> is the dedupe
 # identity (workflow file / pipeline source, #43); it defaults to a per-id
 # unique value so unrelated runs never collapse. <event>
 # is the trigger event (forgejo/github; default push) — gitlab expresses the
@@ -133,6 +141,9 @@ run_obj() {
 		gitlab:fail)  printf '{"id":%s,"sha":"%s","status":"failed","source":"%s"}'    "$3" "$4" "$ident" ;;
 		gitlab:run)   printf '{"id":%s,"sha":"%s","status":"running","source":"%s"}'   "$3" "$4" "$ident" ;;
 		gitlab:skip)  printf '{"id":%s,"sha":"%s","status":"skipped","source":"%s"}'   "$3" "$4" "$ident" ;;
+		forgejo:cancel) printf '{"id":%s,"commit_sha":"%s","status":"cancelled","workflow_id":"%s","trigger_event":"%s"}' "$3" "$4" "$ident" "$ev" ;;
+		github:cancel)  printf '{"id":%s,"head_sha":"%s","status":"completed","conclusion":"cancelled","workflow_id":"%s","event":"%s"}' "$3" "$4" "$ident" "$ev" ;;
+		gitlab:cancel)  printf '{"id":%s,"sha":"%s","status":"canceled","source":"%s"}' "$3" "$4" "$ident" ;;
 	esac
 }
 # set_runs <backend> <obj> [<obj> …] — write runs.json in the backend's native shape:
@@ -171,13 +182,13 @@ for backend in $CI_WATCH_BACKENDS; do
 	set_runs "$backend" "$(run_obj "$backend" ok 42 "$REMOTE_SHA")" "$(run_obj "$backend" ok 43 "$REMOTE_SHA")"
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
 	check "$backend: all-success across multiple runs → status=success" \
-		"$([ "$rc" = 0 ] && grep -q "runs=2 pending=0 failed=0 skipped=0 status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+		"$([ "$rc" = 0 ] && grep -q "runs=2 pending=0 failed=0 skipped=0 cancelled=0 status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 
 	# 5. Aggregate: any run fails → status=failure (even if others passed).
 	set_runs "$backend" "$(run_obj "$backend" ok 42 "$REMOTE_SHA")" "$(run_obj "$backend" fail 43 "$REMOTE_SHA")"
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
 	check "$backend: any failed run → status=failure" \
-		"$([ "$rc" = 0 ] && grep -q "failed=1 skipped=0 status=failure" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+		"$([ "$rc" = 0 ] && grep -q "failed=1 skipped=0 cancelled=0 status=failure" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 
 	# 6. Aggregate: does NOT early-exit while a sibling run is still pending.
 	#    One finished + one running → must keep watching → hits the timeout.
@@ -213,7 +224,7 @@ if covers forgejo; then
 	set_runs forgejo "$(run_obj forgejo wait 44 "$REMOTE_SHA")"
 	out="$(run_watch forgejo 2 --sha "$REMOTE_SHA")"; rc=$?
 	check "forgejo: a waiting run is seen as pending, not 'no CI run found'" \
-		"$(grep -q "pending=1 failed=0 skipped=0 status=pending" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+		"$(grep -q "pending=1 failed=0 skipped=0 cancelled=0 status=pending" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 	check "forgejo: waiting-run timeout message is not the missing-run one" \
 		"$(grep -q "no CI run found" <<<"$out" && echo 0 || echo 1)" "out=$out"
 	# …and with the two clocks (#171) it is specifically the QUEUE message: a run
@@ -239,24 +250,24 @@ for backend in $CI_WATCH_BACKENDS; do
 	set_runs "$backend" "$(run_obj "$backend" fail 42 "$REMOTE_SHA" lint.yml)" "$(run_obj "$backend" ok 43 "$REMOTE_SHA" lint.yml)"
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
 	check "$backend: superseded failed run is ignored (latest attempt wins)" \
-		"$([ "$rc" = 0 ] && grep -q "runs=1 pending=0 failed=0 skipped=0 status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+		"$([ "$rc" = 0 ] && grep -q "runs=1 pending=0 failed=0 skipped=0 cancelled=0 status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 
 	set_runs "$backend" "$(run_obj "$backend" ok 43 "$REMOTE_SHA" lint.yml)" "$(run_obj "$backend" fail 42 "$REMOTE_SHA" lint.yml)"
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
 	check "$backend: dedupe is list-order independent" \
-		"$([ "$rc" = 0 ] && grep -q "runs=1 pending=0 failed=0 skipped=0 status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+		"$([ "$rc" = 0 ] && grep -q "runs=1 pending=0 failed=0 skipped=0 cancelled=0 status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 
 	set_runs "$backend" "$(run_obj "$backend" ok 42 "$REMOTE_SHA" lint.yml)" "$(run_obj "$backend" fail 43 "$REMOTE_SHA" lint.yml)"
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
 	check "$backend: latest attempt failed → still failure" \
-		"$([ "$rc" = 0 ] && grep -q "failed=1 skipped=0 status=failure" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+		"$([ "$rc" = 0 ] && grep -q "failed=1 skipped=0 cancelled=0 status=failure" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 
 	# Distinct identities must NOT collapse: a failed lint.yml is not superseded
 	# by a green tests.yml.
 	set_runs "$backend" "$(run_obj "$backend" fail 42 "$REMOTE_SHA" lint.yml)" "$(run_obj "$backend" ok 43 "$REMOTE_SHA" tests.yml)"
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
 	check "$backend: different workflows never dedupe" \
-		"$([ "$rc" = 0 ] && grep -q "runs=2 pending=0 failed=1 skipped=0 status=failure" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+		"$([ "$rc" = 0 ] && grep -q "runs=2 pending=0 failed=1 skipped=0 cancelled=0 status=failure" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 
 	# A manual re-dispatch supersedes the workflow's earlier runs across trigger
 	# events (a human explicitly re-ran it): flaked push run + newer green
@@ -268,7 +279,7 @@ for backend in $CI_WATCH_BACKENDS; do
 	fi
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
 	check "$backend: manual re-dispatch supersedes the flaked push run" \
-		"$([ "$rc" = 0 ] && grep -q "runs=1 pending=0 failed=0 skipped=0 status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+		"$([ "$rc" = 0 ] && grep -q "runs=1 pending=0 failed=0 skipped=0 cancelled=0 status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 
 	# …but only for the SAME workflow: a green dispatch of tests.yml does not
 	# absolve a failed push run of lint.yml. (GitLab has no workflow dimension —
@@ -277,7 +288,7 @@ for backend in $CI_WATCH_BACKENDS; do
 		set_runs "$backend" "$(run_obj "$backend" fail 42 "$REMOTE_SHA" lint.yml push)" "$(run_obj "$backend" ok 43 "$REMOTE_SHA" tests.yml workflow_dispatch)"
 		out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
 		check "$backend: a dispatch of another workflow doesn't absolve the failure" \
-			"$([ "$rc" = 0 ] && grep -q "failed=1 skipped=0 status=failure" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+			"$([ "$rc" = 0 ] && grep -q "failed=1 skipped=0 cancelled=0 status=failure" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 	fi
 done
 
@@ -292,7 +303,7 @@ for backend in $CI_WATCH_BACKENDS; do
 	set_runs "$backend" "$(run_obj "$backend" skip 42 "$REMOTE_SHA" lint.yml)"
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
 	check "$backend: an all-skipped run reports status=skipped, not success" \
-		"$([ "$rc" = 0 ] && grep -q "runs=1 pending=0 failed=0 skipped=1 status=skipped" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+		"$([ "$rc" = 0 ] && grep -q "runs=1 pending=0 failed=0 skipped=1 cancelled=0 status=skipped" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 	check "$backend: an all-skipped run never claims success" \
 		"$(grep -q "status=success" <<<"$out" && echo 0 || echo 1)" "out=$out"
 
@@ -300,19 +311,19 @@ for backend in $CI_WATCH_BACKENDS; do
 	set_runs "$backend" "$(run_obj "$backend" skip 42 "$REMOTE_SHA" lint.yml)" "$(run_obj "$backend" skip 43 "$REMOTE_SHA" tests.yml)"
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
 	check "$backend: every run skipped → status=skipped" \
-		"$([ "$rc" = 0 ] && grep -q "runs=2 pending=0 failed=0 skipped=2 status=skipped" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+		"$([ "$rc" = 0 ] && grep -q "runs=2 pending=0 failed=0 skipped=2 cancelled=0 status=skipped" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 
 	# Some ran, some skipped → still a pass, but the count is on the line.
 	set_runs "$backend" "$(run_obj "$backend" ok 42 "$REMOTE_SHA" lint.yml)" "$(run_obj "$backend" skip 43 "$REMOTE_SHA" tests.yml)"
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
 	check "$backend: a partial skip still passes and names the skip count" \
-		"$([ "$rc" = 0 ] && grep -q "runs=2 pending=0 failed=0 skipped=1 status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+		"$([ "$rc" = 0 ] && grep -q "runs=2 pending=0 failed=0 skipped=1 cancelled=0 status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 
 	# A skip never launders a failure.
 	set_runs "$backend" "$(run_obj "$backend" skip 42 "$REMOTE_SHA" lint.yml)" "$(run_obj "$backend" fail 43 "$REMOTE_SHA" tests.yml)"
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
 	check "$backend: a skipped sibling doesn't hide a failure" \
-		"$([ "$rc" = 0 ] && grep -q "runs=2 pending=0 failed=1 skipped=1 status=failure" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+		"$([ "$rc" = 0 ] && grep -q "runs=2 pending=0 failed=1 skipped=1 cancelled=0 status=failure" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 
 	# Skipped is terminal, so a still-running sibling must keep the watch open.
 	set_runs "$backend" "$(run_obj "$backend" skip 42 "$REMOTE_SHA" lint.yml)" "$(run_obj "$backend" run 43 "$REMOTE_SHA" tests.yml)"
@@ -329,6 +340,62 @@ for backend in $CI_WATCH_BACKENDS; do
 	check "$backend: --status-file records skipped, not success" \
 		"$([ "$rc" = 0 ] && [ "$(jq -r .status "$sf" 2>/dev/null)" = skipped ] && echo 1 || echo 0)" "rc=$rc file=$(cat "$sf" 2>/dev/null)"
 done
+
+# 12b. Cancelled runs (FJ-281): a cancelled run used to count as failed, so a run
+#      cut short by a newer push watched as `status=failure` — while `ci log`,
+#      which only looks for failed jobs, found nothing. Cancelled is now its own
+#      axis and its own verdict: not a pass (it verified nothing), not a failure.
+printf '\033[1m── cancelled runs (FJ-281) ──\033[0m\n'
+for backend in $CI_WATCH_BACKENDS; do
+	set_runs "$backend" "$(run_obj "$backend" cancel 42 "$REMOTE_SHA" tests.yml)"
+	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
+	check "$backend: a cancelled run reports status=cancelled, not failure" \
+		"$([ "$rc" = 0 ] && grep -q "runs=1 pending=0 failed=0 skipped=0 cancelled=1 status=cancelled" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+
+	# A green sibling doesn't turn a cancelled run into a pass: part of CI never finished.
+	set_runs "$backend" "$(run_obj "$backend" ok 42 "$REMOTE_SHA" lint.yml)" "$(run_obj "$backend" cancel 43 "$REMOTE_SHA" tests.yml)"
+	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
+	check "$backend: success + cancelled → status=cancelled" \
+		"$([ "$rc" = 0 ] && grep -q "runs=2 pending=0 failed=0 skipped=0 cancelled=1 status=cancelled" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+
+	# A real failure still wins over a cancellation.
+	set_runs "$backend" "$(run_obj "$backend" fail 42 "$REMOTE_SHA" lint.yml)" "$(run_obj "$backend" cancel 43 "$REMOTE_SHA" tests.yml)"
+	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
+	check "$backend: a cancelled sibling doesn't hide a failure" \
+		"$([ "$rc" = 0 ] && grep -q "runs=2 pending=0 failed=1 skipped=0 cancelled=1 status=failure" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+
+	# Cancelled beats all-skipped: something was meant to run and didn't finish.
+	set_runs "$backend" "$(run_obj "$backend" skip 42 "$REMOTE_SHA" lint.yml)" "$(run_obj "$backend" cancel 43 "$REMOTE_SHA" tests.yml)"
+	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
+	check "$backend: skipped + cancelled → status=cancelled" \
+		"$([ "$rc" = 0 ] && grep -q "skipped=1 cancelled=1 status=cancelled" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+
+	set_runs "$backend" "$(run_obj "$backend" cancel 42 "$REMOTE_SHA" tests.yml)"
+	sf="$SANDBOX/status-cancel-$backend.json"; rm -f "$sf"
+	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA" --status-file "$sf")"; rc=$?
+	check "$backend: --status-file records cancelled" \
+		"$([ "$rc" = 0 ] && [ "$(jq -r .status "$sf" 2>/dev/null)" = cancelled ] && echo 1 || echo 0)" "rc=$rc file=$(cat "$sf" 2>/dev/null)"
+
+	# The PR's head moved during the watch: the verdict is for the old commit, and
+	# stderr says so. pr.json is read once to resolve the SHA (REMOTE) and again
+	# at the end; swap it between the two by pointing the end read at a new head.
+	set_runs "$backend" "$(run_obj "$backend" cancel 42 "$REMOTE_SHA" tests.yml)"
+	out="$(run_watch "$backend" 10 --pr 7)"; rc=$?
+	check "$backend: --pr with an unchanged head prints no head-moved note" \
+		"$([ "$rc" = 0 ] && ! grep -q "moved to" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+	printf '{"head":{"sha":"%s"},"sha":"%s"}\n' "$LOCAL_SHA" "$LOCAL_SHA" >"$RESP/pr-after.json"
+	out="$(PR_SWITCH=1 run_watch "$backend" 10 --pr 7)"; rc=$?
+	rm -f "$RESP/pr-after.json" "$RESP/pr-calls"
+	check "$backend: --pr whose head moved names the new head on stderr" \
+		"$([ "$rc" = 0 ] && grep -q "status=cancelled" <<<"$out" && grep -q "moved to ${LOCAL_SHA:0:12}" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+done
+if covers gitlab; then
+	# GitLab's `canceling` is on its way to `canceled`, so the watch keeps waiting.
+	set_runs gitlab '{"id":42,"sha":"'"$REMOTE_SHA"'","status":"canceling","source":"push"}'
+	out="$(run_watch gitlab 2 --sha "$REMOTE_SHA")"; rc=$?
+	check "gitlab: a canceling pipeline is still pending" \
+		"$([ "$rc" != 0 ] && grep -q "pending=1 failed=0 skipped=0 cancelled=0 status=pending" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+fi
 
 # 13. Queued ≠ hung (#171). `--timeout` bounds EXECUTION; time in which every
 #     job is waiting for a runner is bounded by the separate `--queue-timeout`.

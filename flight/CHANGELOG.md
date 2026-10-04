@@ -13,7 +13,17 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **`flight ci watch` no longer reports a cancelled run as a failure** (FJ-281). A run stopped
+  before it finished (most often because a newer push superseded it) used to count as `failed`,
+  so the watch ended on `status=failure` while `ci log` found no failed job to show. Cancelled
+  runs are now counted on their own `cancelled=<c>` field. With no failure, the verdict is the
+  new `status=cancelled`: not a pass, because the run verified nothing, and not a red to debug.
+  GitLab's `canceling` now counts as still pending. With `--pr`, if the PR's head moved during
+  the watch, a line on stderr names the new head so you know to watch again. `branches sync-down`
+  stops on a cancelled verdict and says so, and `promoting-a-branch` and `promoting-branches`
+  say what to do with it.
 
 ## [0.17.2] - 2026-10-04
 

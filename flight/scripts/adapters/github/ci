@@ -40,6 +40,21 @@ case "$verb" in
       printf '{"sha":"%s","status":"%s"}\n' "$sha" "$1" >"$status_file"
     }
 
+    # A verdict is for the SHA resolved at the start. If the PR's head moved
+    # while we watched (a push mid-run, which is also what usually cancels the
+    # run), say so on stderr: this verdict is for a commit the PR no longer
+    # points at, and the next step is to watch the new head (FJ-281). Best
+    # effort: an unreadable PR prints nothing.
+    _head_moved() {
+      [ -n "$pr" ] || return 0
+      local now_sha
+      now_sha="$(_api GET "/pulls/${pr}" 2>/dev/null | jq -r '.head.sha // empty' 2>/dev/null || true)"
+      if [ -n "$now_sha" ] && [ "$now_sha" != "$sha" ]; then
+        echo "ci watch: the head of PR #${pr} moved to ${now_sha:0:12} during the watch; this verdict is for ${sha:0:12} — watch again for the new head" >&2
+      fi
+      return 0
+    }
+
     poll="${LS_CI_POLL_SECONDS:-5}"
     start="$(date +%s)"; seen=0; last_sig=""
     # Two clocks (#171): `timeout` bounds EXECUTION, `queue_timeout` bounds time
@@ -51,8 +66,9 @@ case "$verb" in
         "${REPO_API}/actions/runs?head_sha=${sha}&per_page=20" 2>/dev/null || true)"
       # Aggregate over ALL runs for this SHA (a PR can trigger several workflows):
       # keep watching while any is not yet `completed`; once all are completed the
-      # verdict is failure if any conclusion isn't success/skipped/neutral, skipped
-      # if every run's conclusion was `skipped`, else success.
+      # verdict is failure if any conclusion isn't success/skipped/neutral/cancelled,
+      # cancelled if any run was cancelled (FJ-281), skipped if every run's
+      # conclusion was `skipped`, else success.
       # `skipped` is counted on its own axis (#150): it is not a failure, but it is
       # not a pass either — a run where nothing executed must not be
       # indistinguishable from one that verified everything at the merge gate.
@@ -71,27 +87,32 @@ case "$verb" in
         | ($r|length) as $total
         | ([$r[] | select(.status != "completed")] | length) as $pending
         | ([$r[] | select(.status == "completed")
-                 | select((.conclusion as $c | ["success","skipped","neutral"] | index($c)) | not)] | length) as $failed
+                 | select((.conclusion as $c | ["success","skipped","neutral","cancelled"] | index($c)) | not)] | length) as $failed
         | ([$r[] | select(.status == "completed") | select(.conclusion == "skipped")] | length) as $skipped
-        | "\($total) \($pending) \($failed) \($skipped)"' 2>/dev/null || true)"
-      read -r total pending failed skipped <<<"$metrics" || true
+        | ([$r[] | select(.status == "completed") | select(.conclusion == "cancelled")] | length) as $cancelled
+        | "\($total) \($pending) \($failed) \($skipped) \($cancelled)"' 2>/dev/null || true)"
+      read -r total pending failed skipped cancelled <<<"$metrics" || true
       total="${total:-0}"; pending="${pending:-0}"; failed="${failed:-0}"; skipped="${skipped:-0}"
+      cancelled="${cancelled:-0}"
       if [ "$total" -gt 0 ]; then
         seen=1
-        # Verdict order matters: pending wins, then failure, then an all-skipped
-        # run (#150) — which is its own terminal outcome, NOT a pass, because
-        # nothing in it executed. A partial skip still passes; the skipped count
-        # on the line is what tells the human how much was actually verified.
+        # Verdict order matters: pending wins, then failure, then a cancelled
+        # run (FJ-281), then an all-skipped run (#150). Cancelled and all-skipped
+        # are their own terminal outcomes, neither a pass nor a failure: nothing
+        # failed, but the cancelled run verified nothing, and usually a newer
+        # push superseded it. A partial skip still passes; the skipped count on
+        # the line is what tells the human how much was actually verified.
         if [ "$pending" -gt 0 ]; then agg=pending
         elif [ "$failed" -gt 0 ]; then agg=failure
+        elif [ "$cancelled" -gt 0 ]; then agg=cancelled
         elif [ "$skipped" -eq "$total" ]; then agg=skipped
         else agg=success; fi
-        sig="${total}/${pending}/${failed}/${skipped}"
+        sig="${total}/${pending}/${failed}/${skipped}/${cancelled}"
         if [ "$sig" != "$last_sig" ]; then
-          echo "ci runs=${total} pending=${pending} failed=${failed} skipped=${skipped} status=${agg}"
+          echo "ci runs=${total} pending=${pending} failed=${failed} skipped=${skipped} cancelled=${cancelled} status=${agg}"
           last_sig="$sig"; _write "$agg"
         fi
-        [ "$pending" -eq 0 ] && exit 0
+        [ "$pending" -eq 0 ] && { _head_moved; exit 0; }
       fi
 
       # Queued or executing? The run-level status alone cannot say. GitHub marks

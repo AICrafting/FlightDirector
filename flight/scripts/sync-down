@@ -276,6 +276,12 @@ EOF
 		row "$lower" stopped "PR #$num left open — CI ran nothing (every run skipped)"
 		return 1
 	fi
+	# `cancelled` (FJ-281): nothing failed, but a run was stopped before it
+	# finished, so CI did not verify this head either.
+	if [ "$status" = cancelled ]; then
+		row "$lower" stopped "PR #$num left open — a CI run was cancelled before it finished"
+		return 1
+	fi
 	if [ "$status" != success ]; then
 		row "$lower" stopped "PR #$num left open — CI ${status:-reported no run}"
 		return 1
