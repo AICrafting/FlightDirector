@@ -31,6 +31,13 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   branch's commit, and the push, the PR body and `pr open` run only inside a guard that reads it;
   otherwise the group is reported skipped, with the reason, and the other groups carry on.
 
+### Changed
+
+- **`working-an-issue` runs the repo's `code.preflight` gate before moving an issue to `to-test`**
+  (FJ-221). The interactive path was the one place a branch changed state without consulting the
+  gate, looser than the batch path. A red gate now leaves the issue `in-progress` and shows the
+  failing output; with no gate configured nothing changes.
+
 ## [0.17.2] - 2026-10-04
 
 ### Added
