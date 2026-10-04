@@ -61,7 +61,7 @@ producers may add the optional extras at the end.
   "reasoning_output_tokens": 342,                   // informational; already inside output_tokens — never add it again
   "cache_creation_tokens": 0,                       // prompt tokens written to the provider's cache
   "cache_read_tokens": 667776,                      // prompt tokens served from the cache
-  "cost_usd": 0.123456,                             // priced from pricing.json; null when the model or usage is unknown
+  "cost_usd": 0.123456,                             // priced from pricing.json when logged; null when the model or usage is unknown
   "cost_basis": "api-equivalent",                   // "actual-api" | "api-equivalent" | null — see below
   "duration_seconds": 42.1                          // turn wall time
   // optional extras:
@@ -74,6 +74,12 @@ producers may add the optional extras at the end.
   // "usage_missing": "no-usage", only on a row whose token fields are null — why:
   //                              "no-path" (payload named no transcript) | "unreadable" | "no-usage"
   // "models": {"m1": 123, …}   a turn that spanned models — output tokens per model; `model` is the dominant one
+  // "usage_by_model": {"m1": {…usage fields…}, …}
+  //                              Claude Code, a turn that spanned models: each model's full usage, so the
+  //                              row can be priced again per model (rows before FJ-270 have only `models`)
+  // "cache_creation_1h_tokens": 800,
+  //                              Claude Code: the part of cache_creation_tokens written with the 1-hour TTL
+  //                              (the rest were 5-minute writes); absent on Codex rows and older rows
 }
 ```
 
@@ -93,7 +99,9 @@ producers may add the optional extras at the end.
 - **Missing data is `null`, never `0`.** If the transcript can't be read or has no usage for the
   turn, the token and cost fields are `null`, `usage_missing` records which of the three causes
   it was, and the hook prints a warning on stderr. A `0` means the provider said zero.
-- **`cost_usd` is an estimate at API list prices.** `cost_basis` says how to read it:
+- **`cost_usd` is what the row cost at the rates in force when it was logged.** `summary`
+  does not trust it: it prices each row again from its tokens (see *Reading the ledger*).
+- **The cost is an estimate at API list prices.** `cost_basis` says how to read it:
   `actual-api` when the harness authenticates with an API key (Anthropic key, Bedrock/Vertex,
   `OPENAI_API_KEY`/`CODEX_API_KEY`) and the number is what you would be billed; `api-equivalent`
   under a subscription login (claude.ai, ChatGPT), where the number is what the same tokens
@@ -111,10 +119,20 @@ producers may add the optional extras at the end.
 ```jsonc
 {
   "models":   { "<exact model id>": { "input_per_million": …, "output_per_million": …,
-                                      "cache_creation_per_million": …, "cache_read_per_million": … } },
-  "families": { "<id prefix>": { …same rates… } }   // longest matching prefix wins: "claude-opus-5" matches claude-opus-5-1
-}
+                                      "cache_creation_per_million": …,     // 5-minute cache write
+                                      "cache_creation_1h_per_million": …,  // 1-hour cache write (optional)
+                                      "cache_read_per_million": … } },
+  "families": { "<id prefix>": { …same rates… } }   // longest matching prefix wins: "claude-opus-5" matches claude-opus-5-1,
+}                                                   // and "claude-opus-5-5" beats it for claude-opus-5-5
 ```
+
+Anthropic prices cache writes by TTL: 1.25× input for a 5-minute write, 2× for a 1-hour one.
+Claude Code reports the split (`usage.cache_creation.ephemeral_1h_input_tokens`), and its rows
+record it as `cache_creation_1h_tokens`; those tokens take `cache_creation_1h_per_million` and
+the rest take `cache_creation_per_million`. An entry with no 1-hour rate prices every write at
+its 5-minute rate, and Codex rows (no split) always do. A trailing context tag on a model id
+(`claude-opus-5-5[1m]`) is ignored when looking up its rates, unless `models` names the tagged
+id exactly.
 
 Put repo-specific or newer prices in **`.flightdirector/pricing.json`** (same shape); it is merged
 on top of the bundled file. An unknown model logs its tokens with `cost_usd: null` and a warning
@@ -126,12 +144,19 @@ naming the model, so the gap is visible in the ledger rather than silently price
 flight prompt-log summary --session <session_id> [--session <id> …] [--since <ISO-8601>] [--json]
 ```
 
+prices every row **again from its stored tokens** at today's rates (the bundled table plus any
+`.flightdirector/pricing.json`), so a pricing fix — upstream or in a repo override — also corrects
+turns logged before it, and a model that was unpriced when logged is priced once an override names
+it. A row that cannot be priced that way keeps the `cost_usd` it was logged with: a model still
+missing from the table, or a multi-model row from before FJ-270 that kept no per-model usage.
+`--as-logged` skips the re-pricing and sums the logged `cost_usd` values. It then
 prints a Markdown block for the issue comment: one line per harness × model with turns, tokens,
 and cost; a total; the cost basis; and notes when subagent rows are included or when rows had no
 usage (then the total is a lower bound) — broken down by `usage_missing` cause, with rows that
 predate the field counted as "reason not recorded". With no rows for the session it says so explicitly —
 "estimate only" is claimed only when there truly is no data. `--json` returns the same aggregate
-for scripting. `working-an-issue` Step 4 and the `queue-batches` worker prompt call this.
+for scripting (`pricing` says `current` or `as-logged`, and `repriced_rows` how many rows were priced
+again). `working-an-issue` Step 4 and the `queue-batches` worker prompt call this.
 
 ## Producers
 
