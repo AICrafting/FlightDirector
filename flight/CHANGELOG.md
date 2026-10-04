@@ -39,6 +39,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Fixed
 
+- **`flight branches prune` drops a deleted branch's retained identity binding** (FJ-248). The
+  schema-3 migration binds every legacy `feature/<N>-…` branch to its tracker in
+  `.flightdirector/batches/work-items/identities.json`, and nothing ever removed those entries, so
+  the file only grew. Once `prune` leaves a branch gone both locally and on origin, its binding
+  goes too, reported as a `drop-binding` row (`would-drop-binding` in a preview). A binding is
+  never dropped while the branch still exists on either side — it is the only record of which
+  tracker an unqualified legacy branch belongs to — and other branches' bindings are untouched.
+  Bindings for branches that were already deleted before this release are not swept.
+
 - **`flight ci watch` no longer reports a cancelled run as a failure** (FJ-281). A run stopped
   before it finished (most often because a newer push superseded it) used to count as `failed`,
   so the watch ended on `status=failure` while `ci log` found no failed job to show. Cancelled
