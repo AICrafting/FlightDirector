@@ -388,8 +388,20 @@ overlay_local() {
 # tracker's host). The code token is never copied: a legacy issue token equal to it
 # is dropped (the tracker shares the code credential), and with no legacy issue
 # credential nothing is added beyond the empty `issueTrackers` marker. `code` is
-# never touched.
+# never touched. A legacy issue token that would move onto a tracker that already
+# has a credential entry is refused (FJ-278): keeping either one would be a guess,
+# and dropping the other would lose a credential without a word.
 migrate_secrets() {
+	local clash
+	clash="$(jq -r -s --arg t "$ref" '
+		.[0] as $cfg | .[1] as $sec
+		| ([$cfg.issueTrackers[]? | select((.ref | ascii_downcase) == ($t | ascii_downcase))] | .[0].ref) as $r
+		| if ($sec.issues | type) == "object" and ($sec.issues.token // "") != ""
+			and $sec.issues.token != ($sec.code.token // "")
+			and $r != null and (($sec.issueTrackers // {})[$r] != null)
+		  then $r else empty end
+	' "$config" "$secrets")"
+	[ -z "$clash" ] || die "mixed tracker secrets: $secrets has both issues.token and issueTrackers.$clash, and they differ; remove one and rerun — nothing was changed"
 	jq -s --arg t "$ref" '
 		.[0] as $cfg | .[1] as $sec
 		| ([$cfg.issueTrackers[] | select((.ref | ascii_downcase) == ($t | ascii_downcase))] | .[0]) as $d
