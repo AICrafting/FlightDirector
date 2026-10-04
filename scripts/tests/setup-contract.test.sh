@@ -295,6 +295,9 @@ check "it documents all three starting-status states" \
 	"$(says "$TRACKER_SKILL" '| absent | never asked |' && says "$TRACKER_SKILL" '| `false` | declined |' && says "$TRACKER_SKILL" '| a string | configured |' && echo 1 || echo 0)"
 check "it prefers the Jira project key, else GH/FJ/GL" \
 	"$(says "$TRACKER_SKILL" 'the project key' && says "$TRACKER_SKILL" '`FJ` (Forgejo/Gitea), `GH` (GitHub), `GL` (GitLab)' && echo 1 || echo 0)"
+check "it steers a GitHub tracker off the ref GH when the code repo is on GitHub (#247)" \
+	"$(says "$TRACKER_SKILL" '**GitHub, while the code repository is also on GitHub**' && says "$TRACKER_SKILL" 'never propose `GH`' \
+		&& says "$TRACKER_SKILL" 'GitHub autolinks' && echo 1 || echo 0)"
 check "it never renames, recolors or deletes labels" "$(ok says "$TRACKER_SKILL" 'Never rename, recolor, or delete an existing label')"
 check "it keys own credentials under secrets.issueTrackers.<REF>" "$(ok says "$TRACKER_SKILL" 'secrets.issueTrackers.<REF>.token')"
 check "setting-up-a-repo delegates trackers to add-an-issue-tracker" \

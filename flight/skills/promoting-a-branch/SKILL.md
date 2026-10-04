@@ -26,7 +26,7 @@ See [flight-setup.md](../../references/flight-setup.md) and
   issue close/relabel is governed separately by the target stage's `closesIssues`/`issueStatus`
   (Step 5). A `pr` hop uses `Closes #N` only when the target stage closes issues, else `Ready #N` —
   and only for an issue that lives in the code repository itself. Another tracker's issue is
-  named `Tracks GH-12` and driven explicitly in Step 5; a bare `#12` for it would close the code
+  named ``Tracks `GH-12` `` (the id in backticks, so GitHub doesn't autolink it) and driven explicitly in Step 5; a bare `#12` for it would close the code
   repository's *own* issue 12 (Step 4).
 - **Halt if you can't write a test plan** for a resolved issue on a `pr` hop — an unwritable
   plan usually means the feature isn't reachable. Fix that before opening the PR, and don't reach
@@ -382,8 +382,8 @@ ISSUE_STATUS="$(flight config ".code.stages[<i>].issueStatus // empty")"
 
 The forge acts on `Closes #N` against the PR's **own** repository, so `pr-reference` writes
 `Closes #12` (closing stage) or `Ready #12` only when the issue's tracker *is* the code repository —
-same backend, same api host, same owner/repo. For any other tracker it writes `Tracks GH-12`,
-which no forge acts on: a cross-tracker PR can never close the code repository's unrelated issue
+same backend, same api host, same owner/repo. For any other tracker it writes ``Tracks `GH-12` ``,
+which no forge acts on (the backticks stop GitHub autolinking `GH-12` to the code repo's #12): a cross-tracker PR can never close the code repository's unrelated issue
 12. Step 5 then updates the issue on its own tracker explicitly, whichever line was written.
 
 The PR is built from the **pushed** branch tip, not your local working copy — so **run the Step
