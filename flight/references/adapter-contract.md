@@ -314,8 +314,8 @@ dispatcher, like `copy`.
 
 | Verb | Args | stdout |
 |---|---|---|
-| `block` | `--number ID --by ID [--no-status]` | `FJ-12 blocked by GH-3 (native\|text)` |
-| `unblock` | `--number ID --by ID [--no-status]` | `FJ-12 no longer blocked by GH-3` (or, on stderr, that it wasn't) |
+| `block` | `--number ID --by ID [--no-status] [--model ID]` | `FJ-12 blocked by GH-3 (native\|text)` |
+| `unblock` | `--number ID --by ID [--no-status] [--model ID]` | `FJ-12 no longer blocked by GH-3` (or, on stderr, that it wasn't) |
 | `blockers` | `--number ID` | `id⇥title⇥state⇥native\|text` per blocker |
 | `blocking` | `--number ID` | the same, per issue it blocks |
 
@@ -327,6 +327,11 @@ dispatcher, like `copy`.
 - Status, unless `--no-status`: `block` sets the tracker's `blocked` role and records
   `(was <role>)`; the last `unblock` restores that role, or `new`, or clears the status. A status
   someone changed by hand is left alone.
+- A text-linked issue that no longer exists is still listed by `blockers` / `blocking`, with an
+  empty title and state `unknown` (TSV), or `title` and `state` null (`--json`).
+- `--model ID` stamps the signature on the comments `block` / `unblock` post. A no-op `unblock`
+  (nothing was linked) exits 0; under `--json` it still prints `{number, by, removed: [], status}`.
+- A partial write names the missing piece and says to rerun: rerunning `block` / `unblock` is safe.
 - `--tracker` is refused (each id names its tracker). Requires config schema 3.
 
 ## Notes

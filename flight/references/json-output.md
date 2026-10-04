@@ -62,8 +62,8 @@ their own meaning: `prompt-log summary --json` predates this and is unchanged.
 | `issues set-status` | `{number, tracker, qualified, status, label}` |
 | `issues copy` | `{source, target, copied: {body, comments, labels, status, footer, backLink}, skipped: {labels, status}}`; with `--dry-run`, `target` is null and `dryRun` is true |
 | `issues block` | `{number, by, via, status}` |
-| `issues unblock` | `{number, by, removed, status}` |
-| `issues blockers` / `blocking` | `{issues: [{id, title, state, via}]}` |
+| `issues unblock` | `{number, by, removed, status}`; a no-op unblock still prints it, with `removed: []`. `block` / `unblock` also take `--model ID` |
+| `issues blockers` / `blocking` | `{issues: [{id, title, state, via}]}`; a text-linked issue that no longer exists has `title` and `state` null (TSV: empty title, state `unknown`) |
 | `issues resync` | `{source, target, copied: {comments}, skipped: {}}`; `dryRun: true` with `--dry-run` |
 | `labels list` | an array of label objects |
 | `labels statuses` | an array of status roles |

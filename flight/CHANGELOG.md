@@ -22,7 +22,8 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   backend can't, and always across trackers, the link is a pair of signed comments. By default the
   blocked issue's status moves to `blocked` and back to what it was; `--no-status` skips that.
   `issues get --json` gains `blocked_by`, and `working-an-issue` warns before starting an issue
-  with an open blocker. Capability token: `issues-deps`.
+  with an open blocker. Capability token: `issues-deps`. GitLab's native (Premium) path is
+  untested live: the test rig is on the Free tier and exercises the comment fallback.
 
 ### Fixed
 
