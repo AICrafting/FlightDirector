@@ -27,6 +27,14 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
+- **`setting-up-a-repo` no longer creates a `CLAUDE.md` stub** (FJ-246). Claude Code reads
+  `AGENTS.md` when a repo has no `CLAUDE.md`, so the backend breadcrumb now defaults to
+  `AGENTS.md` alone: a repo with only `AGENTS.md` (or neither file) gets the block in `AGENTS.md`
+  and no `CLAUDE.md`; a repo with only `CLAUDE.md` gets the block in `CLAUDE.md` as-is, with no
+  recommendation to split it out. When both files exist the block still goes in `AGENTS.md`, and
+  setup still offers to add `@AGENTS.md` to a `CLAUDE.md` that lacks it — Claude Code skips
+  `AGENTS.md` whenever `CLAUDE.md` exists.
+
 - **`working-an-issue` runs the repo's `code.preflight` gate before moving an issue to `to-test`**
   (FJ-221). The interactive path was the one place a branch changed state without consulting the
   gate, looser than the batch path. A red gate now leaves the issue `in-progress` and shows the
