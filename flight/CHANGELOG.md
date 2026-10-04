@@ -13,7 +13,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **Jira headings survive a read** (FJ-178). `flight issues get` and `issues comments` on Jira
+  now render an ADF heading as `#`-prefixed markdown at its own level (`## Acceptance`), instead
+  of flattening it into a plain paragraph — so the `## Acceptance` / `## Test plans` anchors the
+  skills look for are still there when an issue was written or edited in the Jira web UI.
 
 ## [0.17.2] - 2026-10-04
 

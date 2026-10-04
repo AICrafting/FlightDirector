@@ -431,7 +431,8 @@ dispatcher, like `copy`.
     is the one place transitions are unavoidable.
   - **Bodies/comments are ADF.** Jira stores rich text as Atlassian Document Format (ADF) JSON. A
     **minimal** shim converts markdown→ADF for writes (`create`/`update`/`comment`) and ADF→plain
-    text for reads (`get`/`comments`): paragraphs, fenced code blocks, and bullet/ordered lists.
+    text for reads (`get`/`comments`): paragraphs, headings (read back as `#`-prefixed lines),
+    fenced code blocks, bullet/ordered lists, and `---` rules.
     Inline marks (bold, links) are carried as plain text, not styled.
   - **Labels are thin.** Jira labels are bare strings with no colour/description and no id distinct
     from the name. `labels list` emits `name⇥⇥` (empty colour + description); `labels resolve`

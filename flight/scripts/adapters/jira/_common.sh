@@ -153,8 +153,9 @@ _offset_get() {
 
 # --- Minimal ADF shim ------------------------------------------------------
 # Jira stores rich text as Atlassian Document Format (ADF) JSON. This is a
-# DELIBERATELY minimal converter: paragraphs, fenced code blocks, bullet/
-# ordered lists, and a `---` rule (the dispatcher's signature separator) — enough for issue bodies and comments. Inline marks (bold,
+# DELIBERATELY minimal converter: paragraphs, headings (read back as `#`-prefixed
+# lines, FJ-178), fenced code blocks, bullet/ordered lists, and a `---` rule (the
+# dispatcher's signature separator) — enough for issue bodies and comments. Inline marks (bold,
 # links, …) are carried as plain text, not styled. See adapter-contract.md.
 #
 # ADF_JQ is prepended to jq programs that need md_to_adf / adf_to_text.
@@ -208,7 +209,7 @@ def adf_to_text:
   if type=="object" and (.type=="doc") then
     ([.content[]? |
         if   .type=="paragraph"  then inline
-        elif .type=="heading"    then inline
+        elif .type=="heading"    then ("#" * ([([(.attrs.level // 1), 1] | max), 6] | min)) + " " + inline
         elif .type=="codeBlock"  then "```\n" + inline + "\n```"
         elif .type=="rule"       then "---"
         elif .type=="bulletList" then ([.content[]? | "- " + inline]  | join("\n"))
