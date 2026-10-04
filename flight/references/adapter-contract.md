@@ -187,7 +187,7 @@ GitLab comment endpoints do cap, and are paged.
 | `unassign`  | `--number N`                           | (nothing) — removes all assignees |
 | `close`     | `--number N`                           | (nothing) |
 | `reopen`    | `--number N`                           | (nothing) — inverse of `close`; sets the issue's state back to open |
-| `dep-add`   | `--number N` `--by M`                  | (nothing) — records "N is blocked by M", both on this tracker; idempotent. Fails `unsupported` where the backend can't (Forgejo with dependencies switched off, GitLab Free tier, a Jira site with no "is blocked by" link type) |
+| `dep-add`   | `--number N` `--by M`                  | (nothing) — records "N is blocked by M", both on this tracker; idempotent. Fails `unsupported` where the backend can't (Forgejo with dependencies switched off, GitLab Free tier, a GitLab pair already joined by a link of another type such as `relates_to` — GitLab allows one link per pair, and an unexpected 409 from its links endpoint maps here too — a Jira site with no "is blocked by" link type) |
 | `dep-remove`| `--number N` `--by M`                  | (nothing) — removes that link; idempotent |
 | `dep-list`  | `--number N`                           | one row per issue blocking N: `number⇥title⇥state`; under `LS_JSON` an array of `{number, title, state}`. Links to another repo/project are left out |
 | `dep-blocking` | `--number N`                        | the issues N blocks, same shape |
