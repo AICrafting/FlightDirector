@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.17.2] - 2026-10-04
+
 ### Added
 
 - **Blocked issues** (FJ-271). `flight issues block --number FJ-12 --by GH-3` records that one
