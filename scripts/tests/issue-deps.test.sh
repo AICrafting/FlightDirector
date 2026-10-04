@@ -341,7 +341,10 @@ check "a failed lookup still answers, with blocked_by null and a warning" \
 	"$([ "$RC" = 0 ] && jq -e '.blocked_by == null and .title == "Feature"' <<<"$OUT" >/dev/null && grep -q 'blocked_by is null' "$SANDBOX/get.err" && echo 1 || echo 0)" "rc=$RC out=$OUT"
 OUT="$(cd "$D" && FLIGHT_NO_DEPS=1 PATH="$SANDBOX/bin:$PATH" "$DISP" issues get --number FJ-1 --json 2>/dev/null)"
 check "FLIGHT_NO_DEPS skips the lookup" "$(jq -e '.blocked_by == null' <<<"$OUT" >/dev/null && echo 1 || echo 0)" "$OUT"
-OUT="$(cd "$D" && PATH="$SANDBOX/bin:$PATH" "$DISP" issues get --number FJ-1 2>/dev/null | head -n1)"
+# No `| head -n1`: under pipefail, head exiting before the dispatcher finishes writing the body
+# kills the dispatcher with SIGPIPE and this assignment takes the whole file down with 141.
+OUT="$(cd "$D" && PATH="$SANDBOX/bin:$PATH" "$DISP" issues get --number FJ-1 2>/dev/null)"
+OUT="${OUT%%$'\n'*}"
 check "the TSV form is unchanged" "$([ "$OUT" = "$(printf '1\tFeature\topen')" ] && echo 1 || echo 0)" "$OUT"
 
 [ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
