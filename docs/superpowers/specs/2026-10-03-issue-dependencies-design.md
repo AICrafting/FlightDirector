@@ -123,7 +123,8 @@ added later.
 - its `signature` is not null (flight wrote it), and
 - its **first line** matches
   `^(\*\*)?(Blocked by|No longer blocked by|Blocks|No longer blocks) ([A-Za-z][A-Za-z0-9]*-[0-9]+)(\*\*)?(:.*)?$`.
-  The asterisks are optional because Jira's shim stores bold as literal text.
+  The asterisks are optional because Jira's shim stores bold as literal text. The match ignores
+  case, so a hand-edited `blocked by fj-12` still counts.
 
 Per other issue, the **latest** matching comment decides: `Blocked by` / `Blocks` means linked,
 and the `No longer` forms mean unlinked. The blocked side's comments drive `blockers`; the

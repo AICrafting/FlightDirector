@@ -132,6 +132,14 @@ merge config fields or hand-merge here. Config + verbs:
   Then **state what you read** before moving on — e.g. "read #12: body + 3 comments, latest
   2026-09-06 by dave" (or "no comments") — so the user can see the thread was consulted. If a
   comment contradicts the body, the later comment wins — work to that, and say so explicitly.
+- **Check what blocks it.** Right after the thread:
+  ```
+  flight issues blockers --tracker "$TRACKER" --number "$NUMBER"
+  ```
+  Each row is `id⇥title⇥state⇥native|text`. An **open** blocker goes in the pickup line
+  ("read #12: body + 2 comments; blocked by GH-3 (open)"), and you **ask before starting**: the
+  work may depend on something that isn't there yet. Closed blockers are only mentioned. No rows:
+  say nothing.
 - Derive a short slug from the issue's title (lowercase, hyphens, no special characters) — e.g.
   #42 "Add login page" → `feature/42-add-login-page`. The branch and worktree carry `PREFIX`
   exactly as resolved: `feature/42-<slug>` with one tracker, `feature/fj-42-<slug>` (or
