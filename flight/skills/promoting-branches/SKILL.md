@@ -166,7 +166,9 @@ git -C "$MAIN" fetch -q origin "$BASE"
 git -C "$MAIN" push   # once, after the group's merges
 ```
 
-**If `MERGE` = pr** — one PR per group via an integration branch:
+**If `MERGE` = pr** — one PR per group via an integration branch. Three blocks, in order, once
+per group: assemble, gate, publish. The **publish** block is the only one that pushes or opens a
+PR, and all of it sits inside a guard on the gate's verdict.
 
 ```bash
 INT="batch/<zone-or-run>-<short>"
@@ -181,63 +183,97 @@ git -C "$MAIN" worktree add -b "$INT" "$SCRATCH/int-<zone>" "<the ref the check 
 for each candidate (branch "$B") in the group:
     git -C "$SCRATCH/int-<zone>" merge --no-ff "$B" \
       || { git -C "$SCRATCH/int-<zone>" merge --abort; record SKIPPED($DISPLAY, conflict); }
-# Repo gate on the assembled group, in the integration worktree, before the push: the branches
-# are merged here but nothing is on origin yet, so a red gate costs a re-run, not a revert.
-# The verdict must GUARD the push — a comment saying "stop" stops nothing, and an unguarded
-# push here is the red-reaches-a-reviewer outcome this gate exists to prevent.
-if [ -n "$PREFLIGHT" ]; then
-    ( cd "$SCRATCH/int-<zone>" && sh -c "$PREFLIGHT" ) >"$SCRATCH/preflight-<zone>.log" 2>&1 \
-      || { tail -40 "$SCRATCH/preflight-<zone>.log"; record FAILED(<zone>, preflight)
-           # Take the branch as well as the worktree. $INT was never pushed, so there is no
-           # PR for cleaning-up-branches to collect it behind — a bare `worktree remove`
-           # strands a local batch/* ref forever. It also frees the name: if <short> derives
-           # from the zone rather than the run, the re-promote after the group is fixed would
-           # otherwise hit `worktree add -b "$INT"` with "branch already exists" and halt.
-           git -C "$MAIN" worktree remove --force "$SCRATCH/int-<zone>"
-           git -C "$MAIN" branch -D "$INT"
-           continue; }   # next GROUP: no push, no PR. Red gate = skipped, same as a conflict.
+```
+
+**Gate** — the repo gate on the assembled group, in the integration worktree, before anything
+reaches origin: the branches are merged here but nothing is pushed, so a red gate costs a re-run,
+not a revert. The verdict goes to a **file** under `$SCRATCH`, stamped with the integration
+branch's commit, exactly as `promoting-a-branch` Step 4b does it. A shell variable is gone by the
+next tool call, and a `continue` here has no loop to continue (the per-group iteration is prose,
+not a construct in the block), so neither can stop the push that follows.
+
+```bash
+# Clear the old verdict first: until this run finishes there is no verdict at all.
+VERDICT="$SCRATCH/preflight-verdict-<zone>"
+rm -f "$VERDICT"
+if ! GATE="$("$DISP" config '.code.preflight // empty')"; then
+    echo "could not read code.preflight: no verdict for <zone>" >&2
+elif [ -n "$GATE" ]; then
+    INT_SHA="$(git -C "$SCRATCH/int-<zone>" rev-parse HEAD)"
+    if ( cd "$SCRATCH/int-<zone>" && sh -c "$GATE" ) >"$SCRATCH/preflight-<zone>.log" 2>&1; then
+        echo "pass $INT_SHA" >"$VERDICT"
+        echo "preflight: passed for <zone> ($GATE)"
+    else
+        tail -40 "$SCRATCH/preflight-<zone>.log"
+        echo "fail $INT_SHA" >"$VERDICT"    # the publish block below reads this back
+        echo "FAILED(<zone>, preflight) — full output: $SCRATCH/preflight-<zone>.log" >&2
+    fi
 fi
-git -C "$SCRATCH/int-<zone>" push -u origin "$INT"
-# Decide stage closure before assembling the PR body; this value also drives
-# the explicit tracker lifecycle updates in Step 5.
-LAST=$(( $("$DISP" config '.code.stages | length') - 1 ))
-CL="$("$DISP" config '.code.stages[0].closesIssues // null')"
-[ "$CL" = "null" ] && { [ 0 -eq "$LAST" ] && CL=true || CL=false; }
-# Assemble the PR body: Summary + a per-issue test plan — read each retained issue's
-# body AND comments (issues get / issues comments --tracker "$TRACKER" --number "$NUMBER")
-# first: the thread carries scope changes and the work ledger. Halt the group if a resolved
-# issue has no writable plan. The code PR may be public while a tracker is private: write the
-# summary and test steps in your own words and never paste issue bodies, comments, ledger
-# entries or tracker URLs into it. Name each issue ONLY with its pr-reference line:
-"$ISSUE_IDENTITY" pr-reference --identity "$ISSUE" --closes "$CL" >> "$SCRATCH/pr-<zone>.md"
-#   → `Closes #12` / `Ready #12` only when the issue lives in the code repository itself (same
-#     backend, api host, owner/repo); `Tracks GH-12` for any other tracker, so the PR can never
-#     close the code repository's unrelated issue 12. Step 5 drives every issue explicitly.
-# Same two guards as promoting-a-branch Step 3, per issue in the group:
-#   - the `- no user surface` hatch is for an INHERENTLY absent surface (infra/migration/refactor),
-#     never a surface you merely couldn't reach — obstructed means write the real plan, drive the
-#     precondition as a step, and file a successor issue for the fixture.
-#   - scan the assembled body for deferrals. The test is SEMANTIC, not textual: anything the body
-#     records as deliberately not done ("known gaps", "out of scope", "TODO", "future work", "punted",
-#     "follow-up", ...) counts, however phrased — those are examples, not a list to grep for. Each
-#     needs an issue, named by its qualified id, verified open (IFS=$'\t' read -r _ _ STATE <<<"$("$DISP" issues get --number "FJ-31")"
-#     then [ "$STATE" = open ] — state is field 3, normalized across backends, #205), filed right
-#     then if absent. An issue this PR resolves does NOT count as the tracker, even on a Ready #N
-#     hop where it stays open for now. Halt the group otherwise.
-PR="$("$DISP" pr open --head "$INT" --base "$BASE" --title "Batch: <zone> (FJ-18, GH-12, …)" --body-file "$SCRATCH/pr-<zone>.md" --model <your-model-id>)"
-# watch CI ("$DISP" ci watch --pr "<pr#>" …). Read the `status=` on the last line, NOT the exit code —
-# it exits 0 on any terminal verdict. status=failure → record the group FAILED ("$DISP" ci log --pr "<pr#>"
-# shows why) and move on;
-# status=skipped → nothing ran, so the group is NOT verified: report that to the user and leave the PR
-# open rather than treating not-failed as passed; status=cancelled → a run was stopped before it
-# finished (usually a newer push; a --pr watch says so on stderr): not a failure and not verified —
-# watch again if the head moved, else report it and leave the PR open; status=success → merge on the gate, using stages[0]'s
-# configured strategy (default "merge" — never hard-code one):
-"$DISP" pr merge --number "<pr#>" --strategy "$("$DISP" config '.code.stages[0].strategy // "merge"')"
-git -C "$MAIN" worktree remove "$SCRATCH/int-<zone>"
-# The integration branch itself is left standing, local and on origin. `batch/*` is one of
-# `flight branches`' default patterns, so `cleaning-up-branches` finds it once its PR is
-# merged — don't hand-delete it here.
+```
+
+**Publish** — reads the config inline (an unbound `$PREFLIGHT` looks exactly like "no gate
+configured") and the verdict file, and does nothing else unless the repo is ungated or the file
+says `pass` for the integration branch's current commit. A gate that failed, never ran, judged an
+older commit, or could not be asked about all land in a branch that **says** the group was skipped
+and why: a guard that declines in silence is indistinguishable from a group that quietly did
+nothing. Other groups carry on either way.
+
+```bash
+if ! GATE="$("$DISP" config '.code.preflight // empty')"; then
+    echo "could not read code.preflight: group <zone> skipped — no push, no PR; $INT kept for a retry" >&2
+elif [ -z "$GATE" ] || [ "$(cat "$SCRATCH/preflight-verdict-<zone>" 2>/dev/null)" \
+                         = "pass $(git -C "$SCRATCH/int-<zone>" rev-parse HEAD)" ]; then
+    git -C "$SCRATCH/int-<zone>" push -u origin "$INT"
+    # Decide stage closure before assembling the PR body; this value also drives
+    # the explicit tracker lifecycle updates in Step 5.
+    LAST=$(( $("$DISP" config '.code.stages | length') - 1 ))
+    CL="$("$DISP" config '.code.stages[0].closesIssues // null')"
+    [ "$CL" = "null" ] && { [ 0 -eq "$LAST" ] && CL=true || CL=false; }
+    # Assemble the PR body: Summary + a per-issue test plan — read each retained issue's
+    # body AND comments (issues get / issues comments --tracker "$TRACKER" --number "$NUMBER")
+    # first: the thread carries scope changes and the work ledger. Halt the group if a resolved
+    # issue has no writable plan. The code PR may be public while a tracker is private: write the
+    # summary and test steps in your own words and never paste issue bodies, comments, ledger
+    # entries or tracker URLs into it. Name each issue ONLY with its pr-reference line:
+    "$ISSUE_IDENTITY" pr-reference --identity "$ISSUE" --closes "$CL" >> "$SCRATCH/pr-<zone>.md"
+    #   → `Closes #12` / `Ready #12` only when the issue lives in the code repository itself (same
+    #     backend, api host, owner/repo); `Tracks GH-12` for any other tracker, so the PR can never
+    #     close the code repository's unrelated issue 12. Step 5 drives every issue explicitly.
+    # Same two guards as promoting-a-branch Step 3, per issue in the group:
+    #   - the `- no user surface` hatch is for an INHERENTLY absent surface (infra/migration/refactor),
+    #     never a surface you merely couldn't reach — obstructed means write the real plan, drive the
+    #     precondition as a step, and file a successor issue for the fixture.
+    #   - scan the assembled body for deferrals. The test is SEMANTIC, not textual: anything the body
+    #     records as deliberately not done ("known gaps", "out of scope", "TODO", "future work", "punted",
+    #     "follow-up", ...) counts, however phrased — those are examples, not a list to grep for. Each
+    #     needs an issue, named by its qualified id, verified open (IFS=$'\t' read -r _ _ STATE <<<"$("$DISP" issues get --number "FJ-31")"
+    #     then [ "$STATE" = open ] — state is field 3, normalized across backends, #205), filed right
+    #     then if absent. An issue this PR resolves does NOT count as the tracker, even on a Ready #N
+    #     hop where it stays open for now. Halt the group otherwise.
+    PR="$("$DISP" pr open --head "$INT" --base "$BASE" --title "Batch: <zone> (FJ-18, GH-12, …)" --body-file "$SCRATCH/pr-<zone>.md" --model <your-model-id>)"
+    # watch CI ("$DISP" ci watch --pr "<pr#>" …). Read the `status=` on the last line, NOT the exit code —
+    # it exits 0 on any terminal verdict. status=failure → record the group FAILED ("$DISP" ci log --pr "<pr#>"
+    # shows why) and move on;
+    # status=skipped → nothing ran, so the group is NOT verified: report that to the user and leave the PR
+    # open rather than treating not-failed as passed; status=cancelled → a run was stopped before it
+    # finished (usually a newer push; a --pr watch says so on stderr): not a failure and not verified —
+    # watch again if the head moved, else report it and leave the PR open; status=success → merge on
+    # the gate, using stages[0]'s configured strategy (default "merge" — never hard-code one):
+    "$DISP" pr merge --number "<pr#>" --strategy "$("$DISP" config '.code.stages[0].strategy // "merge"')"
+    git -C "$MAIN" worktree remove "$SCRATCH/int-<zone>"
+    # The integration branch itself is left standing, local and on origin. `batch/*` is one of
+    # `flight branches`' default patterns, so `cleaning-up-branches` finds it once its PR is
+    # merged — don't hand-delete it here.
+else
+    echo "preflight gate is not green for <zone> — group skipped: no push, no PR (log: $SCRATCH/preflight-<zone>.log)" >&2
+    # record FAILED(<zone>, preflight). Take the branch as well as the worktree. $INT was never
+    # pushed, so there is no PR for cleaning-up-branches to collect it behind — a bare
+    # `worktree remove` strands a local batch/* ref forever. It also frees the name: if <short>
+    # derives from the zone rather than the run, the re-promote after the group is fixed would
+    # otherwise hit `worktree add -b "$INT"` with "branch already exists" and halt.
+    git -C "$MAIN" worktree remove --force "$SCRATCH/int-<zone>"
+    git -C "$MAIN" branch -D "$INT"
+fi
 ```
 
 ## Step 5: Per-issue bookkeeping + lifecycle (per promoted issue)
@@ -296,6 +332,10 @@ failure without re-running the gate.
 - Running `code.preflight` once on `BASE` after a direct group's merges instead of per branch
   before each one. It gives you a verdict you cannot act on: the only fix is unwinding a stage,
   and it tells you nothing about *which* branch broke the gate.
+- Stopping a red `pr` group with `continue` or a shell variable. The per-group loop is prose, so a
+  `continue` there has nothing to continue and falls through to the push; a variable is gone by the
+  next tool call. The verdict lives in `$SCRATCH/preflight-verdict-<zone>`, and the publish block
+  pushes and opens the PR only inside the guard that reads it.
 - Reinventing merge/sign/CI logic instead of reusing `promoting-a-branch`.
 - Running a bare `git merge` / `git push` / `git worktree remove` inside the per-branch loop.
   You move between worktrees constantly here; anchor every command with `-C "$MAIN"` (or the

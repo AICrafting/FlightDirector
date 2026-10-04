@@ -87,4 +87,25 @@ says "$QB/references/dispatch-claude.md" 'ticket=all'
 if says "$QB/SKILL.md" run_in_background; then exit 1; fi
 says "$QB/references/dispatch-claude.md" 'dies with'
 
+# FJ-231: promoting-branches' `pr` hop publishes a group only inside the guard on the gate's
+# verdict file. Structural, not a phrase check: in the fenced block that opens the PR, the verdict
+# guard comes first, then the push, then `pr open`, then the `else` that skips the group — and no
+# `continue`, which has no shell loop around it there and falls through to the push.
+# (scripts/tests/promote-branches-gate.test.sh runs the real blocks against a red gate.)
+PB="$REPO_ROOT/flight/skills/promoting-branches/SKILL.md"
+tr -d '\r' < "$PB" | awk '
+	/^```/ { if (inb) { if (hit) done = 1; inb = 0 } else if (!done) { inb = 1; n = 0; hit = 0 }; next }
+	inb && !done { L[++n] = $0; if (index($0, "pr open --head \"$INT\"")) hit = 1 }
+	END {
+		if (!done) exit 1
+		for (i = 1; i <= n; i++) {
+			if (L[i] ~ /continue/) exit 1
+			if (!guard && index(L[i], "preflight-verdict-<zone>")) guard = i
+			if (!push && index(L[i], "push -u origin \"$INT\"")) push = i
+			if (!open && index(L[i], "pr open --head")) open = i
+			if (L[i] == "else") els = i
+		}
+		exit !(guard && push > guard && open > push && els > open)
+	}'
+
 printf 'Codex compatibility contract tests passed\n'
