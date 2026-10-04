@@ -70,6 +70,13 @@ grep -q "rig comment" <<<"$CMTS" && ok "comments returns the posted body" || no 
 grep -q "code block" <<<"$CMTS" && ok "comment code block round-trips" || no "comment code block round-trips" "$CMTS"
 grep -q $'\t' < <(head -1 <<<"$CMTS") && ok "comments header is author⇥timestamp TSV" || no "comments header is TSV" "$(head -1 <<<"$CMTS")"
 
+echo "── close / reopen (workflow transitions) ──"
+lsp issues close --number "$K" && ok "close exits 0 (Done transition)" || no "close exits 0"
+[ "$(issue_catkey "$K")" = "done" ] && ok "issue is in the Done status category" || no "issue is in the Done status category" "got '$(issue_catkey "$K")'"
+lsp issues reopen --number "$K" && ok "reopen exits 0 (To-Do/In-Progress transition)" || no "reopen exits 0"
+CAT="$(issue_catkey "$K")"
+[ "$CAT" != "done" ] && ok "reopened issue left the Done category ($CAT)" || no "reopened issue left the Done category" "still done"
+
 echo "── issues block / blockers / blocking / unblock (FJ-271) ──"
 # The rig writes a legacy (schema 2) config; the dependency verbs route by named tracker,
 # which needs schema 3 — migrate the throwaway workdir in place first.
@@ -88,13 +95,6 @@ lsp issues unblock --number "$DA" --by "$DB" --no-status >/dev/null
 RC=0; OUT="$(lsp issues blockers --number "$DA" 2>&1)" || RC=$?
 [ "$RC" = 0 ] && [ -z "$OUT" ] && ok "unblock removes it" || no "unblock removes it" "rc=$RC $OUT"
 lsp issues close --number "$DA" >/dev/null; lsp issues close --number "$DB" >/dev/null
-
-echo "── close / reopen (workflow transitions) ──"
-lsp issues close --number "$K" && ok "close exits 0 (Done transition)" || no "close exits 0"
-[ "$(issue_catkey "$K")" = "done" ] && ok "issue is in the Done status category" || no "issue is in the Done status category" "got '$(issue_catkey "$K")'"
-lsp issues reopen --number "$K" && ok "reopen exits 0 (To-Do/In-Progress transition)" || no "reopen exits 0"
-CAT="$(issue_catkey "$K")"
-[ "$CAT" != "done" ] && ok "reopened issue left the Done category ($CAT)" || no "reopened issue left the Done category" "still done"
 
 echo
 echo "passed=$pass failed=$fail"

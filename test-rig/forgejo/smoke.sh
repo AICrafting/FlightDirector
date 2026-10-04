@@ -102,24 +102,6 @@ if lsp pr merge --number "$prnum" --strategy squash; then
     || no "pr get reports state=merged (closed + merged_at on the wire)" "got '$PST'"
 else no "pr merge exits 0"; fi
 
-echo "── issues block / blockers / blocking / unblock (FJ-271) ──"
-# The rig writes a legacy (schema 2) config; the dependency verbs route by named tracker,
-# which needs schema 3 — migrate the throwaway workdir in place first.
-lsp reconcile --harness claude >/dev/null 2>&1 || no "reconcile (schema 3 migration)"
-DA="$(lsp issues create --title "[rig] blocked" --body "dependency smoke")"
-DB="$(lsp issues create --title "[rig] blocker" --body "dependency smoke")"
-OUT="$(lsp issues block --number "$DA" --by "$DB" --no-status 2>&1)"
-VIA="$(sed -nE 's/.*\((native|text)\)$/\1/p' <<<"$OUT" | tail -n1)"
-[ "$VIA" = native ] && ok "block uses the native link ($VIA)" || no "block uses the native link" "via='$VIA' $OUT"
-OUT="$(lsp issues blockers --number "$DA")"
-grep -q "blocker	open	$VIA$" <<<"$OUT" && ok "blockers lists it ($VIA)" || no "blockers lists it" "$OUT"
-OUT="$(lsp issues blocking --number "$DB")"
-grep -q "blocked	open	$VIA$" <<<"$OUT" && ok "blocking lists the reverse" || no "blocking lists the reverse" "$OUT"
-lsp issues unblock --number "$DA" --by "$DB" --no-status >/dev/null
-RC=0; OUT="$(lsp issues blockers --number "$DA" 2>&1)" || RC=$?
-[ "$RC" = 0 ] && [ -z "$OUT" ] && ok "unblock removes it" || no "unblock removes it" "rc=$RC $OUT"
-lsp issues close --number "$DA" >/dev/null; lsp issues close --number "$DB" >/dev/null
-
 echo "── close ──"
 lsp issues close --number "$N"
 state="$(curl -fsS -H "Authorization: token $TOKEN" "$REPO_API/issues/$N" | jq -r '.state')"
@@ -190,6 +172,24 @@ else
     no "after the fix the PR's new head watches green" "$(tail -1 <<<"$LINES")"
   fi
 fi
+
+echo "── issues block / blockers / blocking / unblock (FJ-271) ──"
+# The rig writes a legacy (schema 2) config; the dependency verbs route by named tracker,
+# which needs schema 3 — migrate the throwaway workdir in place first.
+lsp reconcile --harness claude >/dev/null 2>&1 || no "reconcile (schema 3 migration)"
+DA="$(lsp issues create --title "[rig] blocked" --body "dependency smoke")"
+DB="$(lsp issues create --title "[rig] blocker" --body "dependency smoke")"
+OUT="$(lsp issues block --number "$DA" --by "$DB" --no-status 2>&1)"
+VIA="$(sed -nE 's/.*\((native|text)\)$/\1/p' <<<"$OUT" | tail -n1)"
+[ "$VIA" = native ] && ok "block uses the native link ($VIA)" || no "block uses the native link" "via='$VIA' $OUT"
+OUT="$(lsp issues blockers --number "$DA")"
+grep -q "blocker	open	$VIA$" <<<"$OUT" && ok "blockers lists it ($VIA)" || no "blockers lists it" "$OUT"
+OUT="$(lsp issues blocking --number "$DB")"
+grep -q "blocked	open	$VIA$" <<<"$OUT" && ok "blocking lists the reverse" || no "blocking lists the reverse" "$OUT"
+lsp issues unblock --number "$DA" --by "$DB" --no-status >/dev/null
+RC=0; OUT="$(lsp issues blockers --number "$DA" 2>&1)" || RC=$?
+[ "$RC" = 0 ] && [ -z "$OUT" ] && ok "unblock removes it" || no "unblock removes it" "rc=$RC $OUT"
+lsp issues close --number "$DA" >/dev/null; lsp issues close --number "$DB" >/dev/null
 
 echo
 if [ "$fail" -eq 0 ]; then
