@@ -13,7 +13,15 @@ check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=
 section() { printf '\033[1m── %s ──\033[0m\n' "$1"; }
 
 # Source the shim in a throwaway shell (it expects adapter env) and lift ADF_JQ out.
-ADF_JQ="$(LS_API=x LS_PROJECT=x LS_TOKEN=x LS_EMAIL=x bash -c '. "$1" >/dev/null 2>&1; printf "%s" "$ADF_JQ"' _ "$COMMON")"
+# The shim refuses to load without curl on PATH, and CI's images have none: give it a
+# stub that fails loudly if anything ever calls it (nothing here should). `|| true`
+# so a failed source reaches the check below instead of a silent `set -e` exit.
+SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
+mkdir -p "$SANDBOX/bin"
+printf '#!/usr/bin/env bash\necho "jira-adf.test.sh: curl must not be called" >&2; exit 1\n' >"$SANDBOX/bin/curl"
+chmod +x "$SANDBOX/bin/curl"
+ADF_JQ="$(PATH="$SANDBOX/bin:$PATH" LS_API=x LS_PROJECT=x LS_TOKEN=x LS_EMAIL=x \
+	bash -c '. "$1" >/dev/null 2>&1; printf "%s" "$ADF_JQ"' _ "$COMMON")" || true
 if [ -z "${ADF_JQ:-}" ]; then
 	check "jira shim sourced" 0 "ADF_JQ not defined"
 	printf '\n\033[0;31mPassed: %d  Failed: %d\033[0m\n' "$pass" "$fail"
