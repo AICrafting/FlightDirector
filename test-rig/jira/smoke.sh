@@ -70,6 +70,24 @@ grep -q "rig comment" <<<"$CMTS" && ok "comments returns the posted body" || no 
 grep -q "code block" <<<"$CMTS" && ok "comment code block round-trips" || no "comment code block round-trips" "$CMTS"
 grep -q $'\t' < <(head -1 <<<"$CMTS") && ok "comments header is author⇥timestamp TSV" || no "comments header is TSV" "$(head -1 <<<"$CMTS")"
 
+echo "── issues block / blockers / blocking / unblock (FJ-271) ──"
+# The rig writes a legacy (schema 2) config; the dependency verbs route by named tracker,
+# which needs schema 3 — migrate the throwaway workdir in place first.
+lsp reconcile --harness claude >/dev/null 2>&1
+DA="$(lsp issues create --title "[rig] blocked" --body "dependency smoke")"
+DB="$(lsp issues create --title "[rig] blocker" --body "dependency smoke")"
+OUT="$(lsp issues block --number "$DA" --by "$DB" --no-status 2>&1)"
+VIA="$(sed -n 's/.*(\(native\|text\))$/\1/p' <<<"$OUT" | tail -n1)"
+[ -n "$VIA" ] && ok "block works ($VIA)" || no "block works" "$OUT"
+OUT="$(lsp issues blockers --number "$DA")"
+grep -q "blocker	open	$VIA$" <<<"$OUT" && ok "blockers lists it ($VIA)" || no "blockers lists it" "$OUT"
+OUT="$(lsp issues blocking --number "$DB")"
+grep -q "blocked	open	$VIA$" <<<"$OUT" && ok "blocking lists the reverse" || no "blocking lists the reverse" "$OUT"
+lsp issues unblock --number "$DA" --by "$DB" --no-status >/dev/null
+OUT="$(lsp issues blockers --number "$DA")"
+[ -z "$OUT" ] && ok "unblock removes it" || no "unblock removes it" "$OUT"
+lsp issues close --number "$DA" >/dev/null; lsp issues close --number "$DB" >/dev/null
+
 echo "── close / reopen (workflow transitions) ──"
 lsp issues close --number "$K" && ok "close exits 0 (Done transition)" || no "close exits 0"
 [ "$(issue_catkey "$K")" = "done" ] && ok "issue is in the Done status category" || no "issue is in the Done status category" "got '$(issue_catkey "$K")'"

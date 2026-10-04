@@ -67,6 +67,24 @@ LBLS="$(curl -fsS "${H[@]}" "$REPO_API/issues/$N" | jq -r '[.labels[].name] | ma
 [ "$LBLS" = "status/to test" ] && ok "only the latest status label remains ($LBLS)" \
   || no "only the latest status label remains" "got '$LBLS'"
 
+echo "── issues block / blockers / blocking / unblock (FJ-271) ──"
+# The rig writes a legacy (schema 2) config; the dependency verbs route by named tracker,
+# which needs schema 3 — migrate the throwaway workdir in place first.
+lsp reconcile --harness claude >/dev/null 2>&1
+DA="$(lsp issues create --title "[rig] blocked" --body "dependency smoke")"
+DB="$(lsp issues create --title "[rig] blocker" --body "dependency smoke")"
+OUT="$(lsp issues block --number "$DA" --by "$DB" --no-status 2>&1)"
+VIA="$(sed -n 's/.*(\(native\|text\))$/\1/p' <<<"$OUT" | tail -n1)"
+[ -n "$VIA" ] && ok "block works ($VIA)" || no "block works" "$OUT"
+OUT="$(lsp issues blockers --number "$DA")"
+grep -q "blocker	open	$VIA$" <<<"$OUT" && ok "blockers lists it ($VIA)" || no "blockers lists it" "$OUT"
+OUT="$(lsp issues blocking --number "$DB")"
+grep -q "blocked	open	$VIA$" <<<"$OUT" && ok "blocking lists the reverse" || no "blocking lists the reverse" "$OUT"
+lsp issues unblock --number "$DA" --by "$DB" --no-status >/dev/null
+OUT="$(lsp issues blockers --number "$DA")"
+[ -z "$OUT" ] && ok "unblock removes it" || no "unblock removes it" "$OUT"
+lsp issues close --number "$DA" >/dev/null; lsp issues close --number "$DB" >/dev/null
+
 echo "── comment / comments / close ──"
 lsp issues comment --number "$N" --body "rig comment" && ok "comment exits 0" || no "comment exits 0"
 CMTS="$(lsp issues comments --number "$N")"
