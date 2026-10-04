@@ -180,6 +180,26 @@ hd block --number FJ-21 --by FJ-22
 check "the status comment already there is not posted again" \
 	"$([ "$RC" = 0 ] && [ "$(status_of FJ 21)" = blocked ] && [ "$(ncomments FJ 21)" = 1 ] && echo 1 || echo 0)" "rc=$RC $(comments FJ 21)"
 
+section "re-blocking the same pair records the status the issue has now"
+fresh; mk FJ 24 "Feature" new; mk FJ 25 "Groundwork"
+hd block --number FJ-24 --by FJ-25
+hd unblock --number FJ-24 --by FJ-25
+jq -c '.status = "in-progress"' "$STATE/FJ/24.json" >"$STATE/FJ/24.new" && mv "$STATE/FJ/24.new" "$STATE/FJ/24.json"
+hd block --number FJ-24 --by FJ-25
+check "the stale status comment from the first cycle is not reused" \
+	"$([ "$RC" = 0 ] && [ "$(ncomments FJ 24)" = 2 ] && comments FJ 24 | jq -e '.[-1].body | startswith("**Status: blocked** (was in-progress), blocked by FJ-25")' >/dev/null && echo 1 || echo 0)" "rc=$RC $(comments FJ 24)"
+hd unblock --number FJ-24 --by FJ-25
+check "the second unblock restores in-progress, not the first cycle's new" "$([ "$(status_of FJ 24)" = in-progress ] && echo 1 || echo 0)" "$(status_of FJ 24)"
+
+section "a blocker title containing '(was ' is not a status record"
+fresh; mk FJ 26 "Feature" in-progress; mk GH 4 "Regression (was fine before)"
+hd block --number FJ-26 --by GH-4 --no-status
+hd block --number FJ-26 --by GH-4
+check "the second block, with status on, records the status" \
+	"$([ "$RC" = 0 ] && [ "$(status_of FJ 26)" = blocked ] && comments FJ 26 | jq -e '[.[] | select(.body | test("^\\*\\*Status: blocked\\*\\* \\(was in-progress\\)"))] | length == 1' >/dev/null && echo 1 || echo 0)" "rc=$RC $(comments FJ 26)"
+hd unblock --number FJ-26 --by GH-4
+check "unblock restores in-progress" "$([ "$(status_of FJ 26)" = in-progress ] && echo 1 || echo 0)" "$(status_of FJ 26)"
+
 section "the (was ...) scan reads only flight's Status shapes"
 fresh; mk FJ 23 "Feature" blocked; mk GH 1 "One"
 jq -n '[{id:"1", body:"**Blocked by GH-1**: One\n\nStatus: blocked (was in-progress)", signature:{plugin:"flight"}},

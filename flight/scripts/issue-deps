@@ -112,22 +112,31 @@ text_links() {
 		| to_entries[] | select(.value) | .key' <<<"$1"
 }
 
-# has_status_record COMMENTS_JSON ID — does the latest signed "Blocked by ID" marker also carry
-# the `(was <role>)` status record? (A rerun after a partial failure must not record it twice.)
+# Both "already recorded?" checks below ask the same question: does the latest record for this
+# pair say `(was WAS)`, where WAS is the status the issue has *right now*? Only such a record is
+# worth keeping — it is what a rerun after a partial failure left behind, and the unblock that
+# consumes it will restore the right status. A record naming any other status is stale: the
+# pair was blocked and unblocked before, and the issue's status has moved since. Reusing it
+# would make the next unblock restore the earlier cycle's status. Matching the status, not just
+# the blocker id, tells the two cases apart; the `(was …)` line is matched on its own line, so a
+# title such as "Regression (was fine before)" is never mistaken for a record.
+
+# has_status_record COMMENTS_JSON ID WAS — does the latest signed "Blocked by ID" marker carry a
+# `Status: blocked (was WAS)` line?
 has_status_record() {
-	jq -e --arg id "$2" '
-		[.[] | select(.signature != null)
-		 | select(((.body // "") | split("\n")[0] | sub("\r$"; "")) | test("^(\\*\\*)?(Blocked by|No longer blocked by) \($id)(\\*\\*)?(:.*)?$"; "i"))]
-		| last | (.body // "") | contains("(was ")' <<<"$1" >/dev/null
+	jq -e --arg id "$2" --arg was "$3" '
+		[.[] | select(.signature != null) | ((.body // "") | split("\n") | map(sub("\r$"; "")))
+		 | select(.[0] | test("^(\\*\\*)?(Blocked by|No longer blocked by) \($id)(\\*\\*)?(:.*)?$"; "i"))]
+		| last // [] | any(.[]; . == "Status: blocked (was \($was))")' <<<"$1" >/dev/null
 }
 
-# has_status_comment COMMENTS_JSON ID — does Q's latest signed `**Status: blocked**` comment
-# already name ID as the blocker? (A rerun after set-status failed must not post it twice.)
+# has_status_comment COMMENTS_JSON ID WAS — does Q's latest signed `**Status: blocked**` comment
+# name ID as the blocker and WAS as the status it replaced?
 has_status_comment() {
-	jq -e --arg id "$2" '
+	jq -e --arg id "$2" --arg was "$3" '
 		[.[] | select(.signature != null) | ((.body // "") | split("\n")[0] | sub("\r$"; ""))
 		 | select(startswith("**Status: blocked**"))]
-		| last // "" | ascii_downcase | endswith("blocked by \($id | ascii_downcase)")' <<<"$1" >/dev/null
+		| last // "" | ascii_downcase == ("**Status: blocked** (was \($was)), blocked by \($id)" | ascii_downcase)' <<<"$1" >/dev/null
 }
 
 # collect blockers|blocking — this issue's links as [{id, title, state, via}]: the native rows
@@ -223,7 +232,7 @@ if [ "$VERB" = block ]; then
 		QC="$(fl issues comments --number "$Q")"
 		LINKS="$(text_links "$QC" blocked)"
 		if grep -Fxq -- "$UBQ" <<<"$LINKS"; then
-			if [ -n "$SET_TO" ] && has_status_record "$QC" "$BQ"; then RECORDED=1; fi
+			if [ -n "$SET_TO" ] && has_status_record "$QC" "$BQ" "$WAS"; then RECORDED=1; fi
 		else
 			BODY="**Blocked by $BQ**: $(jq -r '.title' <<<"$BY_J")"
 			if [ -n "$SET_TO" ]; then BODY="$BODY"$'\n\n'"Status: blocked (was $WAS)"; RECORDED=1; fi
@@ -240,7 +249,7 @@ if [ "$VERB" = block ]; then
 		DONE="added the native link"; [ "$VIA" = native ] || DONE="posted the comments"
 		if [ "$RECORDED" != 1 ]; then
 			QC="$(fl issues comments --number "$Q")"
-			if ! has_status_comment "$QC" "$BQ"; then
+			if ! has_status_comment "$QC" "$BQ" "$WAS"; then
 				R="$(post_try "$Q" "**Status: blocked** (was $WAS), blocked by $BQ")"
 				[ -z "$R" ] || partial "$DONE" "the status comment" "$Q" "$R"
 			fi
