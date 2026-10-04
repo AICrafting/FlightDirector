@@ -27,6 +27,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
+- **PR CI takes a cheap path when a change only touches inert docs** (FJ-235). This
+  repository's own `tests` workflow classifies each PR with `scripts/ci/docs-only.sh`: when
+  every changed path is on an allowlist of files no test reads (`docs/**`, `CONTRIBUTING.md`,
+  `CODE_OF_CONDUCT.md`, `SECURITY.md`), each leg skips its install and test *steps* but still
+  runs and reports `success`, so `flight ci watch` sees a real verdict rather than
+  `status=skipped`. Pushes, unknown paths, and any classifier error run the full suite; the
+  step log and job summary say which path ran and which file forced a full one. Contributor-
+  facing only — nothing changes for repos using the plugin.
+
 - **`working-an-issue` runs the repo's `code.preflight` gate before moving an issue to `to-test`**
   (FJ-221). The interactive path was the one place a branch changed state without consulting the
   gate, looser than the batch path. A red gate now leaves the issue `in-progress` and shows the
