@@ -2,7 +2,7 @@
 #
 # Jira Cloud issues adapter (REST v3) — verbs: list get comments create update
 # comment set-status clear-status label-add label-remove assign unassign close
-# reopen.
+# reopen dep-add dep-remove dep-list dep-blocking.
 #
 # Jira specifics (see ../../../references/adapter-contract.md, "Jira backend"):
 #   - The `--number` value is a Jira KEY (e.g. KAN-123), treated as an opaque id.
@@ -366,5 +366,46 @@ case "$verb" in
     _api POST "/rest/api/3/issue/${number}/transitions" "$(jq -n --arg id "$tid" '{transition:{id:$id}}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get comments create update comment set-status clear-status label-add label-remove assign unassign close reopen)" ;;
+  dep-add|dep-remove|dep-list|dep-blocking)
+    # Issue dependencies (FJ-271) as issue links. The link type is found by its inward text
+    # ("is blocked by"), else by the name "Blocks": an admin can rename either. Seen from an
+    # issue's `issuelinks`, an entry holding `inwardIssue` reads "<this issue> is blocked by
+    # <inwardIssue>", and one holding `outwardIssue` reads "<this issue> blocks <outwardIssue>".
+    # Creating "N is blocked by M" therefore posts M as the inward issue (pinned on the live
+    # rig: test-rig/jira/smoke.sh).
+    number=""; by=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --by) by="$2"; shift 2 ;;
+      *) die "issues $verb: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues $verb: --number required"
+    case "$verb" in dep-add|dep-remove) [ -n "$by" ] || die "issues $verb: --by required" ;; esac
+    ltype="$(_api GET "/rest/api/3/issueLinkType" | jq -c '
+      ([.issueLinkTypes[]? | select((.inward // "" | ascii_downcase) == "is blocked by")]
+       + [.issueLinkTypes[]? | select(.name == "Blocks")]) | first // empty')"
+    [ -n "$ltype" ] || fail unsupported "this Jira site has no \"is blocked by\" issue link type"
+    links="$(_api GET "/rest/api/3/issue/${number}?fields=issuelinks" | jq -c --argjson t "$ltype" --arg p "$LS_PROJECT" '
+      [.fields.issuelinks[]? | select(.type.id == $t.id)
+       | if .inwardIssue then {id: .id, side: "blocked_by", issue: .inwardIssue} else {id: .id, side: "blocks", issue: .outwardIssue} end
+       | select(.issue.key | startswith($p + "-"))
+       | {side, link: .id, number: .issue.key, title: (.issue.fields.summary // ""),
+          state: (if .issue.fields.status.statusCategory.key == "done" then "closed" else "open" end)}]')"
+    case "$verb" in
+      dep-list)     jq -c '[.[] | select(.side == "blocked_by") | {number, title, state}]' <<<"$links" | dep_emit ;;
+      dep-blocking) jq -c '[.[] | select(.side == "blocks") | {number, title, state}]' <<<"$links" | dep_emit ;;
+      dep-add)
+        [ "$(jq --arg b "$by" '[.[] | select(.side == "blocked_by" and .number == $b)] | length' <<<"$links")" = 0 ] || exit 0
+        _api POST "/rest/api/3/issueLink" \
+          "$(jq -cn --argjson t "$ltype" --arg b "$by" --arg n "$number" '{type: {id: $t.id}, inwardIssue: {key: $b}, outwardIssue: {key: $n}}')" >/dev/null
+        ;;
+      dep-remove)
+        link="$(jq -r --arg b "$by" '[.[] | select(.side == "blocked_by" and .number == $b)] | first | .link // empty' <<<"$links")"
+        [ -n "$link" ] || exit 0
+        _api DELETE "/rest/api/3/issueLink/${link}" >/dev/null
+        ;;
+    esac
+    ;;
+
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment set-status clear-status label-add label-remove assign unassign close reopen dep-add dep-remove dep-list dep-blocking)" ;;
 esac

@@ -16,7 +16,7 @@ flight/scripts/
   adapters/
     forgejo/
       _common.sh             # shared: _api(), label_id(), auth, error handling (sourced)
-      issues                 # subcommands: list get create comment set-status close reopen
+      issues                 # subcommands: list get create comment set-status close reopen dep-add dep-remove dep-list dep-blocking
       pr                     # subcommands: open merge list   (pull request; "MR" on GitLab)
       ci                     # subcommands: watch log
       labels                 # subcommands: resolve
@@ -187,6 +187,10 @@ GitLab comment endpoints do cap, and are paged.
 | `unassign`  | `--number N`                           | (nothing) — removes all assignees |
 | `close`     | `--number N`                           | (nothing) |
 | `reopen`    | `--number N`                           | (nothing) — inverse of `close`; sets the issue's state back to open |
+| `dep-add`   | `--number N` `--by M`                  | (nothing) — records "N is blocked by M", both on this tracker; idempotent. Fails `unsupported` where the backend can't (Forgejo with dependencies switched off, GitLab Free tier, a Jira site with no "is blocked by" link type) |
+| `dep-remove`| `--number N` `--by M`                  | (nothing) — removes that link; idempotent |
+| `dep-list`  | `--number N`                           | one row per issue blocking N: `number⇥title⇥state`; under `LS_JSON` an array of `{number, title, state}`. Links to another repo/project are left out |
+| `dep-blocking` | `--number N`                        | the issues N blocks, same shape |
 
 ### `labels`
 
@@ -302,6 +306,33 @@ credential and label map, so every backend pair works.
   that fails partway is finished by `resync`.
 - `--tracker` is refused: the two trackers are `--from` (any id `issues resolve` accepts) and
   `--to` (a ref or alias). `--to` the source's own tracker is a usage error. Requires config schema 3.
+
+### `issues block` / `unblock` / `blockers` / `blocking` (dispatcher-owned)
+
+"This issue is blocked by that one" (FJ-271), handled by `scripts/issue-deps` through the
+dispatcher, like `copy`.
+
+| Verb | Args | stdout |
+|---|---|---|
+| `block` | `--number ID --by ID [--no-status] [--model ID]` | `FJ-12 blocked by GH-3 (native\|text)` |
+| `unblock` | `--number ID --by ID [--no-status] [--model ID]` | `FJ-12 no longer blocked by GH-3` (or, on stderr, that it wasn't) |
+| `blockers` | `--number ID` | `id⇥title⇥state⇥native\|text` per blocker |
+| `blocking` | `--number ID` | the same, per issue it blocks |
+
+- Two issues on the same tracker use its `dep-*` verbs. On `unsupported`, and always across
+  trackers, the link is a pair of signed comments: `**Blocked by GH-3**: <title>` on the blocked
+  issue and `**Blocks FJ-12**: <title>` on the blocker; unblocking posts `**No longer …**`. Only
+  flight-signed comments count (they are always signed; see `--signature`), and per pair the latest
+  wins. The first-line match ignores case, so a hand-edited `blocked by fj-12` still counts.
+- Status, unless `--no-status`: `block` sets the tracker's `blocked` role and records
+  `(was <role>)`; the last `unblock` restores that role, or `new`, or clears the status. A status
+  someone changed by hand is left alone.
+- A text-linked issue that no longer exists is still listed by `blockers` / `blocking`, with an
+  empty title and state `unknown` (TSV), or `title` and `state` null (`--json`).
+- `--model ID` stamps the signature on the comments `block` / `unblock` post. A no-op `unblock`
+  (nothing was linked) exits 0; under `--json` it still prints `{number, by, removed: [], status}`.
+- A partial write names the missing piece and says to rerun: rerunning `block` / `unblock` is safe.
+- `--tracker` is refused (each id names its tracker). Requires config schema 3.
 
 ## Notes
 

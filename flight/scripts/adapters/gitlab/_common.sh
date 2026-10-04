@@ -59,6 +59,16 @@ _api() {
   cat "$tmp"; rm -f "$tmp"
 }
 
+# _api_try METHOD PATH JSON_DATA OUTFILE — like _api, but an HTTP error is for the caller to
+# judge: the status is printed and the body written to OUTFILE. Only curl itself failing
+# still stops the adapter. Used where one refusal means "not in this tier" (FJ-271).
+_api_try() {
+  local method="$1" path="$2" data="$3" out="$4"
+  curl -sS -o "$out" -w '%{http_code}' -X "$method" "${GL_HEADERS[@]}" \
+    -H "Content-Type: application/json" --data-binary "$data" "${PROJECT_API}${path}" \
+    || fail network "$method $path: curl failed"
+}
+
 # --- Paging ----------------------------------------------------------------
 # GitLab caps `per_page` at 100, so one request per list verb truncates silently on
 # any project past that. Every list endpoint here pages instead.

@@ -13,6 +13,18 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+
+- **Blocked issues** (FJ-271). `flight issues block --number FJ-12 --by GH-3` records that one
+  issue is blocked by another; `unblock` removes it, and `blockers` / `blocking` list the links.
+  Issues on the same tracker use the backend's own relationship (GitHub issue dependencies,
+  Forgejo dependencies, GitLab Premium blocking links, Jira "is blocked by" links). Where the
+  backend can't, and always across trackers, the link is a pair of signed comments. By default the
+  blocked issue's status moves to `blocked` and back to what it was; `--no-status` skips that.
+  `issues get --json` gains `blocked_by`, and `working-an-issue` warns before starting an issue
+  with an open blocker. Capability token: `issues-deps`. GitLab's native (Premium) path is
+  untested live: the test rig is on the Free tier and exercises the comment fallback.
+
 ### Fixed
 
 - **A message sent mid-turn no longer drops the turn's earlier usage from the prompt log**

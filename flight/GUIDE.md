@@ -170,6 +170,15 @@ Body, comments, labels and status come along unless you pass `--no-body`, `--no-
 `--no-labels` or `--no-status`. Nothing names the source on the copy unless you add `--footer`
 or `--back-link`, which matters when copying from a private tracker to a public one.
 
+### Blocked issues
+
+Record that one issue waits on another with `flight issues block --number FJ-12 --by GH-3`, and
+remove it with `flight issues unblock`. `flight issues blockers --number FJ-12` and `blocking`
+list the links. Flight uses the backend's own relationship where it has one, and a pair of signed
+comments otherwise (always across trackers). The blocked issue's status moves to `blocked` and
+back unless you pass `--no-status`. `working-an-issue` warns you about open blockers before it
+starts.
+
 ---
 
 ## The workflow at a glance

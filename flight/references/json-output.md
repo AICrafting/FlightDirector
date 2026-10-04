@@ -40,6 +40,7 @@ $ flight capabilities --json
 | `issues-json` | `issues list`, `issues get` and `issues comments` take `--json`, and `issues list` takes `--status ROLE` |
 | `issues-paging` | `issues list --json` pages with `--per-page M [--cursor C]` (below) |
 | `issues-copy` | `issues copy` and `issues resync` exist |
+| `issues-deps` | `issues block`, `unblock`, `blockers`, `blocking`, and `blocked_by` on `issues get --json` |
 
 ## Which verbs take `--json`
 
@@ -60,6 +61,9 @@ their own meaning: `prompt-log summary --json` predates this and is unchanged.
 | `issues comment` | the new comment object |
 | `issues set-status` | `{number, tracker, qualified, status, label}` |
 | `issues copy` | `{source, target, copied: {body, comments, labels, status, footer, backLink}, skipped: {labels, status}}`; with `--dry-run`, `target` is null and `dryRun` is true |
+| `issues block` | `{number, by, via, status}` |
+| `issues unblock` | `{number, by, removed, status}`; a no-op unblock still prints it, with `removed: []`. `block` / `unblock` also take `--model ID` |
+| `issues blockers` / `blocking` | `{issues: [{id, title, state, via}]}`; a text-linked issue that no longer exists has `title` and `state` null (TSV: empty title, state `unknown`) |
 | `issues resync` | `{source, target, copied: {comments}, skipped: {}}`; `dryRun: true` with `--dry-run` |
 | `labels list` | an array of label objects |
 | `labels statuses` | an array of status roles |
@@ -86,7 +90,8 @@ their own meaning: `prompt-log summary --json` predates this and is unchanged.
   "comments": 3,             // comment count, or null where the backend doesn't give one cheaply
   "url": "https://…/issues/81",        // web link
   "body": "markdown…",       // without the flight signature; null in list rows
-  "signature": {"plugin": "flight", "version": "0.17.1", "model": "Opus/5.5"}  // or null
+  "signature": {"plugin": "flight", "version": "0.17.1", "model": "Opus/5.5"},  // or null
+  "blocked_by": [{"id": "GH-3", "title": "…", "state": "open", "via": "text"}]  // issues get only; null in list rows and when the lookup failed
 }
 ```
 
@@ -99,6 +104,9 @@ Every key is present on every backend. Notes:
   <model>]` footer Flight appends to every body it writes. It is split out of `body`, and `model`
   is null when the footer names none. Bodies Flight didn't write have `signature: null` and their
   text untouched. A `---` elsewhere in the text is left alone.
+- **`blocked_by`** is filled by `issues get --json` only, with the same lookup `issues blockers`
+  does. It is `null` in `list` rows, and when that lookup fails (`get` still succeeds, with a
+  warning on stderr).
 - **`comments`** comes straight from the issue on Forgejo, GitHub and GitLab, and from `get` on
   Jira. Jira list rows have `comments: null`.
 
@@ -189,6 +197,7 @@ stderr still carries the human sentence, as without `--json`. `message` is for d
 | `network` | the server couldn't be reached (curl itself failed) |
 | `backend` | the server answered with any other error (5xx, an unexpected 4xx), or the call failed in a way nothing classified |
 | `usage` | bad flags or arguments, or `--json` on a verb without a JSON form |
+| `unsupported` | an adapter's `dep-*` verb: the backend can't record a dependency here. `issues block` handles it by falling back to comments |
 | `already-copied` | `issues copy`: the ledger already records a copy of this issue on that tracker; use `issues resync`, or `--force` for a second copy |
 
 The code is decided where the cause is known, and never by matching message text. The dispatcher

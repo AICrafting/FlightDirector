@@ -95,6 +95,11 @@ Filing two related issues in one turn? Scan and classify each independently.
 Asked to copy or move an existing issue to another tracker ("copy FJ-12 to GH")? That is not a
 new issue. Use the `copying-an-issue` skill, which keeps the link and checks for an earlier copy.
 
+A new issue that depends on another one? File it, then record the link with
+`flight issues block --number <new id> --by <the other id>` instead of writing "blocked by" in
+the body. That uses the tracker's native relationship where there is one, and moves the status to
+blocked.
+
 ## Step 3: Clarifying questions (only when needed)
 
 Ask 1–3 focused questions before writing if it's a feature with real technical choices (build

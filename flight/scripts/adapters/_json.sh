@@ -216,3 +216,11 @@ cursor_page_token() {
 	page_meta "$more" "" "$next"
 	cat "$out"; rm -f "$out" "$rows"
 }
+
+# dep_emit — one JSON array of {number, title, state} on stdin (FJ-271's dep-list and
+# dep-blocking) → one `number⇥title⇥state` row each, or the array unchanged under --json.
+dep_emit() {
+	if json_mode; then jq -c '.'
+	else jq -r '.[] | [.number, .title, .state] | @tsv'
+	fi
+}
