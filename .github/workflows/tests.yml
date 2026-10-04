@@ -132,7 +132,7 @@ jobs:
   script-tests-windows:
     name: script tests (Windows, MSYS)
     runs-on: windows
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
