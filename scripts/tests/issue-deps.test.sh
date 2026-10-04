@@ -269,6 +269,45 @@ set -e
 check "--tracker is refused (each id names its tracker)" "$([ "$RC" = 1 ] && grep -q 'names its own tracker' <<<"$OUT" && echo 1 || echo 0)" "rc=$RC out=$OUT"
 check "the capability token is advertised" "$(grep -qx issues-deps <<<"$("$DISP" capabilities)" && echo 1 || echo 0)"
 
+section "issues get --json carries blocked_by"
+# A fake curl for the real dispatcher: FJ issue 1 exists, its dependencies are FJ-2, and its
+# comments are empty. With $DEPS_FAIL set, the dependency call answers 500.
+mkdir -p "$SANDBOX/bin"
+cat >"$SANDBOX/bin/curl" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+out=""; url=""
+while [ $# -gt 0 ]; do case "$1" in
+	-o) out="$2"; shift 2 ;;
+	-D|-w|-H|-u|-X|--data-binary) shift 2 ;;
+	-sS|-L) shift ;;
+	*) url="$1"; shift ;;
+esac; done
+code=200
+case "$url" in
+	*/repos/acme/widget) body='{"internal_tracker":{"enable_issue_dependencies":true}}' ;;
+	*/issues/1/dependencies*) if [ -n "${DEPS_FAIL:-}" ]; then code=500; body='{"message":"boom"}'
+		else body='[{"number":2,"title":"Groundwork","state":"open","repository":{"owner":"acme","name":"widget"}}]'; fi ;;
+	*/issues/1/comments*) body='[]' ;;
+	*/issues/1) body='{"number":1,"title":"Feature","state":"open","labels":[],"user":{"login":"a"},"created_at":"2026-10-01T00:00:00Z","updated_at":"2026-10-01T00:00:00Z","comments":0,"html_url":"u","body":"b"}' ;;
+	*) code=404; body='{"message":"no route"}' ;;
+esac
+printf '%s' "$body" >"$out"; printf '%s' "$code"
+SH
+chmod +x "$SANDBOX/bin/curl"
+printf '{"code":{"token":"t"}}\n' >"$D/.flightdirector/secrets.json"
+OUT="$(cd "$D" && PATH="$SANDBOX/bin:$PATH" "$DISP" issues get --number FJ-1 --json 2>/dev/null)"
+check "get --json lists the blockers" "$(jq -e '.blocked_by == [{id:"FJ-2", title:"Groundwork", state:"open", via:"native"}]' <<<"$OUT" >/dev/null && echo 1 || echo 0)" "$OUT"
+set +e
+OUT="$(cd "$D" && DEPS_FAIL=1 PATH="$SANDBOX/bin:$PATH" "$DISP" issues get --number FJ-1 --json 2>"$SANDBOX/get.err")"; RC=$?
+set -e
+check "a failed lookup still answers, with blocked_by null and a warning" \
+	"$([ "$RC" = 0 ] && jq -e '.blocked_by == null and .title == "Feature"' <<<"$OUT" >/dev/null && grep -q 'blocked_by is null' "$SANDBOX/get.err" && echo 1 || echo 0)" "rc=$RC out=$OUT"
+OUT="$(cd "$D" && FLIGHT_NO_DEPS=1 PATH="$SANDBOX/bin:$PATH" "$DISP" issues get --number FJ-1 --json 2>/dev/null)"
+check "FLIGHT_NO_DEPS skips the lookup" "$(jq -e '.blocked_by == null' <<<"$OUT" >/dev/null && echo 1 || echo 0)" "$OUT"
+OUT="$(cd "$D" && PATH="$SANDBOX/bin:$PATH" "$DISP" issues get --number FJ-1 2>/dev/null | head -n1)"
+check "the TSV form is unchanged" "$([ "$OUT" = "$(printf '1\tFeature\topen')" ] && echo 1 || echo 0)" "$OUT"
+
 [ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
 printf '\n%sPassed: %d  Failed: %d\033[0m\n' "$summary_colour" "$pass" "$fail"
 [ "$fail" -eq 0 ]

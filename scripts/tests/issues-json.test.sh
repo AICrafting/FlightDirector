@@ -8,6 +8,8 @@
 set -euo pipefail
 
 unset LS_TOKEN FLIGHT_TOKEN FORGEJO_TOKEN LS_SECRETS_FILE LS_EMAIL FLIGHT_ERROR_FILE LS_JSON
+# The issue shape is under test here, not the blockers lookup (issue-deps.test.sh covers that).
+export FLIGHT_NO_DEPS=1
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DISP="$REPO_ROOT/flight/scripts/flight"
 SANDBOX="$(mktemp -d)"
@@ -126,7 +128,7 @@ chmod +x "$SANDBOX/bin/curl"
 export PATH="$SANDBOX/bin:$PATH" FIXTURES="$F"
 
 fl() { (cd "$R" && "$DISP" "$@"); }
-ISSUE_KEYS='["author","body","comments","created","labels","number","qualified","signature","state","status","title","tracker","updated","url"]'
+ISSUE_KEYS='["author","blocked_by","body","comments","created","labels","number","qualified","signature","state","status","title","tracker","updated","url"]'
 COMMENT_KEYS='["author","body","created","id","signature","updated","url"]'
 
 section "issues get --json: one shape on every backend"

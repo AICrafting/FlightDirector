@@ -316,6 +316,17 @@ handoff() {
           --argjson labels "$LS_LABELS_JSON" "$json_out" >"$json_out.done" \
           || { rm -f "$json_out.done"; die_code backend "could not assemble the --json output"; }
         mv "$json_out.done" "$json_out"
+        # `issues get --json` carries the issue's blockers (FJ-271). The lookup is the same one
+        # `issues blockers` does; it never fails the get. The helper exports FLIGHT_NO_DEPS for
+        # its own reads, which is what stops this from recursing.
+        if [ "$json_finish" = get ] && [ -z "${FLIGHT_NO_DEPS:-}" ] && [ -n "$json_tracker" ]; then
+          deps_q="$(jq -r '.qualified // empty' "$json_out")"
+          if [ -n "$deps_q" ] && deps_out="$(env -u FLIGHT_ERROR_FILE -u LS_JSON "$SELF_DIR/flight" issues blockers --number "$deps_q" --json 2>/dev/null)"; then
+            jq -c --argjson d "$deps_out" '.blocked_by = $d.issues' "$json_out" >"$json_out.done" && mv "$json_out.done" "$json_out"
+          else
+            echo "flight: warning — could not read the blockers of ${deps_q:-the issue}; blocked_by is null" >&2
+          fi
+        fi
         ;;
       create)
         # The adapter printed the new issue's number. Answer with the issue itself,
