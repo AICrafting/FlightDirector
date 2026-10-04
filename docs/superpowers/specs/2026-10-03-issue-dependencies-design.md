@@ -106,7 +106,10 @@ once, as `native`. Text entries get their title and state from `issues get --jso
 
 ### The text record
 
-Every comment flight posts carries the dispatcher's signature. Ids in these lines are always
+Every comment flight posts carries the dispatcher's signature. These comments are **always**
+signed, even in a repo that set `code.signature.enabled: false`, because reading them back
+depends on it: the helper passes a new dispatcher switch, `--signature`, which forces the
+signature on for that one write (the mirror of `--no-signature`). Ids in these lines are always
 **qualified** (`FJ-12`), even in a one-tracker repo, so they stay unambiguous if a tracker is
 added later.
 
@@ -184,7 +187,10 @@ The issue object gains **`blocked_by`**: an array of `{id, title, state, via}` (
 - `GUIDE.md`: a short "Blocked issues" section. `CHANGELOG.md`: an Unreleased entry.
 
 **`--json` shapes:**
-- `block` / `unblock`: `{number, by, via, status}`, where `status` is the role set, or null.
+- `block`: `{number, by, via, status}`. `number` and `by` are qualified ids, `via` is `native`
+  or `text`, and `status` is the role set, or null.
+- `unblock`: `{number, by, removed, status}`. `removed` lists what was removed (`["native"]`,
+  `["text"]`, both, or `[]` when there was no link), and `status` is the role restored, or null.
 - `blockers` / `blocking`: `{issues: [{id, title, state, via}]}`.
 
 ## Error handling
