@@ -217,13 +217,29 @@ another repo mid-task cannot silently redirect a commit. If you ever find yourse
 ### 2. Ready for testing
 
 When the work is done and waiting on the user to verify, hand the board over and tell the user
-it's ready to test, on which branch:
+it's ready to test, on which branch. If the repo configures `code.preflight`, the branch has to
+pass it first: `to-test` means *ready for a human to verify*, and the config is the repo's own
+statement of what "done" means. Same guard shape as `promoting-a-branch` Step 4b — the config is
+read inline, the gate runs in `$WT` in the foreground, and the label moves only inside the guard
+(`$SCRATCH` is the session scratchpad directory, where the gate's log goes):
 
 ```
-flight issues set-status --tracker "$TRACKER" --number "$NUMBER" --status to-test
+if ! GATE="$(flight config '.code.preflight // empty')"; then
+    echo "could not read code.preflight: not moving $DISPLAY to to-test" >&2
+elif [ -n "$GATE" ] && ! ( cd "$WT" && sh -c "$GATE" ) >"$SCRATCH/preflight-$PREFIX.log" 2>&1; then
+    tail -40 "$SCRATCH/preflight-$PREFIX.log"
+    echo "preflight failed — $DISPLAY stays in-progress (full output: $SCRATCH/preflight-$PREFIX.log)" >&2
+else
+    [ -n "$GATE" ] && echo "preflight: passed ($GATE)"
+    flight issues set-status --tracker "$TRACKER" --number "$NUMBER" --status to-test
+fi
 ```
 
-(One call — it drops `in-progress` and adds `to-test` atomically.)
+(`set-status` is one call — it drops `in-progress` and adds `to-test` atomically.) With the key
+unset this is just the `set-status`, as before. On a red gate the label does **not** move: fix the
+branch and run the block again, or, if you can't, tell the user the gate is failing and show the
+log tail — never flip the label to get past it. Run it in the foreground; a backgrounded gate
+has no verdict to act on when the label call runs.
 
 ### 3. The merge gate — wait for confirmation
 
@@ -284,6 +300,8 @@ Only after explicit approval:
 
 ## Common mistakes
 
+- Moving an issue to `to-test` in a repo with `code.preflight` set without running it, or after
+  it failed. The batch path already refuses to; the interactive path must not be the looser one.
 - Forking the worktree from a local `stages[0]` that was never fetched — the agent then builds
   against old code and the mismatch surfaces at promote time as a conflict or a silently
   outdated merge. Fetch and compare first, every time.

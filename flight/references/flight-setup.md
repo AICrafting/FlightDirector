@@ -341,7 +341,7 @@ reader treats exactly like an absent key.
   ```
   **Working directory:** always the checkout that holds the code being gated, passed explicitly
   (`sh -c "$PREFLIGHT"` run from that path, never from whatever directory the shell has wandered
-  into). That is the feature worktree `$WT` in `promoting-a-branch`, each feature worktree in
+  into). That is the feature worktree `$WT` in `working-an-issue` and `promoting-a-branch`, each feature worktree in
   `promoting-branches`, the integration worktree on a `pr` group, and each issue worktree
   (`.worktrees/<ref>-<N>-<slug>`) in `queue-batches`. Write the command so it works from a repo
   root that is not the main checkout — a hard-coded absolute path defeats the point.
@@ -353,7 +353,8 @@ reader treats exactly like an absent key.
   branch moves between the gate and the merge, or a promotion tries to lean on an earlier run,
   it stops with *"preflight gate is not green"* even though the last run you saw was green.
   That is not a false red: the gate has not seen that commit. Promote again and it will.
-  **Where it runs:** `promoting-a-branch` before the merge on a `direct` hop and before
+  **Where it runs:** `working-an-issue` before moving the issue to `to-test` (a failure leaves
+  it `in-progress`); `promoting-a-branch` before the merge on a `direct` hop and before
   `pr open` on a `pr` hop (that hop never pushes the source branch — it expects it on origin
   already); `promoting-branches` before each branch's merge on a `direct` hop (a failure skips
   that branch and the group continues), and on a `pr` hop once on the group's assembled
