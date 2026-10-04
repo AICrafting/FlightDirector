@@ -31,6 +31,12 @@ server to install.
 | `setting-up-a-repo` | "set up flight", "set up labels", "bootstrap labels", "add default labels", or a bare repo during filing | First-run and re-run setup: code coordinates + token, stage pipeline, preferences (worker model, prompt ledger, preflight gate), gitignore and the agent breadcrumb; hands the issue tracker to `add-an-issue-tracker` |
 | `add-an-issue-tracker` | "add an issue tracker", "add another tracker", "connect Jira", "track issues on GitHub too" | Adds or completes one named issue tracker — coordinates, a stable ref and aliases, its own or the shared code credential (verified with `auth check --tracker`), its starting status — and reconciles that tracker's labels, adopting existing equivalents; never moves the default |
 
+One command sits beside the skills: **`/flight:version`** (Claude Code) prints the version of the
+flight plugin the session actually loaded — read from that install's own manifest — with its
+install (`flight@<marketplace>`), its root, and the `flight` CLI on `PATH`, plus a note when the
+two disagree (after a bump, before the plugin cache is refreshed). Codex has no plugin commands;
+there, run `scripts/plugin-version.sh` from the plugin root, or `flight --version` for the CLI.
+
 ## How it works
 
 Skills never embed backend endpoints or handle tokens. They invoke verbs through the dispatcher,

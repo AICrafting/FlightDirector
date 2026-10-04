@@ -91,6 +91,7 @@ verb — lives under [`flight/references/`](flight/references/), starting with
 ├── flight/                           # one plugin
 │   ├── .claude-plugin/plugin.json    # Claude Code manifest (version source of truth)
 │   ├── .codex-plugin/plugin.json     # Codex manifest (kept in lockstep by scripts/bump-version.sh)
+│   ├── commands/                     # Claude Code slash commands (`/flight:version`)
 │   ├── bin/                          # entrypoints: `flight` (dispatcher), `batch-manifest`, deprecated `lightspeed` shim
 │   ├── scripts/                      # dispatcher + adapters/<backend>/ (forgejo, github, gitlab, jira)
 │   ├── skills/                       # the skills, shared by both harnesses

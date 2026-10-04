@@ -7,6 +7,11 @@ CODEX_MANIFEST="$REPO_ROOT/flight/.codex-plugin/plugin.json"
 
 [ -f "$CODEX_MANIFEST" ]
 [ "$(jq -r '.skills' "$CODEX_MANIFEST")" = ./skills/ ]
+# FJ-257: /flight:version is a Claude Code command (commands/ is auto-discovered there). Codex
+# manifests have no commands field, so none is invented; GUIDE.md points Codex at the script.
+[ "$(jq -r 'has("commands")' "$CODEX_MANIFEST")" = false ]
+[ -f "$REPO_ROOT/flight/commands/version.md" ]
+grep -q 'scripts/plugin-version.sh' "$REPO_ROOT/flight/GUIDE.md"
 grep -q 'labels ensure' "$REPO_ROOT/flight/skills/working-an-issue/SKILL.md"
 grep -q 'dispatch-codex.md' "$REPO_ROOT/flight/skills/queue-batches/SKILL.md"
 grep -q 'dispatch-claude.md' "$REPO_ROOT/flight/skills/queue-batches/SKILL.md"
