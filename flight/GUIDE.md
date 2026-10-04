@@ -399,7 +399,8 @@ estimated cost — to a gitignored `.flightdirector/prompt-log.jsonl`. **Claude 
 write the same file with the same schema**, so a project worked from both (even at once) has one
 ledger, and `flight prompt-log summary --session <id>` renders the per-model totals the
 ledger comment pastes in. Cost is priced from a bundled table you can extend per repo
-(`.flightdirector/pricing.json`); under a subscription login it is labelled `api-equivalent` —
+(`.flightdirector/pricing.json`), and `summary` prices each row again from its tokens, so a
+pricing fix also corrects turns already logged; under a subscription login it is labelled `api-equivalent` —
 what the tokens *would* cost via the API, good for comparing issues, not a bill. Unknown models
 and unreadable transcripts show up as `null` with a warning, never as a silent zero. Full schema
 and semantics: [prompt-log.md](references/prompt-log.md).

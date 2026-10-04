@@ -56,7 +56,7 @@ assert_jq "input_tokens is the TOTAL prompt (uncached + cache write + cache read
 assert_jq "output and reasoning tokens summed once per request" '.output_tokens==500 and .reasoning_output_tokens==120' "$LOG"
 assert_jq "cache counters summed" '.cache_creation_tokens==1500 and .cache_read_tokens==41000' "$LOG"
 # fable-5 family: uncached 15 @10, cache write 1500 @12.5, cache read 41000 @1.0, output 500 @50  (per million)
-assert_jq "cost uses the bundled family pricing for claude-fable-5-1" '(.cost_usd*1e9|round) == ((15*10 + 1500*12.5 + 41000*1.0 + 500*50)/1e6*1e9|round)' "$LOG"
+assert_jq "cost uses the bundled family pricing for claude-fable-5-1" '(.cost_usd*1e9|round) == ((15*10 + 1500*12.5 + 41000*0.25 + 500*50)/1e6*1e9|round)' "$LOG"
 assert_jq "cost_basis defaults to api-equivalent without an API key" '.cost_basis=="api-equivalent"' "$LOG"
 assert_jq "duration is recorded" '.duration_seconds != null and .duration_seconds > 0' "$LOG"
 check "no warnings on a clean main turn" "$([ ! -s "$T/main.err" ] && echo 1 || echo 0)"
@@ -200,7 +200,10 @@ cat >"$R/.flightdirector/prompt-log.jsonl" <<'EOF'
 {"timestamp":"2026-09-06T12:04:00+00:00","session_id":"S2","prompt":"other session","model":"claude-sonnet-4-6","input_tokens":1,"output_tokens":1,"cache_creation_tokens":0,"cache_read_tokens":0,"cost_usd":9.0,"duration_seconds":1}
 EOF
 J="$(cd "$R" && "$DISP" prompt-log summary --session S1 --json)"
-check "summary filters to the session" "$(jq -e '.rows==4 and .cost_usd==0.85' <<<"$J" >/dev/null && echo 1 || echo 0)"
+# re-priced from the tokens (FJ-270): fable-5-1 100 uncached x10 + 900 read x0.25 + 100 out x50;
+# gpt-5.6-sol 2000 x4 + 200 out x20; opus-5 500 x5 + 50 out x25 — the logged 0.85 is not used
+check "summary filters to the session" "$(jq -e '.rows==4 and (.cost_usd*1e6|round)==21975' <<<"$J" >/dev/null && echo 1 || echo 0)"
+check "summary --as-logged sums the logged costs" "$(cd "$R" && "$DISP" prompt-log summary --session S1 --json --as-logged | jq -e '.cost_usd==0.85' >/dev/null && echo 1 || echo 0)"
 check "summary groups per harness/provider/model" "$(jq -e '(.groups|length)==3 and (.groups[]|select(.model=="claude-fable-5-1")|.rows)==2' <<<"$J" >/dev/null && echo 1 || echo 0)"
 check "summary counts unmeasured and subagent rows" "$(jq -e '.unmeasured_rows==1 and .subagent_rows==1' <<<"$J" >/dev/null && echo 1 || echo 0)"
 MD="$(cd "$R" && "$DISP" prompt-log summary --session S1)"
@@ -260,6 +263,63 @@ check "json output still carries the 'unknown' group (trimming is render-only)" 
 MD7="$(cd "$R" && "$DISP" prompt-log summary --session S5)"
 check "an 'unknown' row with tokens but no price is kept, marked unpriced" "$(grep -q '| claude | unknown | 1 | .* (+1 unpriced) |' <<<"$MD7" && echo 1 || echo 0)"
 check "…and no omitted-turns note is emitted for it" "$(grep -q 'recorded no model' <<<"$MD7" && echo 0 || echo 1)"
+
+# ---------------------------------------------------------------------------
+# 7. pricing (FJ-270): current rates, 5-minute vs 1-hour cache writes, a turn that
+#    spans models keeps each model's usage, and summary re-prices from the tokens
+# ---------------------------------------------------------------------------
+PRICE() {	# PRICE <repo> <model> <usage-json>  → common.price_usage, printed
+	python3 -c '
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from common import price_usage
+print(price_usage(Path(sys.argv[2]), sys.argv[3], json.loads(sys.argv[4])))
+' "$ROOT/flight/scripts/prompt-logger" "$@"
+}
+R="$T/pricing"; make_repo "$R" true
+ISSUE='{"input_tokens":1110000,"output_tokens":100000,"reasoning_output_tokens":0,"cache_creation_tokens":100000,"cache_creation_1h_tokens":100000,"cache_read_tokens":1000000}'
+check "Opus 5.5 at published rates: the issue's worked request costs \$3.04" "$([ "$(PRICE "$R" claude-opus-5-5 "$ISSUE")" = 3.04 ] && echo 1 || echo 0)"
+check "a [1m] context tag prices as its base model" "$([ "$(PRICE "$R" 'claude-opus-5-5[1m]' "$ISSUE")" = 3.04 ] && echo 1 || echo 0)"
+FIVE='{"input_tokens":1110000,"output_tokens":100000,"reasoning_output_tokens":0,"cache_creation_tokens":100000,"cache_read_tokens":1000000}'
+check "cache writes with no 1-hour split price at the 5-minute rate" "$([ "$(PRICE "$R" claude-opus-5-5 "$FIVE")" = 2.74 ] && echo 1 || echo 0)"
+check "Sonnet 5.x priced at \$2/\$10 with \$0.20 cache reads" "$([ "$(PRICE "$R" claude-sonnet-5-5 "$FIVE")" = 1.47 ] && echo 1 || echo 0)"
+check "Fable 5.1 cache reads at \$0.25, Fable 5 at \$1" "$([ "$(PRICE "$R" claude-fable-5-1 "$FIVE")" = 6.6 ] && [ "$(PRICE "$R" claude-fable-5 "$FIVE")" = 7.35 ] && echo 1 || echo 0)"
+printf '%s\n' '{"families":{"claude-opus-5-5":{"input_per_million":4,"output_per_million":20,"cache_creation_per_million":5,"cache_read_per_million":0.2}}}' >"$R/.flightdirector/pricing.json"
+check "an override without a 1-hour rate falls back to its 5-minute rate" "$([ "$(PRICE "$R" claude-opus-5-5 "$ISSUE")" = 2.74 ] && echo 1 || echo 0)"
+rm "$R/.flightdirector/pricing.json"
+
+S="$T/state-ttl"; LOG="$R/.flightdirector/prompt-log.jsonl"
+invoke prompt "$(jq -nc --arg cwd "$R" '{session_id:"session-ttl",cwd:$cwd,hook_event_name:"UserPromptSubmit",prompt:"ttl prompt"}')" "$R" "$S"; backdate_state "$S"
+invoke stop "$(jq -nc --arg cwd "$R" --arg path "$FIXTURES/claude-cache-ttl.jsonl" '{session_id:"session-ttl",cwd:$cwd,hook_event_name:"Stop",transcript_path:$path}')" "$R" "$S" 2>/dev/null
+assert_jq "the 1-hour share of the cache writes is recorded" '.cache_creation_tokens==3500 and .cache_creation_1h_tokens==1300' "$LOG"
+assert_jq "a turn that spans models keeps each model's usage" '.usage_by_model["claude-opus-5-5"].output_tokens==500 and .usage_by_model["claude-opus-5-5"].cache_creation_1h_tokens==1300 and .usage_by_model["claude-sonnet-5-5"].cache_creation_tokens==2000 and .usage_by_model["claude-sonnet-5-5"].cache_creation_1h_tokens==0' "$LOG"
+# opus-5-5: 15 uncached x4, 200 5m x5, 1300 1h x8, 41000 read x0.2, 500 out x20; sonnet-5-5: 3 x2, 2000 5m x2.5, 50 out x10
+assert_jq "each model is priced at its own rates, each cache write at its own TTL" '(.cost_usd*1e9|round) == (((15*4 + 200*5 + 1300*8 + 41000*0.2 + 500*20) + (3*2 + 2000*2.5 + 50*10))/1e6*1e9|round)' "$LOG"
+
+# an agent that changes model between stops: its per-model usage is an increment too
+R="$T/inc-models"; S="$T/state-inc-models"; make_repo "$R" true; LOG="$R/.flightdirector/prompt-log.jsonl"
+sed 's/"isSidechain":false/"isSidechain":true/' "$FIXTURES/claude-cache-ttl.jsonl" >"$T/sidechain-ttl.jsonl"
+stop_at agent-switch "$T/sidechain-ttl.jsonl" 3	# opus-5-5 only so far
+stop_at agent-switch "$T/sidechain-ttl.jsonl" 4	# then a sonnet-5-5 request
+check "the first stop (one model) records no per-model split" "$(jq -se '.[0].usage_by_model==null and .[0].model=="claude-opus-5-5"' "$LOG" >/dev/null && echo 1 || echo 0)"
+check "the next stop's per-model usage holds only what it added" "$(jq -se '.[1].usage_by_model|keys==["claude-sonnet-5-5"] and .["claude-sonnet-5-5"].output_tokens==50' "$LOG" >/dev/null && echo 1 || echo 0)"
+check "re-priced, the agent's rows cost what the turn did" "$(python3 "$ROOT/flight/scripts/prompt-logger/summary.py" --log "$LOG" --session session-main --json | jq -e '(.cost_usd*1e9|round) == ((((15*4 + 200*5 + 1300*8 + 41000*0.2 + 500*20) + (3*2 + 2000*2.5 + 50*10))/1e6)*1e9|round)' >/dev/null && echo 1 || echo 0)"
+
+# summary prices from the stored tokens, so a pricing fix reaches turns already logged
+R="$T/reprice"; make_repo "$R" true
+cat >"$R/.flightdirector/prompt-log.jsonl" <<'EOF'
+{"timestamp":"2026-09-06T12:00:00+00:00","provider":"anthropic","harness":"claude","session_id":"R1","turn_id":"r1","prompt":"stale","model":"claude-opus-5-5","input_tokens":1110000,"output_tokens":100000,"reasoning_output_tokens":0,"cache_creation_tokens":100000,"cache_creation_1h_tokens":100000,"cache_read_tokens":1000000,"cost_usd":3.675,"cost_basis":"api-equivalent","duration_seconds":1}
+{"timestamp":"2026-09-06T12:01:00+00:00","provider":"anthropic","harness":"claude","session_id":"R1","turn_id":"r2","prompt":"legacy multi-model","model":"claude-opus-5","input_tokens":100,"output_tokens":10,"reasoning_output_tokens":0,"cache_creation_tokens":0,"cache_read_tokens":0,"cost_usd":1.5,"cost_basis":"api-equivalent","duration_seconds":1,"models":{"claude-opus-5":6,"claude-haiku-4-5":4}}
+{"timestamp":"2026-09-06T12:02:00+00:00","provider":"openai","harness":"codex","session_id":"R1","turn_id":"r3","prompt":"once unpriced","model":"gpt-7-nova","input_tokens":1000000,"output_tokens":0,"reasoning_output_tokens":0,"cache_creation_tokens":0,"cache_read_tokens":0,"cost_usd":null,"cost_basis":"api-equivalent","duration_seconds":1}
+EOF
+printf '%s\n' '{"models":{"gpt-7-nova":{"input_per_million":1,"output_per_million":1,"cache_read_per_million":0.1}}}' >"$R/.flightdirector/pricing.json"
+JR="$(cd "$R" && "$DISP" prompt-log summary --session R1 --json)"
+check "summary re-prices a stale row from its tokens (3.675 logged → 3.04)" "$(jq -e '(.groups[]|select(.model=="claude-opus-5-5")|.cost_usd*1e6|round)==3040000' <<<"$JR" >/dev/null && echo 1 || echo 0)"
+check "a row logged unpriced is priced once the override names its model" "$(jq -e '(.groups[]|select(.model=="gpt-7-nova")|.cost_usd==1 and .unpriced_rows==0) and .unpriced_models==[]' <<<"$JR" >/dev/null && echo 1 || echo 0)"
+check "a legacy multi-model row (no per-model usage) keeps its logged cost" "$(jq -e '(.groups[]|select(.model=="claude-opus-5")|.cost_usd)==1.5' <<<"$JR" >/dev/null && echo 1 || echo 0)"
+check "summary --as-logged adds up the stored costs instead" "$(cd "$R" && "$DISP" prompt-log summary --session R1 --json --as-logged | jq -e '(.cost_usd*1e6|round)==5175000 and (.unpriced_models|length)==1' >/dev/null && echo 1 || echo 0)"
+check "re-pricing is quiet (no per-row warnings on stderr)" "$( (cd "$R" && "$DISP" prompt-log summary --session R1 >/dev/null 2>"$T/reprice.err"); [ ! -s "$T/reprice.err" ] && echo 1 || echo 0)"
 
 # Summary: plain when nothing failed, red when something did (#123).
 [ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''

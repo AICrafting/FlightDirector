@@ -13,7 +13,24 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **Prompt-log pricing matches the published Claude rates** (FJ-270). Claude Opus 5.5 was priced
+  at Claude Opus 5 rates ($5/$25, cache reads $0.50); it is now $4/$20 with $0.20 cache reads.
+  Claude Sonnet 5 and 5.5 were priced at $3/$15; they are now $2/$10 with $0.20 cache reads.
+  Claude Fable 5.1 and Mythos 5.1 cache reads are now $0.25 (they were $1, the Fable 5 rate).
+- **Cache writes are priced by TTL** (FJ-270). Claude Code rows record the 1-hour share of their
+  cache writes (`cache_creation_1h_tokens`), which is priced at the new
+  `cache_creation_1h_per_million` rate (2× input) instead of the 5-minute rate (1.25×). A model id
+  with a context tag such as `claude-opus-5-5[1m]` is priced as its base model.
+
+### Changed
+
+- **`flight prompt-log summary` prices each row again from its stored tokens** (FJ-270), so a
+  pricing fix, bundled or in `.flightdirector/pricing.json`, also corrects turns logged before
+  it. A turn that spans models now records each model's usage (`usage_by_model`) so it can be
+  priced the same way. Rows that still cannot be priced keep their logged cost; `--as-logged`
+  sums the logged costs as before.
 
 ## [0.17.1] - 2026-10-03
 

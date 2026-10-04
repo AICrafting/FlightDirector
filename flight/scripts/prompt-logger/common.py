@@ -149,7 +149,7 @@ def append_record(repo_root: Path, record: dict[str, Any], record_key: str) -> b
 	return True
 
 
-USAGE_FIELDS = ("input_tokens", "output_tokens", "reasoning_output_tokens", "cache_creation_tokens", "cache_read_tokens")
+USAGE_FIELDS = ("input_tokens", "output_tokens", "reasoning_output_tokens", "cache_creation_tokens", "cache_creation_1h_tokens", "cache_read_tokens")
 
 
 def append_increment(repo_root: Path, record: dict[str, Any]) -> bool:
@@ -189,6 +189,7 @@ def append_increment(repo_root: Path, record: dict[str, Any]) -> bool:
 			grew = grew or record[field] > 0
 		if not grew:
 			return False
+		_subtract_by_model(record, measured)
 		if _is_number(record.get("cost_usd")):
 			logged = sum(row["cost_usd"] for row in measured if _is_number(row.get("cost_usd")))
 			record["cost_usd"] = max(round(record["cost_usd"] - logged, 12), 0.0)
@@ -196,6 +197,29 @@ def append_increment(repo_root: Path, record: dict[str, Any]) -> bool:
 			record["part"] = len(measured) + 1
 		_write_row(log_path, record)
 	return True
+
+
+def _subtract_by_model(record: dict[str, Any], earlier: list[dict[str, Any]]) -> None:
+	"""Make a cumulative `usage_by_model` an increment, as append_increment does the totals.
+	An earlier row whose split was never recorded leaves no way to attribute it, so the
+	split is dropped and summary falls back to the row's logged cost."""
+	split = record.get("usage_by_model")
+	if not isinstance(split, dict):
+		return
+	for row in earlier:
+		logged = row_usage_by_model(row)
+		if logged is None:
+			del record["usage_by_model"]
+			return
+		for model, usage in logged.items():
+			bucket = split.get(model)
+			if not isinstance(bucket, dict) or not isinstance(usage, dict):
+				continue
+			for field, value in bucket.items():
+				if _is_number(value) and _is_number(usage.get(field)):
+					bucket[field] = max(value - usage[field], 0)
+	for model in [m for m, u in split.items() if not any(_is_number(v) and v > 0 for v in u.values())]:
+		del split[model]
 
 
 def _is_number(value: Any) -> bool:
@@ -259,7 +283,7 @@ def _lock_exclusive(handle, timeout: float = 60.0) -> None:
 			time.sleep(0.05)
 
 
-def _merged_pricing(repo_root: Path) -> dict[str, Any] | None:
+def merged_pricing(repo_root: Path) -> dict[str, Any] | None:
 	base_path = Path(__file__).with_name("pricing.json")
 	override_path = repo_root / ".flightdirector" / "pricing.json"
 	merged: dict[str, Any] = {}
@@ -294,6 +318,7 @@ def _rate(entry: dict[str, Any], name: str) -> float | None:
 		"output": ("output_per_million", "output_usd_per_million"),
 		"cache_read": ("cache_read_per_million", "cached_input_per_million", "cache_read_usd_per_million"),
 		"cache_creation": ("cache_creation_per_million", "cache_write_per_million", "cache_creation_usd_per_million"),
+		"cache_creation_1h": ("cache_creation_1h_per_million", "cache_write_1h_per_million"),
 	}
 	for key in aliases[name]:
 		value = entry.get(key)
@@ -302,47 +327,116 @@ def _rate(entry: dict[str, Any], name: str) -> float | None:
 	return None
 
 
-def price_usage(repo_root: Path, model: str | None, usage: dict[str, int] | None) -> float | None:
+def _pricing_entry(pricing: dict[str, Any], model: str) -> dict[str, Any] | None:
+	"""The rates for `model`: an exact `models` id, else the longest `families` prefix.
+	A trailing context tag (`claude-opus-5-5[1m]`) is not part of the price: an exact
+	`models` entry for the tagged id still wins, but otherwise the id is looked up
+	without it (as a prefix, the tagged id would match the wrong family)."""
+	models = pricing.get("models", pricing)
+	models = models if isinstance(models, dict) else {}
+	entry = models.get(model)
+	if isinstance(entry, dict):
+		return entry
+	if model.endswith("]") and "[" in model:
+		model = model[:model.index("[")]
+		entry = models.get(model)
+		if isinstance(entry, dict):
+			return entry
+	families = pricing.get("families", {})
+	if isinstance(families, dict):
+		matches = [key for key in families if model == key or model.startswith(f"{key}-")]
+		if matches:
+			candidate = families[max(matches, key=len)]
+			return candidate if isinstance(candidate, dict) else None
+	return None
+
+
+def price_usage(
+	repo_root: Path, model: str | None, usage: dict[str, int] | None,
+	quiet: bool = False, pricing: dict[str, Any] | None = None,
+) -> float | None:
+	"""USD for one model's usage, or None when it cannot be priced (a warning says why
+	unless `quiet`). `pricing` lets a caller pricing many rows merge the files once."""
 	if usage is None or not model:
 		return None
-	pricing = _merged_pricing(repo_root)
+	if pricing is None:
+		pricing = merged_pricing(repo_root)
 	if pricing is None:
 		return None
+	say = (lambda message: None) if quiet else warn
 
-	models = pricing.get("models", pricing)
-	entry = models.get(model) if isinstance(models, dict) else None
+	entry = _pricing_entry(pricing, model)
 	if not isinstance(entry, dict):
-		families = pricing.get("families", {})
-		if isinstance(families, dict):
-			matches = [key for key in families if model == key or model.startswith(f"{key}-")]
-			if matches:
-				candidate = families[max(matches, key=len)]
-				entry = candidate if isinstance(candidate, dict) else None
-	if not isinstance(entry, dict):
-		warn(f"no pricing entry for model {model}; cost_usd is null")
+		say(f"no pricing entry for model {model}; cost_usd is null")
 		return None
 
 	input_rate = _rate(entry, "input")
 	output_rate = _rate(entry, "output")
 	if input_rate is None or output_rate is None:
-		warn(f"pricing entry for model {model} lacks input/output per-million rates; cost_usd is null")
+		say(f"pricing entry for model {model} lacks input/output per-million rates; cost_usd is null")
 		return None
 
 	input_tokens = usage["input_tokens"]
 	cache_read = usage["cache_read_tokens"]
 	cache_creation = usage["cache_creation_tokens"]
+	# The 1-hour share of the cache writes, when the producer could tell (Claude Code can);
+	# the rest are 5-minute writes. An entry with no 1-hour rate prices both alike.
+	cache_creation_1h = usage.get("cache_creation_1h_tokens")
+	cache_creation_1h = min(cache_creation_1h, cache_creation) if _is_number(cache_creation_1h) and cache_creation_1h > 0 else 0
 	uncached_input = max(input_tokens - cache_read - cache_creation, 0)
 	cache_read_rate = _rate(entry, "cache_read")
 	cache_creation_rate = _rate(entry, "cache_creation")
+	cache_creation_1h_rate = _rate(entry, "cache_creation_1h")
+	if cache_creation_1h_rate is None:
+		cache_creation_1h_rate = cache_creation_rate
 	if cache_read and cache_read_rate is None:
-		warn(f"pricing entry for model {model} lacks a cache-read rate; cost_usd is null")
+		say(f"pricing entry for model {model} lacks a cache-read rate; cost_usd is null")
 		return None
 	if cache_creation and cache_creation_rate is None:
-		warn(f"pricing entry for model {model} lacks a cache-creation rate; cost_usd is null")
+		say(f"pricing entry for model {model} lacks a cache-creation rate; cost_usd is null")
 		return None
 
 	cost = uncached_input * input_rate
 	cost += cache_read * (cache_read_rate or 0.0)
-	cost += cache_creation * (cache_creation_rate or 0.0)
+	cost += (cache_creation - cache_creation_1h) * (cache_creation_rate or 0.0)
+	cost += cache_creation_1h * (cache_creation_1h_rate or 0.0)
 	cost += usage["output_tokens"] * output_rate
 	return round(cost / 1_000_000, 12)
+
+
+def row_usage_by_model(row: dict[str, Any]) -> dict[str, dict[str, int]] | None:
+	"""A ledger row's usage per model: its `usage_by_model` when the turn spanned models,
+	else all of it under `model`. None when the row is unmeasured, or when it is an older
+	multi-model row that kept only output tokens per model (`models`), so its split is lost."""
+	recorded = row.get("usage_by_model")
+	if isinstance(recorded, dict) and recorded:
+		return recorded
+	if isinstance(row.get("models"), dict) and len(row["models"]) > 1:
+		return None
+	model = row.get("model")
+	if not isinstance(model, str) or not model:
+		return None
+	usage = {field: row.get(field) for field in USAGE_FIELDS}
+	for field in ("input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens"):
+		if not _is_number(usage[field]):
+			if field in ("input_tokens", "output_tokens"):
+				return None
+			usage[field] = 0
+	return {model: usage}
+
+
+def price_row(repo_root: Path, row: dict[str, Any], pricing: dict[str, Any] | None) -> float | None:
+	"""Price a ledger row from its stored tokens at today's rates, quietly; None when any
+	part of it cannot be priced (the caller then falls back to the logged `cost_usd`)."""
+	by_model = row_usage_by_model(row)
+	if not by_model or pricing is None:
+		return None
+	cost = 0.0
+	for model, usage in by_model.items():
+		if not isinstance(usage, dict):
+			return None
+		part = price_usage(repo_root, model, usage, quiet=True, pricing=pricing)
+		if part is None:
+			return None
+		cost += part
+	return round(cost, 12)

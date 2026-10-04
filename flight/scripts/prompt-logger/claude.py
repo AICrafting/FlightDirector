@@ -108,7 +108,7 @@ def save_prompt(event: dict[str, Any]) -> None:
 
 
 def empty_usage() -> dict[str, int]:
-	return {"input_tokens": 0, "output_tokens": 0, "reasoning_output_tokens": 0, "cache_creation_tokens": 0, "cache_read_tokens": 0}
+	return {"input_tokens": 0, "output_tokens": 0, "reasoning_output_tokens": 0, "cache_creation_tokens": 0, "cache_creation_1h_tokens": 0, "cache_read_tokens": 0}
 
 
 def add_usage(total: dict[str, int], usage: dict[str, Any]) -> bool:
@@ -136,6 +136,13 @@ def add_usage(total: dict[str, int], usage: dict[str, Any]) -> bool:
 	total["output_tokens"] += output
 	total["reasoning_output_tokens"] += reasoning
 	total["cache_creation_tokens"] += cache_creation
+	# `cache_creation` splits the writes by TTL; a 1-hour write costs 2x input, a
+	# 5-minute one 1.25x. Without the split every write is priced as 5-minute.
+	split = usage.get("cache_creation")
+	if isinstance(split, dict):
+		hour = split.get("ephemeral_1h_input_tokens", 0)
+		if isinstance(hour, int) and not isinstance(hour, bool) and hour > 0:
+			total["cache_creation_1h_tokens"] += min(hour, cache_creation)
 	total["cache_read_tokens"] += cache_read
 	return True
 
@@ -329,13 +336,16 @@ def make_record(event: dict[str, Any], delegated: bool) -> tuple[Path, dict[str,
 		"cache_creation_tokens": usage["cache_creation_tokens"] if usage else None,
 		"cache_read_tokens": usage["cache_read_tokens"] if usage else None,
 		"cost_usd": cost,
-		"cost_basis": auth_cost_basis() if cost is not None else None,
+		"cost_basis": auth_cost_basis() if usage else None,
 		"duration_seconds": round(duration, 3) if duration is not None else None,
 	}
 	if usage is None:
 		record["usage_missing"] = parsed["missing"]
+	else:
+		record["cache_creation_1h_tokens"] = usage["cache_creation_1h_tokens"]
 	if by_model and len(by_model) > 1:
 		record["models"] = {m: u["output_tokens"] for m, u in by_model.items()}
+		record["usage_by_model"] = by_model	# so summary can price each model again later
 	if delegated:
 		record["subagent"] = True
 		record.update(agent_lineage(transcript if isinstance(transcript, str) else None))
