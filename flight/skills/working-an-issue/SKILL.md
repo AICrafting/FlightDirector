@@ -134,7 +134,7 @@ merge config fields or hand-merge here. Config + verbs:
   comment contradicts the body, the later comment wins — work to that, and say so explicitly.
 - **Check what blocks it.** Right after the thread:
   ```
-  flight issues blockers --tracker "$TRACKER" --number "$NUMBER"
+  flight issues blockers --number "$QUALIFIED"
   ```
   Each row is `id⇥title⇥state⇥native|text`. An **open** blocker goes in the pickup line
   ("read #12: body + 2 comments; blocked by GH-3 (open)"), and you **ask before starting**: the

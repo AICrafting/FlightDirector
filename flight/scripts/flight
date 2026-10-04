@@ -335,7 +335,7 @@ handoff() {
         # caller would file it again): fall back to the fields already known, and say
         # so on stderr.
         js_number="$(tr -d '[:space:]' <"$json_out")"
-        if ! env -u FLIGHT_ERROR_FILE -u LS_JSON "$SELF_DIR/flight" issues get --number "$js_number" \
+        if ! env -u FLIGHT_ERROR_FILE -u LS_JSON FLIGHT_NO_DEPS=1 "$SELF_DIR/flight" issues get --number "$js_number" \
             ${json_tracker:+--tracker "$json_tracker"} --json >"$json_out.done" 2>/dev/null; then
           echo "flight: warning — created #$js_number but could not read it back; returning the known fields only" >&2
           jq -cn --arg n "$js_number" --arg t "$js_title" \

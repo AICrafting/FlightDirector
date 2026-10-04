@@ -121,6 +121,15 @@ has_status_record() {
 		| last | (.body // "") | contains("(was ")' <<<"$1" >/dev/null
 }
 
+# has_status_comment COMMENTS_JSON ID — does Q's latest signed `**Status: blocked**` comment
+# already name ID as the blocker? (A rerun after set-status failed must not post it twice.)
+has_status_comment() {
+	jq -e --arg id "$2" '
+		[.[] | select(.signature != null) | ((.body // "") | split("\n")[0] | sub("\r$"; ""))
+		 | select(startswith("**Status: blocked**"))]
+		| last // "" | ascii_downcase | endswith("blocked by \($id | ascii_downcase)")' <<<"$1" >/dev/null
+}
+
 # collect blockers|blocking — this issue's links as [{id, title, state, via}]: the native rows
 # first (skipped when the backend has none), then the text record's ids not already listed.
 collect() {
@@ -149,8 +158,24 @@ collect() {
 # post QUALIFIED TEXT — one signed comment (signed even where a repo turned signatures off:
 # reading the record back depends on it).
 post() {
+	local r
+	r="$(post_try "$@")"
+	[ -z "$r" ] || fail "$(err_code "$r")" "$(err_msg "$r")"
+}
+
+# post_try QUALIFIED TEXT — post, but a failure prints `!CODE<TAB>MESSAGE` and returns, so the
+# caller can say what is already done (a partial write names the missing piece).
+post_try() {
+	local r
 	printf '%s\n' "$2" >"$TMP/body.md"
-	fl issues comment --number "$1" --body-file "$TMP/body.md" --signature ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} >/dev/null
+	r="$(fl_try issues comment --number "$1" --body-file "$TMP/body.md" --signature ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"})"
+	case "$r" in '!'*) printf '%s\n' "$r" ;; esac
+}
+
+# partial DONE WHAT_FAILED ISSUE RESULT — stop with the failed call's code, saying what is
+# already done, what failed, and that rerunning the verb finishes it.
+partial() {
+	fail "$(err_code "$4")" "$1 but $2 on $3 failed ($(err_msg "$4")); rerun 'flight issues $VERB --number $Q --by $BQ'"
 }
 
 # status_roles TRACKER — the tracker's configured status roles, {role: label} (declined roles left out).
@@ -207,12 +232,21 @@ if [ "$VERB" = block ]; then
 		BC="$(fl issues comments --number "$BQ")"
 		MIRROR="$(text_links "$BC" mirror)"
 		if ! grep -Fxq -- "$UQ" <<<"$MIRROR"; then
-			post "$BQ" "**Blocks $Q**: $(jq -r '.title' <<<"$ISSUE_J")"
+			R="$(post_try "$BQ" "**Blocks $Q**: $(jq -r '.title' <<<"$ISSUE_J")")"
+			[ -z "$R" ] || partial "posted the marker on $Q" "the mirror" "$BQ" "$R"
 		fi
 	fi
 	if [ -n "$SET_TO" ]; then
-		[ "$RECORDED" = 1 ] || post "$Q" "**Status: blocked** (was $WAS), blocked by $BQ"
-		fl issues set-status --number "$Q" --status blocked >/dev/null
+		DONE="added the native link"; [ "$VIA" = native ] || DONE="posted the comments"
+		if [ "$RECORDED" != 1 ]; then
+			QC="$(fl issues comments --number "$Q")"
+			if ! has_status_comment "$QC" "$BQ"; then
+				R="$(post_try "$Q" "**Status: blocked** (was $WAS), blocked by $BQ")"
+				[ -z "$R" ] || partial "$DONE" "the status comment" "$Q" "$R"
+			fi
+		fi
+		R="$(fl_try issues set-status --number "$Q" --status blocked)"
+		case "$R" in '!'*) partial "$DONE" "setting the status" "$Q" "$R" ;; esac
 	fi
 
 	if [ "${LS_JSON:-}" = 1 ]; then
@@ -240,7 +274,13 @@ fi
 QC="$(fl issues comments --number "$Q")"
 LINKS="$(text_links "$QC" blocked)"
 if grep -Fxq -- "$UBQ" <<<"$LINKS"; then
-	post "$Q" "**No longer blocked by $BQ**"
+	R="$(post_try "$Q" "**No longer blocked by $BQ**")"
+	if [ -n "$R" ]; then
+		case " ${REMOVED[*]-} " in
+			*" native "*) partial "removed the native link" "the comment" "$Q" "$R" ;;
+			*) fail "$(err_code "$R")" "$(err_msg "$R")" ;;
+		esac
+	fi
 	REMOVED+=(text)
 fi
 # A blocker that no longer exists has no comments to mirror onto: skip, don't stop.
@@ -252,7 +292,8 @@ case "$BC" in
 	*) MIRROR="$(text_links "$BC" mirror)" ;;
 esac
 if grep -Fxq -- "$UQ" <<<"$MIRROR"; then
-	post "$BQ" "**No longer blocks $Q**"
+	R="$(post_try "$BQ" "**No longer blocks $Q**")"
+	[ -z "$R" ] || partial "posted the comment on $Q" "the mirror" "$BQ" "$R"
 	case " ${REMOVED[*]-} " in *" text "*) ;; *) REMOVED+=(text) ;; esac
 fi
 
@@ -265,7 +306,9 @@ elif [ "$WANT_STATUS" = 1 ] && [ "$REMAINING" = "[]" ]; then
 	CURRENT="$(fl issues get --number "$Q")"
 	if [ "$(jq -r '.status // ""' <<<"$CURRENT")" = blocked ]; then
 		WAS="$(fl issues comments --number "$Q" | jq -r '[.[] | select(.signature != null) | (.body // "")
-			| [capture("\\(was (?<r>[a-z0-9-]+)\\)")] | first // empty | .r] | last // empty')"
+			| ((split("\n") | map(sub("\r$"; ""))) as $ls
+				| [($ls[] | capture("^Status: blocked \\(was (?<r>[a-z0-9-]+)\\)$")), ($ls[0] | capture("^\\*\\*Status: blocked\\*\\* \\(was (?<r>[a-z0-9-]+)\\), blocked by "))]
+				| first // empty | .r)] | last // empty')"
 		if [ -n "$WAS" ] && [ "$WAS" != none ] && [ "$WAS" != blocked ] && jq -e --arg r "$WAS" 'has($r)' <<<"$ROLES" >/dev/null; then
 			RESTORED="$WAS"
 		elif jq -e 'has("new")' <<<"$ROLES" >/dev/null; then

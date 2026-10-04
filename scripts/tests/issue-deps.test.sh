@@ -160,6 +160,8 @@ section "a mirror that failed is posted on the rerun"
 fresh; mk FJ 6 "Feature"; mk GH 2 "Upstream"
 RC=0; FAIL_COMMENT_ON=GH-2 FLIGHT_SELF="$STUB" FLIGHT_REPO_ROOT="$SANDBOX" "$HELPER" block --number FJ-6 --by GH-2 --no-status >/dev/null 2>"$SANDBOX/err" || RC=$?
 check "the failure is reported" "$([ "$RC" = 1 ] && grep -q 'GH-2' "$SANDBOX/err" && echo 1 || echo 0)" "rc=$RC $(cat "$SANDBOX/err")"
+check "it names what is done, what is missing, and to rerun" \
+	"$(grep -q "posted the marker on FJ-6 but the mirror on GH-2 failed" "$SANDBOX/err" && grep -q "rerun 'flight issues block --number FJ-6 --by GH-2'" "$SANDBOX/err" && echo 1 || echo 0)" "$(cat "$SANDBOX/err")"
 hd block --number FJ-6 --by GH-2 --no-status
 check "the rerun posts only the mirror" "$([ "$RC" = 0 ] && [ "$(ncomments FJ 6)" = 1 ] && [ "$(ncomments GH 2)" = 1 ] && echo 1 || echo 0)" "$(ncomments FJ 6)/$(ncomments GH 2)"
 
@@ -170,6 +172,20 @@ check "the first run fails on the mirror" "$([ "$RC" = 1 ] && echo 1 || echo 0)"
 hd block --number FJ-17 --by GH-3
 check "the rerun records the status once, ends blocked, and posts the mirror once" \
 	"$([ "$RC" = 0 ] && [ "$(status_of FJ 17)" = blocked ] && [ "$(ncomments FJ 17)" = 1 ] && [ "$(ncomments GH 3)" = 1 ] && comments FJ 17 | jq -e '[.[] | select(.body | contains("(was "))] | length == 1' >/dev/null && echo 1 || echo 0)" "rc=$RC $(comments FJ 17) / $(ncomments GH 3)"
+
+section "a native rerun after set-status failed posts one status comment"
+fresh; mk FJ 21 "Feature" in-progress; mk FJ 22 "Groundwork"
+jq -n '[{id:"1", body:"**Status: blocked** (was in-progress), blocked by fj-22", signature:{plugin:"flight"}}]' >"$STATE/FJ/21.comments.json"
+hd block --number FJ-21 --by FJ-22
+check "the status comment already there is not posted again" \
+	"$([ "$RC" = 0 ] && [ "$(status_of FJ 21)" = blocked ] && [ "$(ncomments FJ 21)" = 1 ] && echo 1 || echo 0)" "rc=$RC $(comments FJ 21)"
+
+section "the (was ...) scan reads only flight's Status shapes"
+fresh; mk FJ 23 "Feature" blocked; mk GH 1 "One"
+jq -n '[{id:"1", body:"**Blocked by GH-1**: One\n\nStatus: blocked (was in-progress)", signature:{plugin:"flight"}},
+	{id:"2", body:"Moved it back and forth: it was fine (was to-test) until Tuesday", signature:{plugin:"flight"}}]' >"$STATE/FJ/23.comments.json"
+hd unblock --number FJ-23 --by GH-1
+check "another signed comment mentioning (was to-test) does not steer the restore" "$([ "$RC" = 0 ] && [ "$(status_of FJ 23)" = in-progress ] && echo 1 || echo 0)" "rc=$RC $(status_of FJ 23)"
 
 section "a native failure other than unsupported stops the verb"
 fresh; mk FJ 18 "Feature" in-progress; mk FJ 19 "Groundwork"

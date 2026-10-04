@@ -93,7 +93,7 @@ check "copying-an-issue previews with --dry-run before copying" "$(has "$C" 'fli
 check "copying-an-issue scans the target for duplicates" "$(has "$C" 'flight issues list --tracker "$DST_T" --state open --limit 100')"
 check "filing-issues points copy requests at copying-an-issue" "$(has "$SK/filing-issues/SKILL.md" 'copying-an-issue')"
 
-check "working-an-issue checks open blockers before starting" "$(has "$W" 'issues blockers --tracker "$TRACKER" --number "$NUMBER"')"
+check "working-an-issue checks open blockers before starting" "$(has "$W" 'issues blockers --number "$QUALIFIED"')"
 check "triaging-issues names open blockers for blocked picks" "$(has "$SK/triaging-issues/SKILL.md" 'issues blockers')"
 check "filing-issues records dependencies with issues block" "$(has "$SK/filing-issues/SKILL.md" 'issues block --number')"
 
