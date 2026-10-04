@@ -73,19 +73,20 @@ grep -q $'\t' < <(head -1 <<<"$CMTS") && ok "comments header is author⇥timesta
 echo "── issues block / blockers / blocking / unblock (FJ-271) ──"
 # The rig writes a legacy (schema 2) config; the dependency verbs route by named tracker,
 # which needs schema 3 — migrate the throwaway workdir in place first.
-lsp reconcile --harness claude >/dev/null 2>&1
+lsp reconcile --harness claude >/dev/null 2>&1 || no "reconcile (schema 3 migration)"
 DA="$(lsp issues create --title "[rig] blocked" --body "dependency smoke")"
 DB="$(lsp issues create --title "[rig] blocker" --body "dependency smoke")"
 OUT="$(lsp issues block --number "$DA" --by "$DB" --no-status 2>&1)"
-VIA="$(sed -n 's/.*(\(native\|text\))$/\1/p' <<<"$OUT" | tail -n1)"
-[ -n "$VIA" ] && ok "block works ($VIA)" || no "block works" "$OUT"
+VIA="$(sed -nE 's/.*\((native|text)\)$/\1/p' <<<"$OUT" | tail -n1)"
+# Native, not text: pins the inwardIssue/outwardIssue direction in flight/scripts/adapters/jira/issues.
+[ "$VIA" = native ] && ok "block uses the native link ($VIA)" || no "block uses the native link" "via='$VIA' $OUT"
 OUT="$(lsp issues blockers --number "$DA")"
 grep -q "blocker	open	$VIA$" <<<"$OUT" && ok "blockers lists it ($VIA)" || no "blockers lists it" "$OUT"
 OUT="$(lsp issues blocking --number "$DB")"
 grep -q "blocked	open	$VIA$" <<<"$OUT" && ok "blocking lists the reverse" || no "blocking lists the reverse" "$OUT"
 lsp issues unblock --number "$DA" --by "$DB" --no-status >/dev/null
-OUT="$(lsp issues blockers --number "$DA")"
-[ -z "$OUT" ] && ok "unblock removes it" || no "unblock removes it" "$OUT"
+RC=0; OUT="$(lsp issues blockers --number "$DA" 2>&1)" || RC=$?
+[ "$RC" = 0 ] && [ -z "$OUT" ] && ok "unblock removes it" || no "unblock removes it" "rc=$RC $OUT"
 lsp issues close --number "$DA" >/dev/null; lsp issues close --number "$DB" >/dev/null
 
 echo "── close / reopen (workflow transitions) ──"
