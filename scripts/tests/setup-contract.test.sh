@@ -318,6 +318,22 @@ check "setting-up-a-repo migrates older schemas with reconcile, never by hand" \
 check "the breadcrumb example uses tracker-qualified branches" \
 	"$(says "$SETUP_SKILL" 'feature/<ref>-<N>-<slug>' && says "$SETUP_SKILL" '--tracker <REF>' && echo 1 || echo 0)"
 
+section "breadcrumb target file — AGENTS.md by default, no CLAUDE.md stub (FJ-246)"
+check "only AGENTS.md: the block goes in AGENTS.md and no CLAUDE.md is created" \
+	"$(ok says "$SETUP_SKILL" '| only `AGENTS.md` | Put the block in `AGENTS.md`. Don'"'"'t create a `CLAUDE.md`. |')"
+check "neither: only AGENTS.md is created" \
+	"$(ok says "$SETUP_SKILL" '| neither | Create `AGENTS.md` with the block — only `AGENTS.md`. |')"
+check "only CLAUDE.md: the block goes in CLAUDE.md as-is, no split" \
+	"$(ok says "$SETUP_SKILL" '| only `CLAUDE.md` | Put the block in `CLAUDE.md` and use it as-is — no `AGENTS.md`, no split. |')"
+check "both: the block goes in AGENTS.md, with the @AGENTS.md import offer kept" \
+	"$(ok says "$SETUP_SKILL" '| both | Put the block in `AGENTS.md`. If `CLAUDE.md` has no `@AGENTS.md` import, offer to add one at its top. |')"
+check "the skill no longer offers to create a CLAUDE.md containing @AGENTS.md" \
+	"$(! grep -qiE 'create (one|a `CLAUDE\.md`) contain|a `CLAUDE\.md` containing `@AGENTS\.md`' "$SETUP_SKILL" && echo 1 || echo 0)"
+check "the skill no longer recommends splitting a CLAUDE.md-only repo" \
+	"$(! grep -qi 'Recommend the split' "$SETUP_SKILL" && echo 1 || echo 0)"
+check "the description no longer says AGENTS.md is imported by CLAUDE.md" \
+	"$(! grep -q 'imported by CLAUDE.md' <<<"$(sed -n '/^description:/p' "$SETUP_SKILL")" && echo 1 || echo 0)"
+
 section "skill inventories"
 skills_dir="$(find "$REPO_ROOT/flight/skills" -mindepth 2 -maxdepth 2 -name SKILL.md | sed 's#/SKILL.md$##; s#.*/##' | sort)"
 readme_rows="$(grep -oE '^\| `[a-z-]+` \|' "$REPO_ROOT/flight/README.md" | tr -d '|` ' | sort)"

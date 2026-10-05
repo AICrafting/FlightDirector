@@ -1,6 +1,6 @@
 ---
 name: setting-up-a-repo
-description: Use when setting up a repo for flight for the first time — "set up this repo", "set up flight", "configure flight", "set up labels", "bootstrap labels", "add the default labels" — when filing/triage reveals the repo has no flight config or few labels, when re-running setup after an upgrade to pick up new questions, or when retrofitting the backend breadcrumb onto an already-configured repo ("add the flight note/breadcrumb", "add it to AGENTS.md"). Writes the flight config + secrets (code coordinates, stage pipeline, worker model, prompt ledger, preflight gate), hands the issue tracker — coordinates, ref, credential, label reconcile, starting status — to add-an-issue-tracker, and leaves a backend breadcrumb in the repo's agent instructions (AGENTS.md, imported by CLAUDE.md).
+description: Use when setting up a repo for flight for the first time — "set up this repo", "set up flight", "configure flight", "set up labels", "bootstrap labels", "add the default labels" — when filing/triage reveals the repo has no flight config or few labels, when re-running setup after an upgrade to pick up new questions, or when retrofitting the backend breadcrumb onto an already-configured repo ("add the flight note/breadcrumb", "add it to AGENTS.md"). Writes the flight config + secrets (code coordinates, stage pipeline, worker model, prompt ledger, preflight gate), hands the issue tracker — coordinates, ref, credential, label reconcile, starting status — to add-an-issue-tracker, and leaves a backend breadcrumb in the repo's agent instructions (AGENTS.md by default; CLAUDE.md only when it's the repo's sole instructions file).
 ---
 
 # Setting Up a Repo
@@ -359,17 +359,21 @@ directory alone hasn't proven loud enough to stop that. So finish setup by writi
 into the repo's agent instructions (they load every session; a memory directory is per-user and
 doesn't travel with the repo).
 
-**Which file.** flight runs under Claude Code *and* Codex, and they read different files: Codex
-auto-discovers `AGENTS.md` (and never reads `CLAUDE.md` unless a user configures it as a
-fallback); Claude Code reads `CLAUDE.md`, which can import `AGENTS.md` with a bare `@AGENTS.md`
-line. So the block belongs in **`AGENTS.md`**, with `CLAUDE.md` importing it — one source, both
-harnesses. Resolve the target like this, and tell the user which case applied:
+**Which file.** flight runs under Claude Code *and* Codex, and both read `AGENTS.md`: Codex
+auto-discovers it (and never reads `CLAUDE.md` unless a user configures it as a fallback), and
+Claude Code reads it whenever the repo has no `CLAUDE.md`. So `AGENTS.md` is the default home
+for the block — one source, both harnesses — and flight never creates a `CLAUDE.md` stub just
+to import it. Resolve the target like this, and tell the user which case applied:
 
 | Repo has | Do |
 |---|---|
-| `AGENTS.md` (with or without `CLAUDE.md`) | Put the block in `AGENTS.md`. If `CLAUDE.md` exists and has no `@AGENTS.md` import, offer to add one at its top; if there is no `CLAUDE.md`, offer to create one containing just `@AGENTS.md`. |
-| only `CLAUDE.md` | Recommend the split: create `AGENTS.md` with the block, add `@AGENTS.md` at the top of `CLAUDE.md`. If the user says they don't use Codex and would rather keep a single file, put the block in `CLAUDE.md` instead — their call. |
-| neither | Create `AGENTS.md` with the block and a `CLAUDE.md` containing `@AGENTS.md`. |
+| only `AGENTS.md` | Put the block in `AGENTS.md`. Don't create a `CLAUDE.md`. |
+| neither | Create `AGENTS.md` with the block — only `AGENTS.md`. |
+| only `CLAUDE.md` | Put the block in `CLAUDE.md` and use it as-is — no `AGENTS.md`, no split. |
+| both | Put the block in `AGENTS.md`. If `CLAUDE.md` has no `@AGENTS.md` import, offer to add one at its top. |
+
+The import offer in the "both" row stays because Claude Code falls back to `AGENTS.md` only when
+`CLAUDE.md` is absent, so without the import a block in `AGENTS.md` never reaches Claude.
 
 Don't suggest a symlink (`CLAUDE.md -> AGENTS.md`): it breaks on Windows without Developer
 Mode and leaves no room for Claude-only notes. The import is the documented pattern.
@@ -423,8 +427,9 @@ default").
 
 **Offer a local-notes file for anything private.** Notes that must not be published — the real
 host of a self-hosted forge, homelab caveats, personal conventions — go in a **gitignored
-`AGENTS.local.md`** next to `AGENTS.md`, and `AGENTS.md` gets a short section that pulls it in
-for both harnesses:
+`AGENTS.local.md`** next to the file the block went in, and that file (`AGENTS.md`, or
+`CLAUDE.md` in the only-`CLAUDE.md` case) gets a short section that pulls it in for both
+harnesses:
 
 ```markdown
 ## Additional local notes
@@ -446,8 +451,9 @@ creating the file, then create it with a heading and the notes they dictate.
 pre-rename "Issue tracking — lightspeed" one — update it in place (the backend or trackers may
 have changed, a pre-tracker block names unqualified `feature/<N>-<slug>` branches, and the old
 block names the `lightspeed` dispatcher) rather than appending a duplicate. If the existing block
-lives in `CLAUDE.md` and the repo also has (or is getting) an `AGENTS.md`, offer to move it there
-so there is one copy, not two that drift.
+lives in `CLAUDE.md` and the repo also has an `AGENTS.md` (the "both" row), offer to move it
+there so there is one copy, not two that drift; when `CLAUDE.md` is the only file, update the
+block where it is — don't create an `AGENTS.md` to move it into.
 
 ## Common mistakes
 
