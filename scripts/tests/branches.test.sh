@@ -370,6 +370,58 @@ check "…and that branch survives" \
 	"$(git -C "$R" rev-parse -q --verify refs/heads/feature/9-current >/dev/null && echo 1 || echo 0)"
 git -C "$R" worktree remove -q "$SANDBOX/mine" 2>/dev/null || git -C "$R" worktree remove --force "$SANDBOX/mine"
 
+printf '\033[1m── schema 3: prune drops identity bindings (#248) ──\033[0m\n'
+# A retained binding goes only when its branch is gone locally AND on origin; one whose
+# branch survives on either side — and every other branch's — is left alone.
+for b in feature/11-gone feature/12-kept; do branch "$b" "$(printf '%s' "$b" | tr '/' '-')"; done
+git -C "$R" switch -q develop
+for b in feature/11-gone feature/12-kept; do git -C "$R" merge -q --no-ff -m "merge $b" "$b"; done
+git -C "$R" push -q origin develop
+cp "$R/.flightdirector/config.json" "$SANDBOX/config.legacy2"
+cp "$SANDBOX/config.s3" "$R/.flightdirector/config.json"
+mkdir -p "$(dirname "$BINDINGS")"
+cat >"$BINDINGS" <<'EOF'
+{"schemaVersion":1,"legacyDefaultTracker":"FJ","manifests":{},"branches":{
+ "feature/11-gone":{"tracker":"GH","number":"11","qualified":"GH-11","branchPrefix":"gh-11","legacy":true},
+ "feature/12-kept":{"tracker":"GH","number":"12","qualified":"GH-12","branchPrefix":"gh-12","legacy":true},
+ "feature/99-elsewhere":{"tracker":"FJ","number":"99","qualified":"FJ-99","branchPrefix":"fj-99","legacy":true}}}
+EOF
+has_binding() { jq -e --arg b "$1" '.branches | has($b)' "$BINDINGS" >/dev/null 2>&1 && echo 1 || echo 0; }
+
+out="$(run prune --branch feature/11-gone)"
+check "a preview of a full prune shows would-drop-binding with the retained id" \
+	"$(grep -q '^would-drop-binding	feature/11-gone	retained identity GH-11$' <<<"$out" && echo 1 || echo 0)" "out=$out"
+check "…and the preview leaves the binding in place" "$(has_binding feature/11-gone)"
+out="$(run prune --local --dry-run --branch feature/11-gone)"
+check "a --local preview (remote stays) does not offer to drop the binding" \
+	"$(grep -q 'drop-binding' <<<"$out" && echo 0 || echo 1)" "out=$out"
+
+out="$(run prune --local --remote --branch feature/11-gone)"
+check "a full prune (local + remote) drops the branch's binding" \
+	"$(grep -q '^drop-binding	feature/11-gone	retained identity GH-11$' <<<"$out" && [ "$(has_binding feature/11-gone)" = 0 ] && echo 1 || echo 0)" \
+	"out=$out; bindings=$(cat "$BINDINGS")"
+check "…other branches' bindings are untouched" \
+	"$([ "$(has_binding feature/12-kept)" = 1 ] && [ "$(has_binding feature/99-elsewhere)" = 1 ] \
+		&& [ "$(jq -r '.legacyDefaultTracker' "$BINDINGS")" = FJ ] && echo 1 || echo 0)" "bindings=$(cat "$BINDINGS")"
+
+out="$(run prune --local --branch feature/12-kept)"
+check "a local-only prune keeps the binding while origin still has the branch" \
+	"$(grep -q '^delete-local	feature/12-kept' <<<"$out" && ! grep -q 'drop-binding' <<<"$out" \
+		&& [ "$(has_binding feature/12-kept)" = 1 ] && echo 1 || echo 0)" "out=$out"
+forget_rc=0
+FLIGHT_REPO_ROOT="$R" FLIGHT_SELF="$STUB" "$REPO_ROOT/flight/scripts/issue-identity.sh" forget --branch feature/12-kept >/dev/null 2>&1 || forget_rc=$?
+check "issue-identity forget refuses while the branch remains on origin" \
+	"$([ "$forget_rc" = 1 ] && [ "$(has_binding feature/12-kept)" = 1 ] && echo 1 || echo 0)" "rc=$forget_rc"
+out="$(run prune --remote --branch feature/12-kept)"
+check "pruning the last remaining (remote) ref then drops it" \
+	"$(grep -q '^drop-binding	feature/12-kept' <<<"$out" && [ "$(has_binding feature/12-kept)" = 0 ] \
+		&& [ "$(has_binding feature/99-elsewhere)" = 1 ] && echo 1 || echo 0)" "out=$out"
+check "no work-items lock is left behind" "$([ ! -e "$BINDINGS.lock" ] && echo 1 || echo 0)"
+
+# Back to the pre-schema-3 fixture.
+cp "$SANDBOX/config.legacy2" "$R/.flightdirector/config.json"
+rm -rf "$R/.flightdirector/batches"
+
 printf '\033[1m── dispatcher wiring ──\033[0m\n'
 
 out="$(cd "$R" && bash "$DISPATCH" branches list --no-fetch 2>&1)"
