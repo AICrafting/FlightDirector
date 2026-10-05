@@ -985,32 +985,27 @@ if [ -f "$sec" ] && git -C "$repo_root" ls-files --error-unmatch "$sec_rel" >/de
   echo "flight: WARNING — $sec_rel is tracked by git; it must be gitignored (it contains a token)." >&2
 fi
 
-# Resolve a selected tracker field in schema 3. Legacy schemas keep the old
-# issues → code inheritance until reconcile converts them.
-cfg_get() {
-	if [ -n "$tracker_json" ]; then
-		printf '%s' "$tracker_json" | jq -r --arg f "$1" '.[$f] // empty'
-	else
-		jq -r --arg a "$axis" --arg f "$1" '(.[$a][$f]) // (.code[$f]) // empty' "$cfg"
-	fi
-}
+# Every field this run reads, in ONE jq rather than eight (FJ-301): the selected
+# tracker's fields in schema 3 (legacy schemas keep the old issues → code inheritance
+# until reconcile converts them), the trunk, and the label map. Joined with \x1f, the
+# unit separator: unlike a tab it is not IFS whitespace, so an empty field cannot
+# collapse into its neighbour and shift the rest.
+if [ -n "$tracker_json" ]; then trk_arg="$tracker_json"; else trk_arg=null; fi
+cfg_fields="$(jq -r --arg a "$axis" --argjson t "$trk_arg" '
+	def field($f): (if $t != null then ($t | .[$f]) else (.[$a][$f]) // (.code[$f]) end) // "" | tostring;
+	[field("backend"), field("api"), field("owner"), field("repo"), field("project"), field("email"),
+	 ((.code.trunkBranch) // (.code.stages[0].name) // "" | tostring),
+	 ((if $t != null then $t.labels else .labels end) // {} | tojson)] | join("\u001f")' "$cfg")" \
+	|| die "could not read $cfg_rel"
+IFS=$'\x1f' read -r backend LS_API LS_OWNER LS_REPO LS_PROJECT cfg_email LS_TRUNK LS_LABELS_JSON <<<"$cfg_fields"
+unset trk_arg cfg_fields
 
-backend="$(cfg_get backend)"
 [ -n "$backend" ] || die_code not-configured "no backend configured for axis '$axis' (set code.backend or ${axis}.backend in $cfg_rel)"
 
-LS_API="$(cfg_get api)"
-LS_OWNER="$(cfg_get owner)"
-LS_REPO="$(cfg_get repo)"
-# Generic passthroughs (backend-agnostic; empty unless the config sets them).
+# LS_API, LS_OWNER, LS_REPO, LS_TRUNK and LS_LABELS_JSON were read above, with the
+# generic passthroughs (backend-agnostic; empty unless the config sets them):
 # `project` is a first-class coordinate for backends like Jira (the project key);
 # `email` is needed by backends that use email:token HTTP Basic auth (Jira).
-LS_PROJECT="$(cfg_get project)"
-LS_TRUNK="$(jq -r '(.code.trunkBranch) // (.code.stages[0].name) // empty' "$cfg")"
-if [ -n "$tracker_json" ]; then
-	LS_LABELS_JSON="$(printf '%s' "$tracker_json" | jq -c '.labels // {}')"
-else
-	LS_LABELS_JSON="$(jq -c '.labels // {}' "$cfg")"
-fi
 
 # `issues list --status ROLE` (#253) — a status ROLE filter, mapped through the
 # selected tracker's label map to its label name. Dispatcher-owned, so one call can
@@ -1170,17 +1165,17 @@ fi
 # Email (for email:token Basic auth): env override, then config, then secrets. A
 # tracker with its own credential takes its email only from its own entry.
 if [ -n "$credential_ref" ] && [ "$credential_ref" != code ]; then
-	LS_EMAIL="$(cfg_get email)"
+	LS_EMAIL="$cfg_email"
 	if [ -z "$LS_EMAIL" ] && [ -f "$sec" ]; then
 		LS_EMAIL="$(jq -r --arg c "$credential_ref" '.issueTrackers[$c].email // empty' "$sec")"
 	fi
 elif [ -n "$credential_ref" ]; then
-	LS_EMAIL="${LS_EMAIL:-$(cfg_get email)}"
+	LS_EMAIL="${LS_EMAIL:-$cfg_email}"
 	if [ -z "$LS_EMAIL" ] && [ -f "$sec" ]; then
 		LS_EMAIL="$(jq -r '.code.email // empty' "$sec")"
 	fi
 else
-	LS_EMAIL="${LS_EMAIL:-$(cfg_get email)}"
+	LS_EMAIL="${LS_EMAIL:-$cfg_email}"
 	if [ -z "$LS_EMAIL" ] && [ -f "$sec" ]; then
 		LS_EMAIL="$(jq -r --arg a "$axis" '(.[$a].email) // (.code.email) // empty' "$sec")"
 	fi
