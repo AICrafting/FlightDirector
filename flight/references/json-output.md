@@ -41,6 +41,7 @@ $ flight capabilities --json
 | `issues-paging` | `issues list --json` pages with `--per-page M [--cursor C]` (below) |
 | `issues-copy` | `issues copy` and `issues resync` exist |
 | `issues-deps` | `issues block`, `unblock`, `blockers`, `blocking`, and `blocked_by` on `issues get --json` |
+| `preflight` | `preflight run` and `preflight check` run and check the repo's `code.preflight` gate (FJ-307) |
 
 ## Which verbs take `--json`
 

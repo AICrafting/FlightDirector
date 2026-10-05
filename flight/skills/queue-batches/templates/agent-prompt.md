@@ -37,12 +37,16 @@ Record the baseline test status for {base_branch}. The repo's check command is:
 {preflight}
 ```
 
-Run **exactly that** — not a subset you pick from memory — from `{repo_root}` (no issue worktree
-exists yet), and run it in the **foreground**:
+Run **exactly that** — not a subset you pick from memory — in `{repo_root}` (no issue worktree
+exists yet), in the **foreground**, through the dispatcher:
 
 ```bash
-( cd "{repo_root}" && sh -c '<the command above>' )
+{dispatcher} preflight run --worktree "{repo_root}" --log "{scratch}/baseline-{zone}.log"
 ```
+
+It runs the configured command in that directory and prints `preflight: passed`, or the log's
+tail and its path. Never run the command yourself with `sh -c`: Claude Code's safety check cannot
+read inside one and may stop to ask, and nobody is there to answer.
 
 Never rely on where your shell happens to be sitting. Your shell also does not outlive your
 return, so a backgrounded run has nothing left to write its verdict into. You'll report deltas at
@@ -149,10 +153,12 @@ issue and label call:
 4. **Before declaring done — walk the user-visible surface.** Don't satisfy only the literal
    acceptance phrase; trace every related field/element a reporter would see. If the real scope
    is materially larger than the issue's framing, safety-valve instead of shipping a narrow read.
-5. **Run the repo's check command** — the one printed under *Setup*, verbatim and in full — from
-   `$WT`, in the foreground. Run it via `sh -c` from that path (`cd "$WT"` in a subshell) rather
-   than trusting the shell's current directory. Skip this step only when *Setup* said
-   `None configured.`
+5. **Run the repo's check command** — the one printed under *Setup* — in `$WT`, in the
+   foreground, through the dispatcher rather than trusting the shell's current directory:
+   ```bash
+   {dispatcher} preflight run --worktree "$WT" --log "{scratch}/preflight-$PREFIX.log"
+   ```
+   Skip this step only when *Setup* said `None configured.`
    Non-zero means the issue is not done: fix it on this branch, or safety-valve with the failing
    output if you can't fix it quickly. Do not move to the next issue on a red gate — a branch
    that fails the repo's own check is one the user cannot promote, and the orchestrator's sweep

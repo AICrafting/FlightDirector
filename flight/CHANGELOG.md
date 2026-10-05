@@ -13,6 +13,21 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+- **`flight preflight run` and `flight preflight check`** (FJ-307). The skills used to run the
+  repo's `code.preflight` gate themselves as `sh -c "$GATE"`. Claude Code's Bash safety check
+  cannot read inside a `sh -c` string, so it sometimes stopped to ask, and an unattended session
+  that could not answer had the step denied at the very check the workflow depends on. The
+  dispatcher now runs the gate: `preflight run --worktree DIR [--log FILE] [--verdict FILE]`
+  reports pass, fail (with the log's tail) or "none configured", and records a verdict for the
+  commit it judged. `preflight check` accepts only a pass or none for the commit now checked out,
+  and says why otherwise. `working-an-issue`, `promoting-a-branch`, `promoting-branches` and
+  `queue-batches` (including its agent prompt) all use it, and each guard is now a one-line
+  `if flight preflight check …`. Promotions now run the gate step in ungated repos too (it records
+  `none` in a moment), since the guards read that verdict instead of re-reading the config.
+  `runtime.md` gains short rules for the commands agents write: no computed `-c`/`eval` strings,
+  no `rm` on globs or possibly-empty paths, and one readable statement per line.
+
 ### Fixed
 - **Label lookups fetch the repo's label list once per command** (FJ-301). The list was meant to
   be cached, but the cache was filled in a subshell and lost every time. Every lookup re-fetched

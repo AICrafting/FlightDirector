@@ -44,7 +44,7 @@ plugin_manifest() {
 # Feature tokens a consumer can detect with `flight capabilities --json` (#254)
 # instead of comparing versions. A token is added here in the same change that
 # ships the feature, and never renamed or removed once released.
-CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json issues-paging issues-copy issues-deps)
+CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json issues-paging issues-copy issues-deps preflight)
 
 # `flight --version [--json]` and `flight capabilities [--json]` (#254) — answered
 # before anything else: no repo, config, token or network needed, so a consumer
@@ -133,7 +133,7 @@ else
 	unset FLIGHT_ERROR_FILE LS_JSON
 fi
 
-[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci auth branches config reconcile prompt-log; also: flight --version, flight capabilities)"
+[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci auth branches config preflight reconcile prompt-log; also: flight --version, flight capabilities)"
 group="$1"; verb="$2"; shift 2
 
 if [ "$json_mode" = 1 ]; then
@@ -150,8 +150,8 @@ case "$group" in
   pr|ci)         axis="code" ;;
   auth)          axis="code" ;;   # default; `auth check --axis issues` overrides it below
   branches)      axis="code" ;;             # dispatcher-owned (git-local); see below
-  config|reconcile|prompt-log) axis="" ;;   # handled below; no adapter needed
-  *) die "unknown group '$group' (expected: issues labels pr ci auth branches config reconcile prompt-log)" ;;
+  config|preflight|reconcile|prompt-log) axis="" ;;   # handled below; no adapter needed
+  *) die "unknown group '$group' (expected: issues labels pr ci auth branches config preflight reconcile prompt-log)" ;;
 esac
 
 command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
@@ -805,6 +805,27 @@ if [ "$group" = "config" ]; then
   [ -f "$cfg" ] || die_code not-configured "no .flightdirector/config.json at repo root ($repo_root)"
   jq -r "$verb" "$cfg"
   exit 0
+fi
+
+# `flight preflight run|check` (FJ-307) — the repo's code.preflight gate, run by the
+# preflight helper so that the agent's own command never carries a `sh -c` string, which
+# Claude Code's safety check cannot read and may stop to ask about. `run` gets the gate
+# from here; `check` reads only the verdict file it wrote.
+if [ "$group" = "preflight" ]; then
+  case "$verb" in
+    run)
+      [ -f "$cfg" ] || die_code not-configured "no .flightdirector/config.json at repo root ($repo_root)"
+      gate="$(jq -r '.code.preflight // empty' "$cfg")" \
+        || die_code not-configured "could not read code.preflight from $cfg_rel"
+      handoff "$SELF_DIR/preflight" run --gate "$gate" "$@"
+      ;;
+    check)
+      handoff "$SELF_DIR/preflight" check "$@"
+      ;;
+    *)
+      die "unknown verb '$verb' (preflight: run check)"
+      ;;
+  esac
 fi
 
 [ -f "$cfg" ] || die_code not-configured "no .flightdirector/config.json at repo root ($repo_root)"

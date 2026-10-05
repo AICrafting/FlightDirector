@@ -31,3 +31,29 @@ Examples in the skill documentation use `flight` for readability. Execute them t
 
 Reconciliation is for config/schema compatibility (including the one-time schema-3 migration). Model labels are runtime provenance and are
 created lazily during ledger finalization; they do not depend on a plugin release.
+
+## Writing the commands you run
+
+Every command you run is read twice before it executes: by Claude Code's Bash safety check, and
+often by the person approving it. Write it for both (FJ-307).
+
+**Let the safety check read it.** It cannot see inside a string handed to another shell. When it
+cannot tell what a command will do, it stops to ask, and an unattended session cannot answer, so
+the step is denied.
+
+- Never run a computed string: no `sh -c "$CMD"`, `bash -c "$CMD"` or `eval "$CMD"`. If flight has
+  a verb for the job, use it. The repo's preflight gate is `flight preflight run`, never
+  `sh -c "$GATE"`. Otherwise, write the command out literally.
+- Never `rm` or `rmdir` a glob (`dir/*`) or a path built from a variable that could be empty or
+  unquoted. Delete files you name exactly. Scratch files under the session's scratchpad, or a
+  `mktemp -d` directory, can simply be left behind.
+
+**Let a person read it.** Format a multi-step command the way the skills' fenced blocks are
+formatted:
+
+- One statement per line. Use `if … then … fi` instead of long `a && b || { c; d; }` chains, and
+  break long argument lists with a trailing `\` and an indented continuation.
+- Name things clearly (`WT`, `BASE`, `LOG`, not `W`, `B`, `L`), and bind each path once at the
+  top rather than repeating it.
+- Put a short `#` comment above any step whose purpose isn't obvious from the command itself.
+- Split unrelated work into separate tool calls instead of one block that does five things.
