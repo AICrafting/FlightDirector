@@ -207,6 +207,7 @@ Each action prints one TSV line — `action⇥branch⇥detail`:
 | `remove-worktree` | the `.worktrees/` entry was removed |
 | `delete-local` | `git branch -d` succeeded |
 | `delete-remote` | `git push origin --delete` succeeded |
+| `drop-binding` | the branch is gone locally *and* on origin, so its retained issue-identity binding was removed (schema 3); a binding is never dropped while either ref remains |
 | `would-*` | preview only (a bare `prune`, or `--dry-run`); nothing was written |
 | `skip` | deliberately left alone; the detail says why |
 

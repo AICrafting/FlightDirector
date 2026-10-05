@@ -17,17 +17,20 @@
 #   issue-identity.sh from-manifest --run-id ID --entry N
 #   issue-identity.sh from-history  --ref REF    [--tracker REF]
 #   issue-identity.sh remember      --branch NAME --identity JSON
+#   issue-identity.sh bound         --branch NAME
+#   issue-identity.sh forget        --branch NAME
 #   issue-identity.sh pr-reference  --identity JSON --closes true|false
 #
 # Exit status: 0 = identity printed; 3 = the input carries no issue identity (a
-# non-issue branch); 4 = a legacy unqualified branch/entry/reference whose tracker
-# cannot be recovered — rerun with --tracker REF (never guessed from the current
-# default); 1 = any other error.
+# non-issue branch; for bound/forget, no binding stored); 4 = a legacy unqualified
+# branch/entry/reference whose tracker cannot be recovered — rerun with --tracker REF
+# (never guessed from the current default); 1 = any other error.
 #
 # Legacy bindings live in <config dir>/batches/work-items/identities.json, written by
 # `flight reconcile` at migration (see references/flight-setup.md). This helper reads
 # them and adds non-legacy entries (`remember`) under the same lock protocol; it never
-# re-points an existing entry. Only unqualified work that predates the migration uses
+# re-points an existing entry; `forget` drops one only once its branch is gone both
+# locally and on origin (`flight branches prune`, #248). Only unqualified work that predates the migration uses
 # the file's `legacyDefaultTracker` — a bare number a person types is resolved by
 # `flight issues resolve` against the CURRENT default instead.
 set -euo pipefail
@@ -155,6 +158,44 @@ remember() { # remember <branch> <identity>
 	with_lock write_binding "$branch" "$id"
 }
 
+# ── bound / forget ────────────────────────────────────────────────────────────
+# A binding is the only record of which tracker an unqualified legacy branch belongs
+# to, so it is dropped only when the branch is gone everywhere this checkout can see:
+# no local ref and no origin remote-tracking ref (#248). `bound` prints the stored
+# binding (exit 3 when there is none); `forget` removes it and prints what it removed
+# (exit 3 when there was none), and refuses while the branch still exists.
+bound() { # bound <branch>
+	local b
+	b="$(bindings | jq -c --arg b "$1" '.branches[$b] // empty' 2>/dev/null || true)"
+	[ -n "$b" ] || exit 3
+	printf '%s\n' "$b"
+}
+
+branch_exists() { # branch_exists <branch> — a local ref or an origin remote-tracking ref
+	git -C "$ROOT" show-ref --verify --quiet "refs/heads/$1" \
+		|| git -C "$ROOT" show-ref --verify --quiet "refs/remotes/origin/$1"
+}
+
+drop_binding() { # drop_binding <branch> — 3 when there is nothing to drop
+	local data old tmp
+	data="$(bindings)"
+	jq -e 'type == "object"' <<<"$data" >/dev/null 2>&1 || die "$FILE is not a JSON object; repair it before changing bindings"
+	old="$(jq -c --arg b "$1" '.branches[$b] // empty' <<<"$data")"
+	[ -n "$old" ] || return 3
+	tmp="$(mktemp "$FILE.tmp.XXXXXX")"
+	jq --arg b "$1" '.branches |= del(.[$b])' <<<"$data" >"$tmp" || { rm -f "$tmp"; die "could not write $FILE"; }
+	mv "$tmp" "$FILE"
+	printf '%s\n' "$old"
+}
+
+forget() { # forget <branch>
+	local branch="${1#refs/heads/}"
+	! branch_exists "$branch" \
+		|| die "branch '$branch' still exists locally or on origin; its binding is kept (it is the only record of the branch's tracker)"
+	[ -f "$FILE" ] || exit 3
+	with_lock drop_binding "$branch"
+}
+
 # ── from-branch ───────────────────────────────────────────────────────────────
 from_branch() { # from_branch <branch> [explicit tracker]
 	local branch="$1" explicit="${2:-}" bound slug n tracker id
@@ -273,7 +314,9 @@ from_history() { # from_history <ref> [explicit tracker]
 # the PR's OWN repository, so it is emitted only when the issue lives in exactly that
 # repository (SAME_TARGET: same backend, same api with trailing / ignored, same
 # owner/repo; never Jira). Otherwise the line names the qualified id, which no forge acts on, and the
-# promotion drives that tracker explicitly. No URL, body or ledger is ever printed.
+# promotion drives that tracker explicitly. The id is in backticks (#247): GitHub autolinks
+# `GH-12`-shaped text to the PR's own repository's issue 12, and a code span suppresses that.
+# No URL, body or ledger is ever printed.
 pr_reference() { # pr_reference <identity> <closes>
 	local id="$1" closes="$2" code tracker same
 	valid_identity "$id" || die "--identity must be the JSON flight issues resolve prints"
@@ -285,7 +328,8 @@ pr_reference() { # pr_reference <identity> <closes>
 		if [ "$closes" = true ]; then printf 'Closes #%s\n' "$(jq -r '.number' <<<"$id")"
 		else printf 'Ready #%s\n' "$(jq -r '.number' <<<"$id")"; fi
 	else
-		printf 'Tracks %s\n' "$(jq -r '.qualified' <<<"$id")"
+		# shellcheck disable=SC2016  # literal backticks: a code span, not a command substitution
+		printf 'Tracks `%s`\n' "$(jq -r '.qualified' <<<"$id")"
 	fi
 }
 
@@ -312,6 +356,8 @@ case "$cmd" in
 	from-manifest) [ -n "$run_id" ] && [ -n "$entry" ] || die "usage: from-manifest --run-id ID --entry N"; from_manifest "$run_id" "$entry" ;;
 	from-history)  [ -n "$ref" ] || die "usage: from-history --ref REF [--tracker REF]"; from_history "$ref" "$explicit" ;;
 	remember)      [ -n "$branch" ] && [ -n "$identity" ] || die "usage: remember --branch NAME --identity JSON"; remember "$branch" "$identity" ;;
+	bound)         [ -n "$branch" ] || die "usage: bound --branch NAME"; bound "${branch#refs/heads/}" ;;
+	forget)        [ -n "$branch" ] || die "usage: forget --branch NAME"; forget "$branch" ;;
 	pr-reference)  [ -n "$identity" ] && [ -n "$closes" ] || die "usage: pr-reference --identity JSON --closes true|false"; pr_reference "$identity" "$closes" ;;
-	*) die "unknown command '${cmd}' (issue-identity: from-branch from-manifest from-history remember pr-reference)" ;;
+	*) die "unknown command '${cmd}' (issue-identity: from-branch from-manifest from-history remember bound forget pr-reference)" ;;
 esac

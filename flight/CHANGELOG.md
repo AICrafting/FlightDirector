@@ -27,6 +27,17 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 
+- **Qualified ids flight writes into forge text are backticked, so GitHub no longer autolinks
+  them** (FJ-247). GitHub turns `GH-12`-shaped text into a link to the rendering repository's own
+  issue 12, so a GitHub tracker's ids pointed readers at an unrelated issue. A code PR's issue
+  line for another tracker's issue now reads ``Tracks `GH-12` ``, `issues copy`'s footer and
+  back-link read ``Copied from `FJ-12` `` / ``Copied to `GH-100` ``, and `promoting-branches`
+  backticks the ids in its batch PR title. `Closes #N` / `Ready #N` are unchanged — they must stay
+  live keywords. `add-an-issue-tracker` no longer proposes the ref `GH` for a GitHub tracker when
+  the code repository is also on GitHub, and says why. Commit subjects (`feat(GH-12): …`) and
+  merge messages are unchanged, so on GitHub those can still autolink; pick a ref other than `GH`
+  to avoid it.
+
 - **`working-an-issue` runs the repo's `code.preflight` gate before moving an issue to `to-test`**
   (FJ-221). The interactive path was the one place a branch changed state without consulting the
   gate, looser than the batch path. A red gate now leaves the issue `in-progress` and shows the
@@ -38,6 +49,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   intact. `#` lines inside fenced code blocks, and `#word` with no space, are left alone.
 
 ### Fixed
+
+- **`flight branches prune` drops a deleted branch's retained identity binding** (FJ-248). The
+  schema-3 migration binds every legacy `feature/<N>-…` branch to its tracker in
+  `.flightdirector/batches/work-items/identities.json`, and nothing ever removed those entries, so
+  the file only grew. Once `prune` leaves a branch gone both locally and on origin, its binding
+  goes too, reported as a `drop-binding` row (`would-drop-binding` in a preview). A binding is
+  never dropped while the branch still exists on either side — it is the only record of which
+  tracker an unqualified legacy branch belongs to — and other branches' bindings are untouched.
+  Bindings for branches that were already deleted before this release are not swept.
 
 - **`flight ci watch` no longer reports a cancelled run as a failure** (FJ-281). A run stopped
   before it finished (most often because a newer push superseded it) used to count as `failed`,

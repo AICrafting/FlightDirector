@@ -143,11 +143,11 @@ section "copy: components off and opt-ins on"
 fixture
 hc copy --from FJ-12 --to GH --no-body --no-comments --no-labels --no-status --footer --back-link
 check "the copy succeeds" "$([ "$RC" = 0 ] && echo 1 || echo 0)" "rc=$RC err=$ERR"
-check "only the footer is in the body" "$(yes jq -e '.body == "Copied from FJ-12\n"' <<<"$(created 100)")" "$(created 100)"
+check "only the footer is in the body" "$(yes jq -e '.body == "Copied from `FJ-12`\n"' <<<"$(created 100)")" "$(created 100)"
 check "no labels are passed (the target's own starting status is left to the dispatcher)" "$(yes jq -e '.labels == []' <<<"$(created 100)")" "$(created 100)"
 check "no comments are posted" "$(yes jq -e 'length == 0' <<<"$(posted GH 100)")" "$(posted GH 100)"
 check "the existing comments and the back-link are recorded as handled" "$(yes jq -e '.comments == ["501","502","c1"] and .components == ["footer","back-link"]' <<<"$(last_ledger)")" "$(last_ledger)"
-check "the back-link is posted on the source" "$(yes jq -e 'length == 1 and (.[0].body | startswith("Copied to GH-100"))' <<<"$(posted FJ 12)")" "$(posted FJ 12)"
+check "the back-link is posted on the source" "$(yes jq -e 'length == 1 and (.[0].body | startswith("Copied to `GH-100`"))' <<<"$(posted FJ 12)")" "$(posted FJ 12)"
 
 section "copy: status the target can't hold, empty bodies, bad targets"
 fixture
