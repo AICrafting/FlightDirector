@@ -67,13 +67,13 @@ run_gate || true
 check "the gate runs in --worktree, not the caller's directory" "$(yes_if [ -f "$R/ran-here" ])"
 rm -f "$R/ran-here"
 
-# An interrupted run must not leave the previous verdict standing.
+# The previous verdict is removed BEFORE the gate starts, so an interrupted run leaves none
+# rather than a stale one. Asked directly: with an old pass in place, a gate that succeeds
+# only when the verdict file is absent must pass.
 gate 'echo ok'
 run_gate
-# shellcheck disable=SC2016  # $PPID is for the gate's own shell to expand, not this one
-gate 'kill -9 $PPID'
-( run_gate ) 2>/dev/null || true   # the subshell keeps bash's "Killed" notice out of the output
-check "the old verdict is gone before the gate starts" "$(yes_if [ ! -s "$V" ])" "$(cat "$V" 2>/dev/null)"
+gate "test ! -e '$V'"
+check "the old verdict is gone before the gate starts" "$(yes_if run_gate)" "$(cat "$SANDBOX/out")"
 
 printf '\033[1m── check ──\033[0m\n'
 gate 'true'
