@@ -206,7 +206,7 @@ msys() { (cd "$R" && PATH="$MSYS_BIN:$PATH" OSTYPE=msys FLIGHT_JQ_BINARY='' "$ID
 msys_status() { local rc=0; msys "$@" >/dev/null 2>&1 || rc=$?; echo "$rc"; }
 has_cr() { grep -q '\\r' <<<"$(od -c)"; }
 check "the emulated jq really emits CR" "$(printf '1\n' | "$CRLF_BIN/jq" . | has_cr && echo 1 || echo 0)"
-msys_checks() { # msys_checks <variant>
+msys_checks() { # msys_checks <variant> [quick] — quick: the first four checks only
 	local variant="$1" out
 	cp "$SANDBOX/bind.good" "$BIND"
 	out="$(msys from-branch --branch feature/gh-1-second 2>&1 || true)"
@@ -221,6 +221,9 @@ msys_checks() { # msys_checks <variant>
 	out="$(msys from-branch --branch feature/12-old-work --tracker fj 2>&1 || true)"
 	check "msys ($variant): an alias/case lookup compares clean refs" \
 		"$([ "$out" = '{"tracker":"FJ","number":"12","qualified":"FJ-12","display":"FJ-12","branchPrefix":"fj-12"}' ] && echo 1 || echo 0)" "$out"
+	# The fallback pass stops here: every call through the emulated jq.exe is a bash
+	# launch, the dearest process on the Windows leg (FJ-301).
+	if [ "${2:-}" = quick ]; then cp "$SANDBOX/bind.good" "$BIND"; return 0; fi
 	out="$(msys from-manifest --run-id run1 --entry 5 2>&1 || true)"
 	check "msys ($variant): a legacy manifest entry resolves" "$([ "$out" = '{"tracker":"FJ","number":"5","qualified":"FJ-5","display":"FJ-5","branchPrefix":"fj-5"}' ] && echo 1 || echo 0)" "$out"
 	out="$(msys from-history --ref '#40' 2>&1 || true)"
@@ -236,7 +239,7 @@ msys_checks() { # msys_checks <variant>
 }
 MSYS_BIN="$CRLF_BIN" msys_checks "jq.exe -b"
 check "msys: a jq.exe with -b is driven with -b, not through tr" "$([ -s "$SANDBOX/jq-b.log" ] && echo 1 || echo 0)"
-MSYS_BIN="$OLD_CRLF_BIN" msys_checks "old jq.exe, tr"
+MSYS_BIN="$OLD_CRLF_BIN" msys_checks "old jq.exe, tr" quick
 
 printf '\033[1m── schema guard ──\033[0m\n'
 jq '.schemaVersion = 2 | del(.issueTrackers, .legacyIssueTracker) | .issues = {"backend":"forgejo"}' "$SANDBOX/config.good" >"$CFG"

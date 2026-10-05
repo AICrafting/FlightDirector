@@ -45,7 +45,11 @@ while [ $# -gt 0 ]; do case "$1" in
 	*) echo "stub: unexpected arg $1" >&2; exit 2 ;;
 esac; done
 err() { jq -cn --arg c "$1" --arg m "$2" '{error:{code:$c, message:$m}}'; exit 1; }
-up() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
+# Pure bash (3.2 has no ${x^^}): a `tr` here was two spawns on every stub call (FJ-301).
+up() { local s="$1" o="" c L=abcdefghijklmnopqrstuvwxyz U=ABCDEFGHIJKLMNOPQRSTUVWXYZ p
+	while [ -n "$s" ]; do c="${s:0:1}"; s="${s:1}"
+		case "$L" in *"$c"*) p="${L%%"$c"*}"; c="${U:${#p}:1}" ;; esac; o="$o$c"; done
+	printf '%s' "$o"; }
 if [ "$verb" = tracker ]; then jq -c --arg r "$(up "$tracker")" '.[$r]' "$S/trackers.json"; exit 0; fi
 case "$number" in
 	*-*) ref="$(up "${number%%-*}")"; n="${number##*-}" ;;

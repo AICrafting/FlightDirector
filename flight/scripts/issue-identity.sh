@@ -91,6 +91,15 @@ canonical() {
 		branchPrefix}' <<<"$1"
 }
 
+# learn_unprefixed <identity> — when canonical has not yet asked, take the answer from
+# an identity `resolve` printed just now: its display already follows the CURRENT
+# tracker count, so a second dispatcher round-trip to ask again is pure cost (FJ-301).
+# Stored identities still go through canonical's own resolve: they may predate a change.
+# Runs at top level, never in `$(…)`, so the answer persists for canonical.
+learn_unprefixed() {
+	[ -n "$UNPREFIXED" ] || UNPREFIXED="$(jq -r 'if .display then .display != .qualified else false end' <<<"$1")"
+}
+
 resolve() { # resolve <input> [tracker]
 	if [ -n "${2:-}" ]; then flight issues resolve --number "$1" --tracker "$2"
 	else flight issues resolve --number "$1"; fi
@@ -222,6 +231,7 @@ from_branch() { # from_branch <branch> [explicit tracker]
 			die "branch '$branch' carries no issue identity (no configured tracker '$ref')" 3
 		fi
 		rm -f "$err"
+		learn_unprefixed "$id"
 		canonical "$id"
 		return 0
 	fi
@@ -235,7 +245,9 @@ from_branch() { # from_branch <branch> [explicit tracker]
 		[ -n "$tracker" ] || tracker="$(bindings | jq -r '.legacyDefaultTracker // empty' 2>/dev/null || true)"
 		[ -n "$tracker" ] || tracker="$(sole_tracker)"
 		[ -n "$tracker" ] || die "legacy branch '$branch' has no recoverable tracker binding; rerun with --tracker REF (flight never guesses)" 4
-		id="$(canonical "$(resolve "$n" "$tracker")")"
+		id="$(resolve "$n" "$tracker")"
+		learn_unprefixed "$id"
+		id="$(canonical "$id")"
 		# An explicit choice is retained, so every later step agrees without asking again.
 		[ -z "$explicit" ] || with_lock write_binding "$branch" "$id"
 		printf '%s\n' "$id"
