@@ -13,7 +13,23 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.17.2] - 2026-10-04
+
 ### Added
+- **Blocked issues** (FJ-271). `flight issues block --number FJ-12 --by GH-3` records that one
+  issue is blocked by another; `unblock` removes it, and `blockers` / `blocking` list the links.
+  Issues on the same tracker use the backend's own relationship (GitHub issue dependencies,
+  Forgejo dependencies, GitLab Premium blocking links, Jira "is blocked by" links). Where the
+  backend can't, and always across trackers, the link is a pair of signed comments. By default the
+  blocked issue's status moves to `blocked` and back to what it was; `--no-status` skips that.
+  `issues get --json` gains `blocked_by`, and `working-an-issue` warns before starting an issue
+  with an open blocker. Capability token: `issues-deps`. GitLab's native (Premium) path is
+  untested live: the test rig is on the Free tier and exercises the comment fallback. GitLab
+  allows one link per issue pair, so a pair that already shares a `relates_to` (or any other)
+  link falls back to the comment record, and `issues block` says which link is in the way
+  instead of aborting on GitLab's 409 (FJ-275).
 
 - **`/flight:version` shows which flight the session loaded** (FJ-257). The plugin's first
   command (alongside the skills) prints the version from the loaded install's own manifest, the
@@ -26,6 +42,11 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   `flight --version` for the CLI.
 
 ### Changed
+- **`flight prompt-log summary` prices each row again from its stored tokens** (FJ-270), so a
+  pricing fix, bundled or in `.flightdirector/pricing.json`, also corrects turns logged before
+  it. A turn that spans models now records each model's usage (`usage_by_model`) so it can be
+  priced the same way. Rows that still cannot be priced keep their logged cost; `--as-logged`
+  sums the logged costs as before.
 
 - **Qualified ids flight writes into forge text are backticked, so GitHub no longer autolinks
   them** (FJ-247). GitHub turns `GH-12`-shaped text into a link to the rendering repository's own
@@ -66,62 +87,6 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   intact. `#` lines inside fenced code blocks, and `#word` with no space, are left alone.
 
 ### Fixed
-
-- **`scripts/bump-version.sh` rolls a CRLF changelog** (FJ-225). On a Windows checkout, where
-  markdown keeps native line endings, it never found `## [Unreleased]`. It still reported
-  success, after bumping the manifests and leaving the changelog unrolled. It now matches the
-  heading regardless of `\r` and writes the new lines with the file's own ending. If the heading
-  is missing, it stops before changing anything.
-
-- **`flight branches prune` drops a deleted branch's retained identity binding** (FJ-248). The
-  schema-3 migration binds every legacy `feature/<N>-…` branch to its tracker in
-  `.flightdirector/batches/work-items/identities.json`, and nothing ever removed those entries, so
-  the file only grew. Once `prune` leaves a branch gone both locally and on origin, its binding
-  goes too, reported as a `drop-binding` row (`would-drop-binding` in a preview). A binding is
-  never dropped while the branch still exists on either side — it is the only record of which
-  tracker an unqualified legacy branch belongs to — and other branches' bindings are untouched.
-  Bindings for branches that were already deleted before this release are not swept.
-
-- **`flight ci watch` no longer reports a cancelled run as a failure** (FJ-281). A run stopped
-  before it finished (most often because a newer push superseded it) used to count as `failed`,
-  so the watch ended on `status=failure` while `ci log` found no failed job to show. Cancelled
-  runs are now counted on their own `cancelled=<c>` field. With no failure, the verdict is the
-  new `status=cancelled`: not a pass, because the run verified nothing, and not a red to debug.
-  GitLab's `canceling` now counts as still pending. With `--pr`, if the PR's head moved during
-  the watch, a line on stderr names the new head so you know to watch again. `branches sync-down`
-  stops on a cancelled verdict and says so, and `promoting-a-branch` and `promoting-branches`
-  say what to do with it.
-
-- **A red preflight gate now really stops a `pr`-hop group in `promoting-branches`** (FJ-231).
-  The red-gate handler ended in a `continue` with no shell loop around it, so a literal run fell
-  through to the push. The gate now writes its verdict to a file stamped with the integration
-  branch's commit, and the push, the PR body and `pr open` run only inside a guard that reads it;
-  otherwise the group is reported skipped, with the reason, and the other groups carry on.
-
-- **Jira headings survive a read** (FJ-178). `flight issues get` and `issues comments` on Jira
-  now render an ADF heading as `#`-prefixed markdown at its own level (`## Acceptance`), instead
-  of flattening it into a plain paragraph — so the `## Acceptance` / `## Test plans` anchors the
-  skills look for are still there when an issue was written or edited in the Jira web UI.
-
-## [0.17.2] - 2026-10-04
-
-### Added
-
-- **Blocked issues** (FJ-271). `flight issues block --number FJ-12 --by GH-3` records that one
-  issue is blocked by another; `unblock` removes it, and `blockers` / `blocking` list the links.
-  Issues on the same tracker use the backend's own relationship (GitHub issue dependencies,
-  Forgejo dependencies, GitLab Premium blocking links, Jira "is blocked by" links). Where the
-  backend can't, and always across trackers, the link is a pair of signed comments. By default the
-  blocked issue's status moves to `blocked` and back to what it was; `--no-status` skips that.
-  `issues get --json` gains `blocked_by`, and `working-an-issue` warns before starting an issue
-  with an open blocker. Capability token: `issues-deps`. GitLab's native (Premium) path is
-  untested live: the test rig is on the Free tier and exercises the comment fallback. GitLab
-  allows one link per issue pair, so a pair that already shares a `relates_to` (or any other)
-  link falls back to the comment record, and `issues block` says which link is in the way
-  instead of aborting on GitLab's 409 (FJ-275).
-
-### Fixed
-
 - **`issues list --all-trackers --status ROLE` no longer fails on a tracker without that role**
   (FJ-277). A tracker that never defined the role, or declined it (`false`), used to show up as
   `tracker X unavailable`. Under `--json` it landed in `errors[]`, and in text mode the command
@@ -159,13 +124,41 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   `cache_creation_1h_per_million` rate (2× input) instead of the 5-minute rate (1.25×). A model id
   with a context tag such as `claude-opus-5-5[1m]` is priced as its base model.
 
-### Changed
+- **`scripts/bump-version.sh` rolls a CRLF changelog** (FJ-225). On a Windows checkout, where
+  markdown keeps native line endings, it never found `## [Unreleased]`. It still reported
+  success, after bumping the manifests and leaving the changelog unrolled. It now matches the
+  heading regardless of `\r` and writes the new lines with the file's own ending. If the heading
+  is missing, it stops before changing anything.
 
-- **`flight prompt-log summary` prices each row again from its stored tokens** (FJ-270), so a
-  pricing fix, bundled or in `.flightdirector/pricing.json`, also corrects turns logged before
-  it. A turn that spans models now records each model's usage (`usage_by_model`) so it can be
-  priced the same way. Rows that still cannot be priced keep their logged cost; `--as-logged`
-  sums the logged costs as before.
+- **`flight branches prune` drops a deleted branch's retained identity binding** (FJ-248). The
+  schema-3 migration binds every legacy `feature/<N>-…` branch to its tracker in
+  `.flightdirector/batches/work-items/identities.json`, and nothing ever removed those entries, so
+  the file only grew. Once `prune` leaves a branch gone both locally and on origin, its binding
+  goes too, reported as a `drop-binding` row (`would-drop-binding` in a preview). A binding is
+  never dropped while the branch still exists on either side — it is the only record of which
+  tracker an unqualified legacy branch belongs to — and other branches' bindings are untouched.
+  Bindings for branches that were already deleted before this release are not swept.
+
+- **`flight ci watch` no longer reports a cancelled run as a failure** (FJ-281). A run stopped
+  before it finished (most often because a newer push superseded it) used to count as `failed`,
+  so the watch ended on `status=failure` while `ci log` found no failed job to show. Cancelled
+  runs are now counted on their own `cancelled=<c>` field. With no failure, the verdict is the
+  new `status=cancelled`: not a pass, because the run verified nothing, and not a red to debug.
+  GitLab's `canceling` now counts as still pending. With `--pr`, if the PR's head moved during
+  the watch, a line on stderr names the new head so you know to watch again. `branches sync-down`
+  stops on a cancelled verdict and says so, and `promoting-a-branch` and `promoting-branches`
+  say what to do with it.
+
+- **A red preflight gate now really stops a `pr`-hop group in `promoting-branches`** (FJ-231).
+  The red-gate handler ended in a `continue` with no shell loop around it, so a literal run fell
+  through to the push. The gate now writes its verdict to a file stamped with the integration
+  branch's commit, and the push, the PR body and `pr open` run only inside a guard that reads it;
+  otherwise the group is reported skipped, with the reason, and the other groups carry on.
+
+- **Jira headings survive a read** (FJ-178). `flight issues get` and `issues comments` on Jira
+  now render an ADF heading as `#`-prefixed markdown at its own level (`## Acceptance`), instead
+  of flattening it into a plain paragraph — so the `## Acceptance` / `## Test plans` anchors the
+  skills look for are still there when an issue was written or edited in the Jira web UI.
 
 ## [0.17.1] - 2026-10-03
 
