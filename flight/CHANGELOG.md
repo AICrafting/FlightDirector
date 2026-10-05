@@ -30,7 +30,7 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Changed
 - **The repo's own Windows CI leg runs only on pull requests into `qa` and `main`** (FJ-305), plus
-  manual dispatches. Feature PRs into `develop` and pushes to `develop` no longer wait ~11
+  manual dispatches; the `main` → `qa` sync-down skips it. Feature PRs into `develop` and pushes to `develop` no longer wait ~11
   minutes for it, so a Windows-only failure first shows up at promotion. Repo CI only: plugin
   behavior is unchanged.
 - **Faster dispatcher on Windows** (FJ-301). Git Bash ran every `jq` call through a `tr` pipe
