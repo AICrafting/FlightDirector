@@ -5,12 +5,14 @@
 # warning, returns 0, and falls through to the push on the next line. A wording check passed it.
 # So, like promote-gate.test.sh, this lifts the REAL gate and publish blocks out of the skill and
 # runs each in its own shell, with the real Step 1 block restated on top, against a fake `flight`,
-# `git` and identity helper. Only things that survive a tool call may carry the verdict (the
-# config, a file under $SCRATCH). $SCRATCH, $INT and the issue identity are values the agent
+# `git` and identity helper. Only things that survive a tool call may carry the verdict (a file
+# under $SCRATCH). Since FJ-307 the gate runs through `flight preflight run|check`, and the fake
+# hands both to the REAL preflight helper. $SCRATCH, $INT and the issue identity are values the agent
 # names rather than derives, so they are given to every call, not carried.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+export PREFLIGHT_HELPER="$REPO_ROOT/flight/scripts/preflight"
 SKILL="$REPO_ROOT/flight/skills/promoting-branches/SKILL.md"
 SANDBOX="$(mktemp -d)"
 trap 'rm -rf "$SANDBOX"' EXIT
@@ -39,6 +41,9 @@ block publish 'pr open --head'
 # block has no `continue` to fall through (the per-group loop is prose, not shell).
 grep -q 'continue' "$SANDBOX/gate.sh" "$SANDBOX/publish.sh" \
 	&& { echo "FAIL: a gate or publish block uses continue, which has no loop to continue"; exit 1; }
+# FJ-307: neither block runs the gate itself; Claude Code's safety check cannot read `sh -c`.
+grep -q 'sh -c' "$SANDBOX/gate.sh" "$SANDBOX/publish.sh" \
+	&& { echo "FAIL: a gate or publish block still runs the gate with sh -c"; exit 1; }
 awk '
 	/preflight-verdict-<zone>/ { guard = NR }
 	/push -u origin "\$INT"/  { push = NR }
@@ -47,13 +52,28 @@ awk '
 	END { exit !(guard && push > guard && open > push && els > open) }
 ' "$SANDBOX/publish.sh" || { echo "FAIL: push / pr open do not sit inside the verdict guard"; exit 1; }
 
+# `preflight run` reads the gate as the real dispatcher does and hands it to the real helper (an
+# unreadable config fails before any verdict exists); `preflight check` is the real helper outright.
 cat >"$SANDBOX/bin/flight" <<'SH'
 #!/usr/bin/env bash
+case "$*" in
+	"preflight run "*)
+		if [ -f "$SANDBOX/config-unreadable" ]; then
+			echo "flight: could not read code.preflight from .flightdirector/config.json" >&2
+			exit 1
+		fi
+		shift 2
+		exec "$PREFLIGHT_HELPER" run --gate "$(cat "$SANDBOX/gate")" "$@"
+		;;
+	"preflight check "*)
+		shift 2
+		exec "$PREFLIGHT_HELPER" check "$@"
+		;;
+esac
 [ -f "$SANDBOX/config-unreadable" ] && exit 1
 case "$*" in
 	"pr open"*)  echo "DID-PR" >>"$SANDBOX/actions"; printf '7\thttp://example.invalid/7\n' ;;
 	"pr merge"*) echo "DID-PR-MERGE" >>"$SANDBOX/actions" ;;
-	*preflight*) cat "$SANDBOX/gate" ;;
 	*"stages | length"*) echo 1 ;;
 	*closesIssues*) echo null ;;
 	*"stages[0].name"*) echo develop ;;
@@ -111,19 +131,22 @@ refused() {
 	PASSED=$((PASSED + 1))
 }
 
-fresh '';      call publish;                         acted   "ungated, gate block skipped"
+# Ungated: the gate block records `none`, which is what lets publish through; skipping the block
+# leaves no verdict, and publish refuses rather than guess (FJ-307).
 fresh '';      call gate; call publish;              acted   "ungated, gate block run"
+fresh '';      call publish;                         refused "ungated, gate block skipped" 'no verdict'
 fresh 'true';  call gate; call publish;              acted   "green gate"
-fresh 'false'; call gate; call publish;              refused "red gate" 'not green'
+fresh 'false'; call gate; call publish;              refused "red gate" 'FAILED'
 grep -q 'FAILED(zone1, preflight)' "$SANDBOX/out" || { echo "FAIL: red gate not recorded as FAILED"; exit 1; }
 grep -q 'branch -D batch/zone1-x' "$SANDBOX/cleanup" || { echo "FAIL: red gate left \$INT standing"; exit 1; }
-fresh 'true';  call publish;                         refused "gated, gate never run" 'not green'
+fresh 'true';  call publish;                         refused "gated, gate never run" 'no verdict'
 fresh 'true';  call gate; echo bbb222 >"$SANDBOX/sha"
-               call publish;                         refused "stale pass, new commit" 'not green'
-fresh 'true';  call gate; touch "$SANDBOX/config-unreadable"
-               call publish;                         refused "config unreadable" 'could not read'
+               call publish;                         refused "stale pass, new commit" 'not the current'
+# "Could not ask" must not read as "no gate configured": an unreadable config leaves no verdict.
+fresh 'true';  touch "$SANDBOX/config-unreadable"; call gate
+               call publish;                         refused "config unreadable" 'no verdict'
 fresh 'true';  call gate; printf 'false' >"$SANDBOX/gate"
-               call gate; call publish;              refused "green, then red re-run" 'not green'
+               call gate; call publish;              refused "green, then red re-run" 'FAILED'
 fresh 'false'; call gate; printf 'true' >"$SANDBOX/gate"
                call gate; call publish;              acted   "red, fixed, re-run"
 

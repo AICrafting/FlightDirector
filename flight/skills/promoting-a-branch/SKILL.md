@@ -251,81 +251,60 @@ thing to discover any drift.
 
 #### Step 4b: Repo preflight gate — after the freshness check, before the merge
 
-If the repo configures `code.preflight`, run it now. It goes **after** Step 4a deliberately: a
-diverged target stops the promotion in seconds, and there is no sense spending minutes on a test
-run that a STOP was going to discard. When the key is absent the block below does nothing, and
-skipping it outright is just as safe: each guard further down reads `code.preflight` from the
-config itself and lets an ungated repo through, needing no state from this step. That is every
-repo that has not opted in, and their promotions are unchanged.
+Run the repo's preflight gate now, **on every promotion**, gated or not. It goes **after** Step 4a
+deliberately: a diverged target stops the promotion in seconds, and there is no sense spending
+minutes on a test run that a STOP was going to discard.
 
 ```
-PREFLIGHT="$(flight config '.code.preflight // empty')"
-if [ -n "$PREFLIGHT" ]; then
-    # $SAFE_BRANCH, not $BRANCH — Step 1 flattened the slash. A raw `feature/<prefix>-<slug>`
-    # here names a directory that does not exist, so the redirection fails *before* the
-    # gate runs and a PASSING gate is reported red with no output to explain it.
-    PFLOG="$SCRATCH/preflight-$SAFE_BRANCH.log"
-    # The verdict goes to DISK, stamped with the commit it judged. A shell variable is gone by
-    # the next tool call, and one that a restated Step 1 could re-bind would turn a red gate
-    # green. Clear the old verdict first: until this run finishes there is no verdict at all.
-    VERDICT="$SCRATCH/preflight-verdict-$SAFE_BRANCH"
-    HEAD_SHA="$(git -C "$WT" rev-parse HEAD)"
-    rm -f "$VERDICT"
-    # Run in the branch's own worktree, by path — never rely on the shell's cwd.
-    if ( cd "$WT" && sh -c "$PREFLIGHT" ) >"$PFLOG" 2>&1; then
-        echo "pass $HEAD_SHA" >"$VERDICT"
-        echo "preflight: passed ($PREFLIGHT)"
-    else
-        tail -40 "$PFLOG"
-        echo "preflight failed — full output: $PFLOG" >&2
-        echo "fail $HEAD_SHA" >"$VERDICT"    # every merge and `pr open` below reads this back
-    fi
-fi
+# $SAFE_BRANCH, not $BRANCH: Step 1 flattened the slash, so these are plain file names.
+flight preflight run --worktree "$WT" \
+    --log "$SCRATCH/preflight-$SAFE_BRANCH.log" \
+    --verdict "$SCRATCH/preflight-verdict-$SAFE_BRANCH"
 ```
 
-The verdict is a **file** rather than a `# STOP` comment or a shell variable, on purpose. A
-comment stops nothing. A variable stops nothing either once the shell that held it is gone, and
-the merge lives in a *later* fenced block, which on a fresh-shell harness is a later shell. Worse,
-a variable with a green default has to be bound somewhere, and wherever that is can be re-run: it
-once sat in this step, where "skip when the key is absent" left it unset and an ungated repo was
-refused; moved to Step 1, restating Step 1 to recover `$MAIN` re-bound it to green over a red
-gate. A file has neither problem. Nothing sets it green except a gate that passed.
+`preflight run` reads `code.preflight`, runs it in the branch's own worktree, and records a
+**verdict file** stamped with the commit it judged: `pass <sha>`, `fail <sha>`, or `none <sha>`
+when the repo has no gate (so an ungated repo costs one quick call). It clears the old verdict
+before it starts, so an interrupted run leaves none at all. On a failure it prints the log's last
+40 lines and the log's path: show them, **stop**, and leave the branch unmerged — the fix belongs
+on the feature branch. On a pass it prints one line (*"preflight: passed (`<cmd>`)"*); keep it in
+the promotion report so the report records that the gate ran.
 
-**There are three sites, and the `pr` one is the site that matters.** Case 1 and Case 2 below are
-both `direct`-hop merges; `pr` is the commoner configuration, so a gate honoured only in the
-`direct` cases is a gate most repos never actually have. All three ask the same two questions
-of things that survive a tool call: does the **config** name a gate, and if so does the **verdict
-file** say `pass` for the exact commit being promoted. Everything else refuses (the gate never
-ran, it failed, the verdict is for an older commit, `$SCRATCH` was lost, the config could not be
-read), and all three **say** why they stopped. The config is read inline at each site, never from
-`$PREFLIGHT`: an unbound `$PREFLIGHT` looks exactly like "no gate configured".
-A guard that declines in silence is indistinguishable from a promotion that quietly did nothing,
-which is how a red gate gets mistaken for an idle run.
+Never run the gate yourself as `sh -c "$GATE"`: Claude Code's safety check cannot read inside a
+`sh -c` string and may stop to ask, which an unattended promotion cannot answer (FJ-307).
 
-On a failure, show the tail and the log path, **stop**, and leave the branch unmerged — the fix
-belongs on the feature branch. On a pass, say so in one line (*"preflight `<cmd>`: passed"*) so
-the promotion report records that the gate ran; when the key is unset, say nothing.
+The verdict is a **file**, not a shell variable, on purpose: the merge lives in a *later* fenced
+block, which on a fresh-shell harness is a later shell, and a variable is gone by then — or worse,
+re-bound to green by restating an earlier block. Nothing sets the file to `pass` except a gate that
+passed. Every merge and `pr open` below asks the same question of it:
 
-A `direct` hop runs this before the merge below. A `pr` hop runs it before `pr open` — that hop
-does not push `$BRANCH` at all, it requires the branch to be on origin already (see the source
-guard in the `pr` block, which tells you to push first rather than pushing for you) — so a red
-gate never reaches CI or a reviewer. It does not replace CI on a `pr` hop; it front-runs it.
+```
+flight preflight check --worktree "$WT" --verdict "$SCRATCH/preflight-verdict-$SAFE_BRANCH"
+```
+
+It succeeds only for `pass` or `none` on the branch's **current** commit. Anything else — no
+verdict, a failed gate, a verdict for an older commit, a lost `$SCRATCH` — fails and **says
+which**, so a refusal is never mistaken for a promotion that quietly did nothing.
+
+**There are three guarded sites, and the `pr` one is the site that matters.** Case 1 and Case 2
+below are both `direct`-hop merges; `pr` is the commoner configuration, so a gate honoured only in
+the `direct` cases is a gate most repos never actually have. A `direct` hop runs Step 4b before
+the merge. A `pr` hop runs it before `pr open` — that hop does not push `$BRANCH` at all, it
+requires the branch to be on origin already (see the source guard in the `pr` block, which tells
+you to push first rather than pushing for you) — so a red gate never reaches CI or a reviewer. It
+does not replace CI on a `pr` hop; it front-runs it.
 
 **Case 1 — `<target>` is checked out in a worktree** (the usual case for `feature → stages[0]`,
 where the main checkout sits on `develop`): merge in that worktree's path (usually `$MAIN`).
 
 ```
-# Merge and push without touching your current (feature) worktree.
-# No gate configured, or Step 4b's verdict file says this exact commit passed. Anything
-# else refuses, and says so: a guard that declines silently looks identical to a
-# promotion that did nothing.
-if ! GATE="$(flight config '.code.preflight // empty')"; then
-    echo "could not read code.preflight: not merging, not pushing" >&2
-elif [ -z "$GATE" ] || [ "$(cat "$SCRATCH/preflight-verdict-$SAFE_BRANCH" 2>/dev/null)" \
-                         = "pass $(git -C "$WT" rev-parse HEAD)" ]; then
-    git -C "$MAIN" merge --no-ff "$BRANCH" && git -C "$MAIN" push
+# Merge and push without touching your current (feature) worktree, and only when
+# Step 4b's verdict allows this exact commit.
+if flight preflight check --worktree "$WT" --verdict "$SCRATCH/preflight-verdict-$SAFE_BRANCH"; then
+    git -C "$MAIN" merge --no-ff "$BRANCH" &&
+        git -C "$MAIN" push
 else
-    echo "preflight gate is not green — not merging, not pushing" >&2
+    echo "not merging, not pushing" >&2
 fi
 ```
 
@@ -339,14 +318,11 @@ Fork the throwaway worktree from **`origin/<target>`**, not from the local ref, 
 ```
 git -C "$MAIN" fetch -q origin "<target>"
 git -C "$MAIN" worktree add --detach "$SCRATCH/promote-<target>-$$" "origin/<target>"
-if ! GATE="$(flight config '.code.preflight // empty')"; then
-    echo "could not read code.preflight: not merging, not pushing" >&2
-elif [ -z "$GATE" ] || [ "$(cat "$SCRATCH/preflight-verdict-$SAFE_BRANCH" 2>/dev/null)" \
-                         = "pass $(git -C "$WT" rev-parse HEAD)" ]; then
-    git -C "$SCRATCH/promote-<target>-$$" merge --no-ff "$BRANCH" && \
+if flight preflight check --worktree "$WT" --verdict "$SCRATCH/preflight-verdict-$SAFE_BRANCH"; then
+    git -C "$SCRATCH/promote-<target>-$$" merge --no-ff "$BRANCH" &&
         git -C "$SCRATCH/promote-<target>-$$" push origin "HEAD:<target>"
 else
-    echo "preflight gate is not green — not merging, not pushing" >&2
+    echo "not merging, not pushing" >&2
 fi
 git -C "$MAIN" worktree remove "$SCRATCH/promote-<target>-$$"
 # Bring the (unchecked-out) local ref back in line with what you just pushed:
@@ -408,20 +384,15 @@ fi
 ```
 
 ```
-# Same guard as the direct-hop merge sites, and on this hop it is the one that fires:
-# `pr` is the common configuration, so a gate honoured only in the `direct` cases is a
-# gate most repos never actually have. The `pr open` must sit INSIDE the guard — a bare
+# The same guard as the direct-hop sites. The `pr open` sits INSIDE it: a bare
 # `if … fi` with a "# STOP" comment in it is the defect this skill already fixed twice.
-if ! GATE="$(flight config '.code.preflight // empty')"; then
-    echo "could not read code.preflight: not opening the PR" >&2
-elif [ -z "$GATE" ] || [ "$(cat "$SCRATCH/preflight-verdict-$SAFE_BRANCH" 2>/dev/null)" \
-                         = "pass $(git -C "$WT" rev-parse HEAD)" ]; then
+if flight preflight check --worktree "$WT" --verdict "$SCRATCH/preflight-verdict-$SAFE_BRANCH"; then
     PR="$(flight pr open --head "$BRANCH" --base <target> \
             --title "…" --body-file "$SCRATCH/pr-body.md" \
             --model <your-model-id>)"                      # → number⇥url; body gets signed
     PR_NUM="$(printf '%s' "$PR" | cut -f1)"
 else
-    echo "preflight gate is not green — not opening the PR" >&2
+    echo "not opening the PR" >&2
 fi
 ```
 
@@ -552,8 +523,12 @@ you would for a diverged target in Step 4a.
   CI behind you: the gate you skipped was the only one, and what it would have caught lands on
   the stage instead. (Running it and then merging anyway is the same mistake, louder.)
 - Running the preflight *before* the Step 4a freshness check, so a diverged target discards a
-  test run you just paid for — or running it from whatever directory the shell is in rather than
-  from `$WT`, which gates the wrong tree.
+  test run you just paid for — or pointing `--worktree` anywhere but `$WT`, which gates the
+  wrong tree.
+- Skipping Step 4b because the repo has no gate. The guards need its verdict (`none <sha>`) and
+  refuse without one — the refusal says so, and the fix is to run Step 4b.
+- Running the gate by hand with `sh -c` instead of `flight preflight run`: an unattended session
+  can be stopped by the safety prompt, and nothing writes the verdict the guards read.
 - Hard-coding `--strategy squash` (or any strategy) instead of reading the target stage's
   `strategy` field. The default is `merge`, and a repo that wants otherwise says so in config.
 - Skipping Step 6 after a stage → stage hop, or running it after a feature hop. Only a stage

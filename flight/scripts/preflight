@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+#
+# preflight — run the repo's `code.preflight` gate in a worktree, and check what it decided.
+# Reached through the dispatcher (FJ-307):
+#
+#   flight preflight run   --worktree DIR [--log FILE] [--verdict FILE]
+#   flight preflight check --worktree DIR --verdict FILE
+#
+# Why a verb rather than a snippet: the skills used to run the gate themselves, as
+# `( cd "$WT" && sh -c "$GATE" )`. Claude Code's Bash safety check cannot see inside a
+# `sh -c` string, so it may stop to ask — and an unattended session cannot answer, so the
+# step was denied at exactly the check the workflow depends on. Here the `sh -c` runs
+# inside this script, and the agent's own command is one plain line.
+#
+# The dispatcher reads `code.preflight` and passes it as --gate; this script never reads
+# config itself.
+#
+# run   Runs the gate in DIR, its output going to --log (a temp file when omitted).
+#         exit 0  the gate passed, or the repo configures none
+#         exit 1  the gate failed: the log's last 40 lines, then where the full log is
+#       --verdict FILE records the outcome for the commit it judged: `pass <sha>`,
+#       `fail <sha>` or `none <sha>`. The file is removed before the gate starts, so an
+#       interrupted run leaves no verdict rather than a stale one.
+#
+# check Exits 0 only when FILE says `pass` or `none` for DIR's CURRENT commit. Anything
+#       else — no file, a failed gate, a verdict for an older commit — exits 1 and says
+#       which, so a refusal is never silent.
+#
+# Both exit 2 on a usage error.
+set -euo pipefail
+
+die() { echo "flight preflight: $*" >&2; exit 2; }
+
+cmd="${1:-}"
+[ $# -gt 0 ] && shift
+
+gate=""
+gate_given=0
+worktree=""
+log=""
+verdict=""
+while [ $# -gt 0 ]; do
+	[ $# -ge 2 ] || die "$1 needs a value"
+	case "$1" in
+		--gate)     gate="$2"; gate_given=1 ;;
+		--worktree) worktree="$2" ;;
+		--log)      log="$2" ;;
+		--verdict)  verdict="$2" ;;
+		*)          die "unknown argument '$1'" ;;
+	esac
+	shift 2
+done
+
+[ -n "$worktree" ] || die "--worktree is required"
+[ -d "$worktree" ] || die "--worktree '$worktree' is not a directory"
+head_sha="$(git -C "$worktree" rev-parse HEAD 2>/dev/null)" || die "cannot read HEAD in '$worktree'"
+
+case "$cmd" in
+	run)
+		[ "$gate_given" = 1 ] || die "run: --gate is required (the dispatcher passes code.preflight)"
+		if [ -n "$verdict" ]; then
+			rm -f "$verdict"
+		fi
+
+		if [ -z "$gate" ]; then
+			echo "preflight: none configured"
+			if [ -n "$verdict" ]; then
+				echo "none $head_sha" >"$verdict"
+			fi
+			exit 0
+		fi
+
+		if [ -z "$log" ]; then
+			log="$(mktemp "${TMPDIR:-/tmp}/flight-preflight.XXXXXX")"
+		fi
+
+		if ( cd "$worktree" && sh -c "$gate" ) >"$log" 2>&1; then
+			if [ -n "$verdict" ]; then
+				echo "pass $head_sha" >"$verdict"
+			fi
+			echo "preflight: passed ($gate)"
+			exit 0
+		fi
+
+		if [ -n "$verdict" ]; then
+			echo "fail $head_sha" >"$verdict"
+		fi
+		tail -n 40 "$log"
+		echo "preflight: FAILED ($gate) — full log: $log" >&2
+		exit 1
+		;;
+
+	check)
+		[ -n "$verdict" ] || die "check: --verdict is required"
+		recorded="$(cat "$verdict" 2>/dev/null || true)"
+		case "$recorded" in
+			"pass $head_sha" | "none $head_sha")
+				exit 0
+				;;
+			"fail $head_sha")
+				echo "preflight: the gate FAILED for $head_sha — fix the branch and run it again" >&2
+				;;
+			"")
+				echo "preflight: no verdict for $head_sha — run \`flight preflight run\` first" >&2
+				;;
+			*)
+				echo "preflight: the verdict is for ${recorded#* }, not the current $head_sha — run the gate again" >&2
+				;;
+		esac
+		exit 1
+		;;
+
+	*)
+		die "unknown verb '$cmd' (preflight: run check)"
+		;;
+esac
