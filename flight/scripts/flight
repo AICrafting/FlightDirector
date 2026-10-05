@@ -389,25 +389,6 @@ tracker_tool() {
 	[ -x "$TRACKER_TOOL" ] || die_code not-configured "named tracker helper is not installed ($TRACKER_TOOL)"
 	"$TRACKER_TOOL" "$@"
 }
-# tracker_coded CODE ARGS… — tracker_tool whose failure is recorded under CODE with
-# the helper's own last message (it prints its reason on stderr and exits 1, so
-# the call site is what knows the code: an id or ref that does not resolve is
-# `not-found`).
-tracker_coded() {
-	local code="$1" tc_out tc_err; shift
-	[ -x "$TRACKER_TOOL" ] || die_code not-configured "named tracker helper is not installed ($TRACKER_TOOL)"
-	tc_err="$(mktemp "${TMPDIR:-/tmp}/flight-tracker.XXXXXX")"
-	if tc_out="$(tracker_tool "$@" 2>"$tc_err")"; then
-		cat "$tc_err" >&2; rm -f "$tc_err"
-		printf '%s\n' "$tc_out"
-		return 0
-	fi
-	cat "$tc_err" >&2
-	record_error "$code" "$(awk 'NF { l = $0 } END { print l }' "$tc_err")"
-	rm -f "$tc_err"
-	exit 1
-}
-
 # Every config-reading path rejects a schema this runtime does not understand, so a
 # newer config is never misread or rewritten. Prompt-log hooks run in every project
 # and must stay silent, so they are the one exemption.
@@ -835,7 +816,49 @@ fi
 # adapters never choose a tracker. PR and CI verbs keep using `code`.
 tracker_json=""
 if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
-	tracker_tool validate --config "$cfg" ${cfg_tmp:+--tracked "$cfg_tracked"} || die_code not-configured "(in $cfg_rel${cfg_tmp:+ merged with its config.local.json}) — fix the config before any issue operation"
+	# ONE helper launch validates the config and, for a verb that acts on a tracker,
+	# resolves its issue id and selects the tracker (FJ-301): it used to be up to three
+	# launches of tracker-config.sh, and a fresh bash is the dearest process on Windows.
+	# Verbs that hand off or fan out (copy, deps, --all-trackers) only validate here;
+	# their helpers and per-tracker dispatches route for themselves.
+	route_args=(); route_identity=""; route_tracker=""
+	case "$group/$verb" in
+		issues/copy | issues/resync | issues/block | issues/unblock | issues/blockers | issues/blocking) ;;
+		issues/resolve)
+			[ "${1:-}" = --number ] && [ $# -eq 2 ] || die "usage: flight issues resolve --number INPUT [--tracker REF]"
+			route_args=(--number "$2") ;;
+		*)
+			if [ "$all_trackers" != 1 ]; then
+				route_args=(--select)
+				# An issue id picks the tracker (and becomes the adapter's native id) unless
+				# an explicit --tracker disagrees, which is an error rather than a guess.
+				if [ "$group" = issues ] && [ "$verb" != tracker ]; then
+					issue_input=""; want_number=0
+					for route_arg in "$@"; do
+						if [ "$want_number" = 1 ]; then issue_input="$route_arg"; want_number=0
+						elif [ "$route_arg" = --number ]; then want_number=1
+						fi
+					done
+					[ "$want_number" = 0 ] || die "issues $verb: --number needs a value"
+					[ -z "$issue_input" ] || route_args+=(--number "$issue_input")
+				fi
+			fi ;;
+	esac
+	route_err="$(mktemp "${TMPDIR:-/tmp}/flight-tracker.XXXXXX")"
+	route_rc=0
+	route_out="$(tracker_tool route --config "$cfg" ${cfg_tmp:+--tracked "$cfg_tracked"} \
+		${tracker_selector:+--tracker "$tracker_selector"} ${route_args[@]+"${route_args[@]}"} 2>"$route_err")" || route_rc=$?
+	cat "$route_err" >&2
+	case "$route_rc" in
+		0) rm -f "$route_err" ;;
+		3) rm -f "$route_err"
+		   die_code not-configured "(in $cfg_rel${cfg_tmp:+ merged with its config.local.json}) — fix the config before any issue operation" ;;
+		*) record_error not-found "$(awk 'NF { l = $0 } END { print l }' "$route_err")"
+		   rm -f "$route_err"; exit 1 ;;
+	esac
+	# `$(…)` dropped the trailing empty line(s), so a read may meet EOF: not an error.
+	{ IFS= read -r route_identity || true; IFS= read -r route_tracker || true; } <<<"$route_out"
+	unset route_out route_err route_rc
 
 	# config.local.json arrays replace wholesale: a local issueTrackers array that lacks
 	# a tracker the tracked config has hides that tracker on this machine. Warn once per
@@ -916,8 +939,7 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 	# `issues resolve --number INPUT [--tracker REF]` — the canonical identity JSON
 	# every workflow retains: {tracker, number (native id), qualified, branchPrefix}.
 	if [ "$group" = issues ] && [ "$verb" = resolve ]; then
-		[ "${1:-}" = --number ] && [ $# -eq 2 ] || die "usage: flight issues resolve --number INPUT [--tracker REF]"
-		tracker_coded not-found resolve --config "$cfg" --number "$2" ${tracker_selector:+--tracker "$tracker_selector"}
+		printf '%s\n' "$route_identity"   # resolved by the route call above
 		exit 0
 	fi
 
@@ -925,7 +947,7 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 	# secrets), e.g. to read its label map: `… | jq -r '.labels.status["to-test"]'`.
 	if [ "$group" = issues ] && [ "$verb" = tracker ]; then
 		[ $# -eq 0 ] || die "usage: flight issues tracker [--tracker REF]"
-		tracker_coded not-found select --config "$cfg" ${tracker_selector:+--tracker "$tracker_selector"}
+		printf '%s\n' "$route_tracker"    # selected by the route call above
 		exit 0
 	fi
 
@@ -953,31 +975,19 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 		esac
 	fi
 
-	# An issue id picks the tracker (and becomes the adapter's native id) unless an
-	# explicit --tracker disagrees, which is an error rather than a guess.
-	if [ "$group" = issues ]; then
-		issue_input=""; want_number=0
-		for route_arg in "$@"; do
-			if [ "$want_number" = 1 ]; then issue_input="$route_arg"; want_number=0
-			elif [ "$route_arg" = --number ]; then want_number=1
+	# The route call above resolved any --number; hand the adapter its native id.
+	if [ -n "$route_identity" ]; then
+		IFS=$'\t' read -r tracker_selector native_number <<<"$(jq -r '[.tracker, .number] | @tsv' <<<"$route_identity")"
+		routed=()
+		while [ $# -gt 0 ]; do
+			if [ "$1" = --number ]; then routed+=(--number "$native_number"); shift 2
+			else routed+=("$1"); shift
 			fi
 		done
-		[ "$want_number" = 0 ] || die "issues $verb: --number needs a value"
-		if [ -n "$issue_input" ]; then
-			identity_json="$(tracker_coded not-found resolve --config "$cfg" --number "$issue_input" ${tracker_selector:+--tracker "$tracker_selector"})"
-			tracker_selector="$(jq -r '.tracker' <<<"$identity_json")"
-			native_number="$(jq -r '.number' <<<"$identity_json")"
-			routed=()
-			while [ $# -gt 0 ]; do
-				if [ "$1" = --number ]; then routed+=(--number "$native_number"); shift 2
-				else routed+=("$1"); shift
-				fi
-			done
-			set -- ${routed[@]+"${routed[@]}"}
-		fi
+		set -- ${routed[@]+"${routed[@]}"}
 	fi
 
-	tracker_json="$(tracker_coded not-found select --config "$cfg" ${tracker_selector:+--tracker "$tracker_selector"})"
+	tracker_json="$route_tracker"
 fi
 
 # Loud, every-run warning if the secrets file is tracked by git (it holds a token).
