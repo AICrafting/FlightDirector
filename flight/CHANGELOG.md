@@ -67,6 +67,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ### Fixed
 
+- **`scripts/bump-version.sh` rolls a CRLF changelog** (FJ-225). On a Windows checkout, where
+  markdown keeps native line endings, it never found `## [Unreleased]`. It still reported
+  success, after bumping the manifests and leaving the changelog unrolled. It now matches the
+  heading regardless of `\r` and writes the new lines with the file's own ending. If the heading
+  is missing, it stops before changing anything.
+
 - **`flight branches prune` drops a deleted branch's retained identity binding** (FJ-248). The
   schema-3 migration binds every legacy `feature/<N>-…` branch to its tracker in
   `.flightdirector/batches/work-items/identities.json`, and nothing ever removed those entries, so

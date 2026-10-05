@@ -179,6 +179,35 @@ check "warns when rolling an empty Unreleased section" \
 check "still bumps despite empty Unreleased" \
 	"$(grep -qx '9.10.0' < <(json_version "$SANDBOX/other/.claude-plugin/plugin.json") && echo 1 || echo 0)"
 
+# --- a CRLF changelog (FJ-225) ------------------------------------------------
+# Markdown keeps native line endings, so a Windows checkout's CHANGELOG.md is CRLF. The roll
+# must still find the heading, and the lines it adds must match the file's own endings.
+CRLF="$(mktemp -d)"
+make_sandbox "$CRLF"
+sed 's/$/\r/' "$CRLF/flight/CHANGELOG.md" >"$CRLF/cl.tmp" && mv "$CRLF/cl.tmp" "$CRLF/flight/CHANGELOG.md"
+crlf_out="$(BUMP_VERSION_ROOT="$CRLF" "$BUMP" flight 1.3.0 2>&1)" && crlf_rc=0 || crlf_rc=$?
+check "CRLF changelog: the bump succeeds" "$([ "$crlf_rc" = 0 ] && echo 1 || echo 0)"
+check "CRLF changelog: [Unreleased] is rolled into the new version" \
+	"$(grep -q '^## \[1.3.0\] - ' <<<"$(tr -d '\r' <"$CRLF/flight/CHANGELOG.md")" && echo 1 || echo 0)"
+check "CRLF changelog: every line still ends in CRLF" \
+	"$([ "$(grep -c $'\r$' "$CRLF/flight/CHANGELOG.md")" = "$(wc -l <"$CRLF/flight/CHANGELOG.md" | tr -d ' ')" ] && echo 1 || echo 0)"
+check "CRLF changelog: no spurious empty-Unreleased warning" \
+	"$(grep -qi 'empty' <<<"$crlf_out" && echo 0 || echo 1)"
+rm -rf "$CRLF"
+
+# --- no [Unreleased] heading: refuse before changing anything ------------------
+NOHEAD="$(mktemp -d)"
+make_sandbox "$NOHEAD"
+sed 's/^## \[Unreleased\]$/## Pending/' "$NOHEAD/flight/CHANGELOG.md" >"$NOHEAD/cl.tmp" && mv "$NOHEAD/cl.tmp" "$NOHEAD/flight/CHANGELOG.md"
+if BUMP_VERSION_ROOT="$NOHEAD" "$BUMP" flight 1.3.0 >/dev/null 2>&1; then
+	check "no [Unreleased] heading: the bump fails" 0
+else
+	check "no [Unreleased] heading: the bump fails" 1
+fi
+check "no [Unreleased] heading: the manifests are untouched" \
+	"$([ "$(json_version "$NOHEAD/flight/.claude-plugin/plugin.json")" = 1.2.3 ] && [ "$(json_version "$NOHEAD/flight/.codex-plugin/plugin.json")" = 1.2.3 ] && echo 1 || echo 0)"
+rm -rf "$NOHEAD"
+
 # --- summary ----------------------------------------------------------------
 # Summary: plain when nothing failed, red when something did (#123).
 [ "$fail" -gt 0 ] && summary_colour=$'\033[0;31m' || summary_colour=''
