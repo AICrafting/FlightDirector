@@ -148,7 +148,7 @@ printf '%s\t%s\t%s\t%s\t%s\n' "$method" "$url" "$headers" "$user" "$data" >>"${C
 case "$url" in *fail.example.com*) exit 6 ;; esac
 body='[]'
 case "$url" in
-	*/labels*page=1*) body='[{"id":22,"name":"alt/progress","color":"fff","description":""},{"id":23,"name":"model/sol","color":"fff","description":""},{"id":24,"name":"one/progress","color":"fff","description":""}]' ;;
+	*/labels*[?\&]page=1) body='[{"id":22,"name":"alt/progress","color":"fff","description":""},{"id":23,"name":"model/sol","color":"fff","description":""},{"id":24,"name":"one/progress","color":"fff","description":""}]' ;;
 	*/labels*) body='[]' ;;
 	*/rest/api/3/search/jql*) body='{"issues":[{"key":"PROJ-1","fields":{"summary":"Jira issue","labels":[]}}]}' ;;
 	*/rest/api/3/issue/*) body='{"key":"PROJ-7","fields":{"summary":"Jira","description":null,"status":{"name":"To Do","statusCategory":{"key":"new"}}}}' ;;
