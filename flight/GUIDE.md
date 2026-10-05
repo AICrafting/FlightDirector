@@ -87,6 +87,11 @@ the whole lifecycle into the session:
 2. That's it — no server to run. The skills activate automatically when you say things that match
    them (see the workflow below).
 
+3. To check which flight the session loaded, run **`/flight:version`**. It prints the plugin's
+   version from the installed copy's own manifest, the install it came from (e.g.
+   `flight@flightdirector`), its root, and the `flight` CLI on `PATH` — with a note when that CLI
+   is a different version (say, after an upgrade before the session restarted).
+
 ## Install in Codex
 
 1. Add the same marketplace, then install the plugin — from the shell:
@@ -104,6 +109,10 @@ the whole lifecycle into the session:
 
 3. Invoke skills by name with `$filing-issues`, `$working-an-issue`, `$queue-batches`, …, or just
    describe what you want — the same natural-language triggers work in both harnesses.
+
+Codex plugins carry skills and hooks but no slash commands, so there is no `/flight:version`
+there. The same report comes from the script behind it — `bash <plugin root>/scripts/plugin-version.sh`
+(add `--json` for a machine-readable copy) — and `flight --version` gives the CLI's version.
 
 Allow the configured forge hostname when Codex requests network permission. Parallel queues
 (`queue-batches`) require Codex multi-agent support; every other workflow runs without it.
@@ -156,6 +165,29 @@ touching the others; the default only changes if you ask. Then `GH-12` or `KAN-7
 on that tracker, `#12` still means the default, and `flight issues list --all-trackers` lists every
 tracker at once.
 
+**Copying an issue to another tracker.** Say *"copy GH-3 into Forgejo"*, and
+**`copying-an-issue`** checks the target for an existing copy, shows a preview, and copies it. Or
+run it yourself:
+
+```
+flight issues copy --from GH-3 --to FJ --dry-run      # preview
+flight issues copy --from GH-3 --to FJ                # copy (prints e.g. FJ-271)
+flight issues resync --from GH-3 --to FJ              # later: bring over new comments
+```
+
+Body, comments, labels and status come along unless you pass `--no-body`, `--no-comments`,
+`--no-labels` or `--no-status`. Nothing names the source on the copy unless you add `--footer`
+or `--back-link`, which matters when copying from a private tracker to a public one.
+
+### Blocked issues
+
+Record that one issue waits on another with `flight issues block --number FJ-12 --by GH-3`, and
+remove it with `flight issues unblock`. `flight issues blockers --number FJ-12` and `blocking`
+list the links. Flight uses the backend's own relationship where it has one, and a pair of signed
+comments otherwise (always across trackers). The blocked issue's status moves to `blocked` and
+back unless you pass `--no-status`. `working-an-issue` warns you about open blockers before it
+starts.
+
 ---
 
 ## The workflow at a glance
@@ -171,6 +203,7 @@ tracker at once.
 | "clean up the branches", "delete merged branches", "what branches can go" | **cleaning-up-branches** | Find branches already merged into a stage, cross-check their issues, then delete refs + worktrees on your go-ahead |
 | "set up flight", "bootstrap labels" | **setting-up-a-repo** | First-run setup (above); re-run after an upgrade to answer new questions |
 | "add an issue tracker", "connect Jira", "track issues on GitHub too" | **add-an-issue-tracker** | Add or complete one named tracker — ref, credential, starting status, labels — keeping the default |
+| "copy GH-3 into Forgejo", "resync the copy" | **copying-an-issue** | Duplicate scan → dry-run preview → copy to another tracker; later, bring over new comments |
 
 You never type the underlying commands — you talk to Claude, and the skills drive the forge for
 you.
@@ -275,7 +308,8 @@ If you give flight your repo's check command, it runs it first:
 "code": { "preflight": "./scripts/run-checks.sh" }
 ```
 
-**promoting-a-branch** runs it from the branch's worktree just before the merge (or before
+**working-an-issue** runs it before moving an issue to `to-test`, and a red result keeps the
+issue `in-progress`. **promoting-a-branch** runs it from the branch's worktree just before the merge (or before
 opening the PR, on a `pr` hop). Only the exit code counts: zero carries on, anything else stops
 the promotion and shows you the failing output. **promoting-branches** depends on the hop: on a
 `direct` hop it runs it per branch, so one red branch is skipped while the clean ones still
@@ -384,7 +418,8 @@ estimated cost — to a gitignored `.flightdirector/prompt-log.jsonl`. **Claude 
 write the same file with the same schema**, so a project worked from both (even at once) has one
 ledger, and `flight prompt-log summary --session <id>` renders the per-model totals the
 ledger comment pastes in. Cost is priced from a bundled table you can extend per repo
-(`.flightdirector/pricing.json`); under a subscription login it is labelled `api-equivalent` —
+(`.flightdirector/pricing.json`), and `summary` prices each row again from its tokens, so a
+pricing fix also corrects turns already logged; under a subscription login it is labelled `api-equivalent` —
 what the tokens *would* cost via the API, good for comparing issues, not a bill. Unknown models
 and unreadable transcripts show up as `null` with a warning, never as a silent zero. Full schema
 and semantics: [prompt-log.md](references/prompt-log.md).

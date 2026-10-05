@@ -16,6 +16,9 @@ BM="$REPO_ROOT/flight/scripts/batch-manifest"
 pass=0; fail=0
 check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=$((pass+1));
 			else printf '\033[0;31m  ✗ %s\033[0m\n  %s\n' "$1" "${3:-}"; fail=$((fail+1)); fi; }
+# tracks <ID> — pr-reference's cross-tracker line: the id is a code span (#247).
+BT='`'
+tracks() { printf 'Tracks %s%s%s' "$BT" "$1" "$BT"; }
 section() { printf '\033[1m── %s ──\033[0m\n' "$1"; }
 
 SANDBOX="$(cd "$(mktemp -d)" && pwd -P)"; trap 'rm -rf "$SANDBOX"' EXIT
@@ -126,7 +129,7 @@ section "promotion"
 GH_OUT="$(ident pr-reference --identity "$GH1" --closes true)"
 FJ_OUT="$(ident pr-reference --identity "$ISSUE" --closes true)"
 check "the code repository's own issue gets its closing keyword" "$([ "$FJ_OUT" = 'Closes #1' ] && echo 1 || echo 0)" "$FJ_OUT"
-check "the cross-tracker GH-1 can never close the code repository's issue 1" "$([ "$GH_OUT" = 'Tracks GH-1' ] && echo 1 || echo 0)" "$GH_OUT"
+check "the cross-tracker GH-1 can never close the code repository's issue 1" "$([ "$GH_OUT" = "$(tracks GH-1)" ] && echo 1 || echo 0)" "$GH_OUT"
 : >"$CURL_LOG"
 GH_ISSUE="$(ident from-branch --branch feature/gh-1-widget)"
 flight issues set-status --tracker "$(jq -r .tracker <<<"$GH_ISSUE")" --number "$(jq -r .number <<<"$GH_ISSUE")" --status to-test >/dev/null 2>&1 || true

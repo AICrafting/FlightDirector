@@ -30,8 +30,11 @@ section() { printf '\033[1m── %s ──\033[0m\n' "$1"; }
 ok() { if "$@" >/dev/null 2>&1; then echo 1; else echo 0; fi; }
 
 # block <file> <marker> — the fenced block that follows `<!-- marker -->`.
+# Markdown keeps native line endings (.gitattributes), so a Windows checkout reads CRLF:
+# drop the \r first, or no marker or closing fence ever matches and every block is empty.
 block() {
 	awk -v marker="<!-- $2 -->" '
+		{ sub(/\r$/, "") }
 		$0 == marker { found = 1; next }
 		found && !fence && /^```/ { fence = 1; next }
 		fence && /^```$/ { exit }
@@ -285,7 +288,7 @@ check "a tracker added after the switch does not take the default" \
 section "skill contract (prose)"
 says() { grep -Fq -- "$2" "$1"; }
 check "add-an-issue-tracker is a packaged skill with its own name" \
-	"$(ok grep -q '^name: add-an-issue-tracker$' "$TRACKER_SKILL")"
+	"$(grep -q '^name: add-an-issue-tracker$' <<<"$(tr -d '\r' <"$TRACKER_SKILL")" && echo 1 || echo 0)"   # CRLF-safe
 check "add-an-issue-tracker starts with the runtime preflight" \
 	"$(ok says "$TRACKER_SKILL" 'follow [runtime preflight](../../references/runtime.md)')"
 check "its triggers cover adding / connecting a tracker" \
@@ -295,6 +298,9 @@ check "it documents all three starting-status states" \
 	"$(says "$TRACKER_SKILL" '| absent | never asked |' && says "$TRACKER_SKILL" '| `false` | declined |' && says "$TRACKER_SKILL" '| a string | configured |' && echo 1 || echo 0)"
 check "it prefers the Jira project key, else GH/FJ/GL" \
 	"$(says "$TRACKER_SKILL" 'the project key' && says "$TRACKER_SKILL" '`FJ` (Forgejo/Gitea), `GH` (GitHub), `GL` (GitLab)' && echo 1 || echo 0)"
+check "it steers a GitHub tracker off the ref GH when the code repo is on GitHub (#247)" \
+	"$(says "$TRACKER_SKILL" '**GitHub, while the code repository is also on GitHub**' && says "$TRACKER_SKILL" 'never propose `GH`' \
+		&& says "$TRACKER_SKILL" 'GitHub autolinks' && echo 1 || echo 0)"
 check "it never renames, recolors or deletes labels" "$(ok says "$TRACKER_SKILL" 'Never rename, recolor, or delete an existing label')"
 check "it keys own credentials under secrets.issueTrackers.<REF>" "$(ok says "$TRACKER_SKILL" 'secrets.issueTrackers.<REF>.token')"
 check "setting-up-a-repo delegates trackers to add-an-issue-tracker" \
@@ -314,6 +320,22 @@ check "setting-up-a-repo migrates older schemas with reconcile, never by hand" \
 	"$(says "$SETUP_SKILL" 'Never hand-convert an older config' && says "$SETUP_SKILL" 'flight reconcile' && echo 1 || echo 0)"
 check "the breadcrumb example uses tracker-qualified branches" \
 	"$(says "$SETUP_SKILL" 'feature/<ref>-<N>-<slug>' && says "$SETUP_SKILL" '--tracker <REF>' && echo 1 || echo 0)"
+
+section "breadcrumb target file — AGENTS.md by default, no CLAUDE.md stub (FJ-246)"
+check "only AGENTS.md: the block goes in AGENTS.md and no CLAUDE.md is created" \
+	"$(ok says "$SETUP_SKILL" '| only `AGENTS.md` | Put the block in `AGENTS.md`. Don'"'"'t create a `CLAUDE.md`. |')"
+check "neither: only AGENTS.md is created" \
+	"$(ok says "$SETUP_SKILL" '| neither | Create `AGENTS.md` with the block — only `AGENTS.md`. |')"
+check "only CLAUDE.md: the block goes in CLAUDE.md as-is, no split" \
+	"$(ok says "$SETUP_SKILL" '| only `CLAUDE.md` | Put the block in `CLAUDE.md` and use it as-is — no `AGENTS.md`, no split. |')"
+check "both: the block goes in AGENTS.md, with the @AGENTS.md import offer kept" \
+	"$(ok says "$SETUP_SKILL" '| both | Put the block in `AGENTS.md`. If `CLAUDE.md` has no `@AGENTS.md` import, offer to add one at its top. |')"
+check "the skill no longer offers to create a CLAUDE.md containing @AGENTS.md" \
+	"$(! grep -qiE 'create (one|a `CLAUDE\.md`) contain|a `CLAUDE\.md` containing `@AGENTS\.md`' "$SETUP_SKILL" && echo 1 || echo 0)"
+check "the skill no longer recommends splitting a CLAUDE.md-only repo" \
+	"$(! grep -qi 'Recommend the split' "$SETUP_SKILL" && echo 1 || echo 0)"
+check "the description no longer says AGENTS.md is imported by CLAUDE.md" \
+	"$(! grep -q 'imported by CLAUDE.md' <<<"$(sed -n '/^description:/p' "$SETUP_SKILL")" && echo 1 || echo 0)"
 
 section "skill inventories"
 skills_dir="$(find "$REPO_ROOT/flight/skills" -mindepth 2 -maxdepth 2 -name SKILL.md | sed 's#/SKILL.md$##; s#.*/##' | sort)"

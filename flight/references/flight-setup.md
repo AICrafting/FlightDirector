@@ -233,6 +233,14 @@ code credential; any other gets its own token under `secrets.issueTrackers.<REF>
 the credential with `flight auth check --tracker <REF>` and reconciles that tracker's labels on
 their own.
 
+**Copied issues.** `flight issues copy` (and the `copying-an-issue` skill) records each copy in
+`.flightdirector/copies.jsonl`: one JSON line per step, `{source, target, at, components,
+comments}`, with the latest line for a source and target tracker winning. It belongs to this
+clone and must be git-ignored (`setting-up-a-repo` adds `.flightdirector/copies.jsonl` to
+`.gitignore`; `copy` warns while it isn't), since it maps private issues to public copies. `copy` uses it to refuse
+a second copy, and `resync` uses it to know which comments are already across. Deleting it
+forgets the links; it never affects the issues themselves.
+
 Two top-level keys should be left alone once present:
 
 - **`issues: { "backend": "requires-newer-flight", … }`** — written by migration and by
@@ -310,7 +318,8 @@ remote-tracking, e.g. `feature/12-x`) and batch manifest in
 `.flightdirector/batches/work-items/identities.json`, bound to `legacyIssueTracker`. It lives
 under `.flightdirector/batches/`, which setup already gitignores; it is local, merged (never
 re-pointed) on repeat runs, and a file bound to a different tracker stops the migration with a
-repairable error.
+repairable error. `flight branches prune` drops a branch's entry once that branch is gone both locally
+and on origin (never while either ref remains).
 
 ### Repo preflight gate (optional)
 
@@ -333,7 +342,7 @@ reader treats exactly like an absent key.
   ```
   **Working directory:** always the checkout that holds the code being gated, passed explicitly
   (`sh -c "$PREFLIGHT"` run from that path, never from whatever directory the shell has wandered
-  into). That is the feature worktree `$WT` in `promoting-a-branch`, each feature worktree in
+  into). That is the feature worktree `$WT` in `working-an-issue` and `promoting-a-branch`, each feature worktree in
   `promoting-branches`, the integration worktree on a `pr` group, and each issue worktree
   (`.worktrees/<ref>-<N>-<slug>`) in `queue-batches`. Write the command so it works from a repo
   root that is not the main checkout — a hard-coded absolute path defeats the point.
@@ -345,7 +354,8 @@ reader treats exactly like an absent key.
   branch moves between the gate and the merge, or a promotion tries to lean on an earlier run,
   it stops with *"preflight gate is not green"* even though the last run you saw was green.
   That is not a false red: the gate has not seen that commit. Promote again and it will.
-  **Where it runs:** `promoting-a-branch` before the merge on a `direct` hop and before
+  **Where it runs:** `working-an-issue` before moving the issue to `to-test` (a failure leaves
+  it `in-progress`); `promoting-a-branch` before the merge on a `direct` hop and before
   `pr open` on a `pr` hop (that hop never pushes the source branch — it expects it on origin
   already); `promoting-branches` before each branch's merge on a `direct` hop (a failure skips
   that branch and the group continues), and on a `pr` hop once on the group's assembled

@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Summarise the prompt ledger (.flightdirector/prompt-log.jsonl) for a work-ledger entry.
 
-	flight prompt-log summary --session <id> [--session <id> …] [--since <ISO-8601>] [--json]
+	flight prompt-log summary --session <id> [--session <id> …] [--since <ISO-8601>] [--json] [--as-logged]
 
 Reads the main worktree's .flightdirector/prompt-log.jsonl (any harness, any provider), keeps
 the rows for the given session id(s) (and, with --since, at or after that
 timestamp), and prints a Markdown block the ledger comment can paste as-is:
 totals per provider/model, rows with null usage counted separately so an
 "estimate" is only claimed when there truly is no data, and the cost basis.
+
+Each row is priced from its stored tokens at today's pricing.json rates, so a pricing
+fix (bundled or a repo override) reaches turns logged before it. A row that cannot be
+priced that way keeps the `cost_usd` it was logged with; --as-logged uses only those.
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from common import ledger_path, main_worktree, warn
+from common import ledger_path, main_worktree, merged_pricing, price_row, warn
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -27,6 +31,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 	parser.add_argument("--session", action="append", default=[], help="session_id to include (repeatable)")
 	parser.add_argument("--since", help="ISO-8601 timestamp; keep rows at or after it")
 	parser.add_argument("--json", action="store_true", help="emit the aggregate as JSON instead of Markdown")
+	parser.add_argument("--as-logged", action="store_true", help="sum the cost_usd each row was logged with instead of re-pricing it")
 	parser.add_argument("--log", help="path to the ledger (default: <main worktree>/.flightdirector/prompt-log.jsonl)")
 	return parser.parse_args(argv)
 
@@ -81,7 +86,12 @@ def is_helper_stop(row: dict[str, Any]) -> bool:
 	)
 
 
-def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def aggregate(rows: list[dict[str, Any]], repo_root: Path | None = None, as_logged: bool = True) -> dict[str, Any]:
+	"""Totals per harness × provider × model. Unless `as_logged`, each measured row is
+	priced again from its tokens (pricing read from `repo_root`); a row that cannot be
+	(an unknown model, or an older multi-model row) keeps its logged `cost_usd`."""
+	pricing = None if as_logged or repo_root is None else merged_pricing(repo_root)
+	repriced = 0
 	groups: dict[tuple[str, str, str], dict[str, Any]] = {}
 	helper_stops = sum(1 for row in rows if is_helper_stop(row))
 	rows = [row for row in rows if not is_helper_stop(row)]
@@ -114,7 +124,11 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 			value = row.get(field)
 			if isinstance(value, (int, float)) and not isinstance(value, bool):
 				group[field] += int(value)
-		cost = row.get("cost_usd")
+		cost = price_row(repo_root, row, pricing) if pricing is not None else None
+		if cost is not None:
+			repriced += 1
+		else:
+			cost = row.get("cost_usd")
 		if isinstance(cost, (int, float)) and not isinstance(cost, bool):
 			group["cost_usd"] += float(cost)
 			basis = row.get("cost_basis")
@@ -138,6 +152,8 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 		"subagent_agents": len(agents),
 		"cost_usd": round(total_cost, 6),
 		"cost_basis": sorted(bases),
+		"pricing": "as-logged" if pricing is None else "current",
+		"repriced_rows": repriced,
 		"unpriced_models": sorted(unpriced_models, key=lambda m: (-m["rows"], m["model"])),
 		"groups": sorted(groups.values(), key=lambda g: (-g["cost_usd"], -g["output_tokens"])),
 	}
@@ -161,7 +177,8 @@ def render_markdown(summary: dict[str, Any], sessions: list[str]) -> str:
 		("actual-api",): "actual API billing",
 		("api-equivalent",): "API-equivalent estimate (subscription auth)",
 	}.get(tuple(basis), "mixed cost bases: " + ", ".join(basis) if basis else "cost basis unknown")
-	lines.append(f"**Cost / tokens** (from `prompt-log.jsonl`, session(s) {', '.join(f'`{s[:8]}`' for s in sessions)}; {basis_note})")
+	priced = "costs as logged" if summary.get("pricing") == "as-logged" else "priced at current rates"
+	lines.append(f"**Cost / tokens** (from `prompt-log.jsonl`, session(s) {', '.join(f'`{s[:8]}`' for s in sessions)}; {basis_note}; {priced})")
 	lines.append("")
 	lines.append("| Harness | Model | Turns | Input | Output | Cache write | Cache read | Cost (USD) |")
 	lines.append("|---|---|---:|---:|---:|---:|---:|---:|")
@@ -223,7 +240,7 @@ def main(argv: list[str]) -> int:
 			if stamp is not None and stamp.tzinfo is not None and since.tzinfo is not None and stamp < since:
 				continue
 		selected.append(row)
-	summary = aggregate(selected)
+	summary = aggregate(selected, main_worktree(), as_logged=args.as_logged)
 	summary["sessions"] = sorted(wanted)
 	if args.json:
 		print(json.dumps(summary, indent=2))

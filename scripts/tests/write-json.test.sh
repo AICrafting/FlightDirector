@@ -84,7 +84,7 @@ SH
 chmod +x "$SANDBOX/bin/curl"
 export PATH="$SANDBOX/bin:$PATH" CURL_LOG="$SANDBOX/curl.log"
 fl() { (cd "$R" && "$DISP" "$@"); }
-ISSUE_KEYS='["author","body","comments","created","labels","number","qualified","signature","state","status","title","tracker","updated","url"]'
+ISSUE_KEYS='["author","blocked_by","body","comments","created","labels","number","qualified","signature","state","status","title","tracker","updated","url"]'
 COMMENT_KEYS='["author","body","created","id","signature","updated","url"]'
 
 section "issues create --json"

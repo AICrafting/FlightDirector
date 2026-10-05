@@ -8,6 +8,8 @@
 set -euo pipefail
 
 unset LS_TOKEN FLIGHT_TOKEN FORGEJO_TOKEN LS_SECRETS_FILE LS_EMAIL FLIGHT_ERROR_FILE LS_JSON
+# The issue shape is under test here, not the blockers lookup (issue-deps.test.sh covers that).
+export FLIGHT_NO_DEPS=1
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DISP="$REPO_ROOT/flight/scripts/flight"
 SANDBOX="$(mktemp -d)"
@@ -126,7 +128,7 @@ chmod +x "$SANDBOX/bin/curl"
 export PATH="$SANDBOX/bin:$PATH" FIXTURES="$F"
 
 fl() { (cd "$R" && "$DISP" "$@"); }
-ISSUE_KEYS='["author","body","comments","created","labels","number","qualified","signature","state","status","title","tracker","updated","url"]'
+ISSUE_KEYS='["author","blocked_by","body","comments","created","labels","number","qualified","signature","state","status","title","tracker","updated","url"]'
 COMMENT_KEYS='["author","body","created","id","signature","updated","url"]'
 
 section "issues get --json: one shape on every backend"
@@ -213,6 +215,29 @@ check "…and named on stderr" "$(grep -q 'tracker GH unavailable' "$SANDBOX/err
 check "…with exit status 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)"
 out="$(cd "$R" && FAIL_HOST=example "$DISP" issues list --all-trackers --json 2>/dev/null || true)"
 check "when every tracker fails, the first failure is the envelope" "$(yes jq -e 'keys == ["error"] and .error.code == "auth"' <<<"$out")" "$out"
+
+section "--all-trackers --status ROLE (FJ-277)"
+# Only FJ spells in-progress; GH/GL/JIR never define it. FJ declines done (false).
+# (The fake forge ignores the label filter, so FJ answers with both its issues.)
+if out="$(cd "$R" && "$DISP" issues list --all-trackers --status in-progress --json 2>"$SANDBOX/err")"; then rc=0; else rc=$?; fi
+check "a tracker without the role contributes zero rows, not an error" \
+	"$(yes jq -e '.errors == [] and ([.issues[].qualified] == ["FJ-1","FJ-2"])' <<<"$out")" "$out"
+check "…with exit status 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "rc=$rc"
+check "…and one stderr note naming each such tracker and the role" \
+	"$([ "$(grep -c "status role 'in-progress' is not configured" "$SANDBOX/err")" = 3 ] && grep -q "tracker GH: .*'in-progress'" "$SANDBOX/err" && ! grep -q unavailable "$SANDBOX/err" && echo 1 || echo 0)" "$(cat "$SANDBOX/err")"
+if out="$(cd "$R" && "$DISP" issues list --all-trackers --status "done" --json 2>/dev/null)"; then rc=0; else rc=$?; fi
+check "a declined role on every tracker: empty list, no errors, exit 0" \
+	"$([ "$rc" = 0 ] && jq -e '.issues == [] and .errors == []' <<<"$out" >/dev/null && echo 1 || echo 0)" "rc=$rc $out"
+if out="$(cd "$R" && "$DISP" issues list --all-trackers --status in-progress 2>"$SANDBOX/err")"; then rc=0; else rc=$?; fi
+check "text --all-trackers: only the tracker with the role lists rows, exit 0" \
+	"$([ "$rc" = 0 ] && [ "$(cut -f1 <<<"$out" | tr '\n' ' ')" = "FJ-1 FJ-2 " ] && echo 1 || echo 0)" "rc=$rc $out"
+check "…and no tracker is reported unavailable" "$(grep -q unavailable "$SANDBOX/err" && echo 0 || echo 1)" "$(cat "$SANDBOX/err")"
+fails_out="$(cd "$R" && "$DISP" issues list --tracker GH --status in-progress --json 2>/dev/null || true)"
+check "a directly selected tracker without the role is still a usage error" \
+	"$(yes jq -e '.error.code == "usage"' <<<"$fails_out")" "$fails_out"
+if (cd "$R" && "$DISP" issues list --tracker GH --status in-progress >/dev/null 2>"$SANDBOX/err"); then rc=0; else rc=$?; fi
+check "…in text mode too (non-zero, names the role)" \
+	"$([ "$rc" != 0 ] && grep -q "status role 'in-progress' is not configured" "$SANDBOX/err" && echo 1 || echo 0)" "rc=$rc $(cat "$SANDBOX/err")"
 
 section "text output is unchanged"
 check "issues list (no --json) is TSV" "$([ "$(fl issues list 2>/dev/null | head -n1)" = "$(printf '1\tFJ one\tbug,status/to test')" ] && echo 1 || echo 0)"

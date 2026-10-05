@@ -44,7 +44,7 @@ plugin_manifest() {
 # Feature tokens a consumer can detect with `flight capabilities --json` (#254)
 # instead of comparing versions. A token is added here in the same change that
 # ships the feature, and never renamed or removed once released.
-CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json issues-paging)
+CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json issues-paging issues-copy issues-deps)
 
 # `flight --version [--json]` and `flight capabilities [--json]` (#254) — answered
 # before anything else: no repo, config, token or network needed, so a consumer
@@ -102,7 +102,7 @@ trap cleanup EXIT
 # it, and handed on as LS_JSON=1. Only the verbs in JSON_VERBS accept it; on any
 # other issues/labels verb it is a usage error. Other groups keep their own
 # meaning of the flag (`prompt-log summary --json` predates this).
-JSON_VERBS=(issues/resolve issues/tracker issues/list issues/get issues/comments labels/list labels/statuses issues/create issues/comment issues/set-status)
+JSON_VERBS=(issues/resolve issues/tracker issues/list issues/get issues/comments labels/list labels/statuses issues/create issues/comment issues/set-status issues/copy issues/resync issues/block issues/unblock issues/blockers issues/blocking issues/dep-add issues/dep-remove issues/dep-list issues/dep-blocking)
 json_mode=0
 case "${1:-}" in
 	issues|labels)
@@ -118,7 +118,7 @@ case "${1:-}" in
 			else
 				json_args+=("$json_arg")
 				case "$json_arg" in
-					--no-status|--no-signature|--all-trackers) ;;
+					--no-status|--no-signature|--signature|--all-trackers|--no-body|--no-comments|--no-labels|--footer|--back-link|--force|--dry-run) ;;
 					--*) json_value_next=1 ;;
 				esac
 			fi
@@ -316,6 +316,17 @@ handoff() {
           --argjson labels "$LS_LABELS_JSON" "$json_out" >"$json_out.done" \
           || { rm -f "$json_out.done"; die_code backend "could not assemble the --json output"; }
         mv "$json_out.done" "$json_out"
+        # `issues get --json` carries the issue's blockers (FJ-271). The lookup is the same one
+        # `issues blockers` does; it never fails the get. The helper exports FLIGHT_NO_DEPS for
+        # its own reads, which is what stops this from recursing.
+        if [ "$json_finish" = get ] && [ -z "${FLIGHT_NO_DEPS:-}" ] && [ -n "$json_tracker" ]; then
+          deps_q="$(jq -r '.qualified // empty' "$json_out")"
+          if [ -n "$deps_q" ] && deps_out="$(env -u FLIGHT_ERROR_FILE -u LS_JSON "$SELF_DIR/flight" issues blockers --number "$deps_q" --json 2>/dev/null)"; then
+            jq -c --argjson d "$deps_out" '.blocked_by = $d.issues' "$json_out" >"$json_out.done" && mv "$json_out.done" "$json_out"
+          else
+            echo "flight: warning — could not read the blockers of ${deps_q:-the issue}; blocked_by is null" >&2
+          fi
+        fi
         ;;
       create)
         # The adapter printed the new issue's number. Answer with the issue itself,
@@ -324,7 +335,7 @@ handoff() {
         # caller would file it again): fall back to the fields already known, and say
         # so on stderr.
         js_number="$(tr -d '[:space:]' <"$json_out")"
-        if ! env -u FLIGHT_ERROR_FILE -u LS_JSON "$SELF_DIR/flight" issues get --number "$js_number" \
+        if ! env -u FLIGHT_ERROR_FILE -u LS_JSON FLIGHT_NO_DEPS=1 "$SELF_DIR/flight" issues get --number "$js_number" \
             ${json_tracker:+--tracker "$json_tracker"} --json >"$json_out.done" 2>/dev/null; then
           echo "flight: warning — created #$js_number but could not read it back; returning the known fields only" >&2
           jq -cn --arg n "$js_number" --arg t "$js_title" \
@@ -408,7 +419,7 @@ if [ -f "$cfg" ] && [ "$group" != "prompt-log" ]; then
 	[ "$runtime_schema" -le "$TRACKER_SCHEMA" ] || die_code not-configured "config uses schema $runtime_schema, newer than this Flight understands (schema $TRACKER_SCHEMA); update the Flight plugin"
 	if [ "$runtime_schema" -lt "$TRACKER_SCHEMA" ] && {
 		[ -n "$tracker_selector" ] || [ "$all_trackers" = 1 ] \
-			|| { [ "$group" = issues ] && { [ "$verb" = resolve ] || [ "$verb" = tracker ]; }; }
+			|| { [ "$group" = issues ] && { [ "$verb" = resolve ] || [ "$verb" = tracker ] || [ "$verb" = copy ] || [ "$verb" = resync ] || [ "$verb" = block ] || [ "$verb" = unblock ] || [ "$verb" = blockers ] || [ "$verb" = blocking ]; }; }
 	}; then
 		die_code not-configured "named tracker routing needs config schema $TRACKER_SCHEMA; run flight reconcile --harness claude|codex first"
 	fi
@@ -851,7 +862,7 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 		: >"$agg_dir/ok"; : >"$agg_dir/failed"
 		while IFS= read -r list_ref; do
 			[ -n "$list_ref" ] || continue
-			if "$SELF_DIR/flight" issues list --tracker "$list_ref" --json "$@" >"$agg_dir/out" 2>"$agg_dir/err"; then
+			if FLIGHT_ALL_TRACKERS_CHILD=1 "$SELF_DIR/flight" issues list --tracker "$list_ref" --json "$@" >"$agg_dir/out" 2>"$agg_dir/err"; then
 				cat "$agg_dir/out" >>"$agg_dir/ok"; printf '\n' >>"$agg_dir/ok"
 				sed -e 's/^flight: //' -e "s/^/flight: tracker $list_ref: /" "$agg_dir/err" >&2
 			else
@@ -881,7 +892,7 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 		list_err="$(mktemp "${TMPDIR:-/tmp}/flight-list-err.XXXXXX")"
 		while IFS= read -r list_ref; do
 			[ -n "$list_ref" ] || continue
-			if "$SELF_DIR/flight" issues list --tracker "$list_ref" "$@" >"$list_out" 2>"$list_err"; then
+			if FLIGHT_ALL_TRACKERS_CHILD=1 "$SELF_DIR/flight" issues list --tracker "$list_ref" "$@" >"$list_out" 2>"$list_err"; then
 				awk -v ref="$list_ref" -v bare="$list_unprefixed" 'BEGIN { FS = OFS = "\t" } NF {
 					n = $1; sub(/^.*-/, "", n)
 					if (bare == "true") print ($1 ~ /^[0-9]+$/ ? "#" $1 : $1), $0
@@ -912,6 +923,30 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 		[ $# -eq 0 ] || die "usage: flight issues tracker [--tracker REF]"
 		tracker_coded not-found select --config "$cfg" ${tracker_selector:+--tracker "$tracker_selector"}
 		exit 0
+	fi
+
+	# `issues copy|resync --from ID --to TRACKER` (FJ-200) — dispatcher-owned, like `branches`:
+	# the helper reads and writes both trackers back through this dispatcher, one tracker per
+	# call, so no adapter is involved here. Links live in .flightdirector/copies.jsonl.
+	if [ "$group" = issues ] && { [ "$verb" = copy ] || [ "$verb" = resync ]; }; then
+		[ -z "$tracker_selector" ] || die "issues $verb: name the trackers with --from/--to, not --tracker"
+		json_finish=""; json_tracker=""
+		export FLIGHT_REPO_ROOT="$repo_root" FLIGHT_SELF="$SELF_DIR/flight"
+		handoff "$SELF_DIR/issue-copy" "$verb" "$@"
+	fi
+
+	# `issues block|unblock|blockers|blocking` (FJ-271) — dispatcher-owned, like copy: the helper
+	# reads and writes each issue back through this dispatcher, trying the tracker's native
+	# dependency verbs (dep-*) first and falling back to signed comments.
+	if [ "$group" = issues ]; then
+		case "$verb" in
+			block|unblock|blockers|blocking)
+				[ -z "$tracker_selector" ] || die "issues $verb: each issue id names its own tracker; drop --tracker"
+				json_finish=""; json_tracker=""
+				export FLIGHT_REPO_ROOT="$repo_root" FLIGHT_SELF="$SELF_DIR/flight"
+				handoff "$SELF_DIR/issue-deps" "$verb" "$@"
+				;;
+		esac
 	fi
 
 	# An issue id picks the tracker (and becomes the adapter's native id) unless an
@@ -975,13 +1010,22 @@ fi
 
 # `issues list --status ROLE` (#253) — a status ROLE filter, mapped through the
 # selected tracker's label map to its label name. Dispatcher-owned, so one call can
-# ask every tracker for "to-test" however each one spells it.
+# ask every tracker for "to-test" however each one spells it. A tracker with no
+# spelling for the role (never defined, or declined as `false`) has no issues in it:
+# as one tracker of --all-trackers (FJ-277) it answers zero rows with a stderr note,
+# so it is neither "unavailable" nor an `errors[]` entry. Asked directly, it is
+# still a usage error — that tracker cannot answer the question it was asked.
 if [ "$group/$verb" = issues/list ]; then
 	st_args=()
 	while [ $# -gt 0 ]; do case "$1" in
 		--status)
 			[ $# -ge 2 ] || die "issues list: --status needs a role"
 			st_label="$(jq -r --arg r "$2" '.status[$r] // empty | strings' <<<"$LS_LABELS_JSON")"
+			if [ -z "$st_label" ] && [ "${FLIGHT_ALL_TRACKERS_CHILD:-}" = 1 ]; then
+				echo "flight: issues list: status role '$2' is not configured for this tracker — no rows from it (see flight labels statuses)" >&2
+				[ "$json_mode" != 1 ] || jq -cn '{issues: [], truncated: false, total: 0, errors: []}'
+				exit 0
+			fi
 			[ -n "$st_label" ] || die "issues list: status role '$2' is not configured for this tracker (see flight labels statuses)"
 			st_args+=(--label "$st_label"); shift 2 ;;
 		*) st_args+=("$1"); shift ;;
@@ -1148,6 +1192,7 @@ fi
 # dispatcher-owned `--model <id>` flag or `FLIGHT_MODEL` / `LS_MODEL` in the
 # env, and the "with …" clause is simply omitted when neither is given.
 # Off switch: `code.signature.enabled: false` in config, or `--no-signature`.
+# `--signature` forces it on for one write (FJ-271).
 case "$group/$verb" in
   issues/create|issues/update|issues/comment|pr/open|pr/update)
     sig_on="$(jq -r 'if .code.signature.enabled == false then "no" else "yes" end' "$cfg")"
@@ -1156,6 +1201,7 @@ case "$group/$verb" in
     while [ $# -gt 0 ]; do case "$1" in
       --model)        [ $# -ge 2 ] || die "$group $verb: --model needs a model id"; sig_model="$2"; shift 2 ;;
       --no-signature) sig_on=no; shift ;;
+      --signature)    sig_on=yes; shift ;;   # forced on: issue-deps' marker comments are read back by it
       --body)         [ $# -ge 2 ] || die "$group $verb: --body needs a value"; sig_body="$2"; sig_have=1; shift 2 ;;
       --body-file)    [ $# -ge 2 ] || die "$group $verb: --body-file needs a path"; sig_body_file="$2"; sig_have=1; shift 2 ;;
       *) sig_args+=("$1"); shift ;;

@@ -26,7 +26,7 @@ See [flight-setup.md](../../references/flight-setup.md) and
   issue close/relabel is governed separately by the target stage's `closesIssues`/`issueStatus`
   (Step 5). A `pr` hop uses `Closes #N` only when the target stage closes issues, else `Ready #N` —
   and only for an issue that lives in the code repository itself. Another tracker's issue is
-  named `Tracks GH-12` and driven explicitly in Step 5; a bare `#12` for it would close the code
+  named ``Tracks `GH-12` `` (the id in backticks, so GitHub doesn't autolink it) and driven explicitly in Step 5; a bare `#12` for it would close the code
   repository's *own* issue 12 (Step 4).
 - **Halt if you can't write a test plan** for a resolved issue on a `pr` hop — an unwritable
   plan usually means the feature isn't reachable. Fix that before opening the PR, and don't reach
@@ -382,8 +382,8 @@ ISSUE_STATUS="$(flight config ".code.stages[<i>].issueStatus // empty")"
 
 The forge acts on `Closes #N` against the PR's **own** repository, so `pr-reference` writes
 `Closes #12` (closing stage) or `Ready #12` only when the issue's tracker *is* the code repository —
-same backend, same api host, same owner/repo. For any other tracker it writes `Tracks GH-12`,
-which no forge acts on: a cross-tracker PR can never close the code repository's unrelated issue
+same backend, same api host, same owner/repo. For any other tracker it writes ``Tracks `GH-12` ``,
+which no forge acts on (the backticks stop GitHub autolinking `GH-12` to the code repo's #12): a cross-tracker PR can never close the code repository's unrelated issue
 12. Step 5 then updates the issue on its own tracker explicitly, whichever line was written.
 
 The PR is built from the **pushed** branch tip, not your local working copy — so **run the Step
@@ -440,7 +440,7 @@ flight ci watch --pr "$PR_NUM" \
 ```
 
 Read the verdict off the `status=` field of the last line, **not** off the exit code — `ci watch`
-exits 0 on every terminal verdict and non-zero only on a timeout. There are three:
+exits 0 on every terminal verdict and non-zero only on a timeout. There are four:
 
 - `status=failure` — `ci log --pr "$PR_NUM"` (every failed run on the PR's head commit — the same
   commit `ci watch --pr` just judged), fix, push, re-watch.
@@ -450,6 +450,13 @@ exits 0 on every terminal verdict and non-zero only on a timeout. There are thre
   not a failure: say **"CI ran nothing for #$PR_NUM (all N runs skipped) — nothing was verified."**
   Don't merge on it, and don't treat it as a red either; it usually means a path filter matched
   nothing or a `needs:` dependency was skipped. The user decides whether that is acceptable here.
+- `status=cancelled` — a run was stopped before it finished and none failed, so CI verified
+  nothing for that run. It is not a red: `ci log` finds no failed job, so don't go hunting for one.
+  The usual cause is a newer push to the branch, and a `--pr` watch says so on stderr
+  (*"the head of PR #N moved to … during the watch"*). In that case, watch again: `ci watch --pr
+  "$PR_NUM"` resolves the new head. If the head did not move, someone cancelled the run: say
+  **"CI for #$PR_NUM was cancelled before it finished — nothing was verified"** and let the user
+  decide whether to re-run it. Don't merge on it either way.
 
 On a green verdict, merge only on the user's go-ahead (`pre-merge` gate) or
 per your `post-merge-qa` policy. Use the `$STRATEGY` resolved in Step 1 — the stage's configured

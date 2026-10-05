@@ -7,7 +7,7 @@
 > called `lightspeed` during initial development/testing — see the [CHANGELOG](CHANGELOG.md)
 > for the migration notes.
 
-Nine skills for running an issue + code workflow from Claude Code or Codex using one shared package.
+Ten skills for running an issue + code workflow from Claude Code or Codex using one shared package.
 Everything goes through the **flight dispatcher** — `flight <group> <verb>` — which calls
 the backend's REST API with `curl`. Skills resolve its installed path rather than requiring Codex
 to inject the plugin's `bin/` directory into `PATH`.
@@ -21,6 +21,7 @@ server to install.
 | Skill | Triggers on | Does |
 |---|---|---|
 | `filing-issues` | "file an issue", "open a ticket", "track this", "log a bug", `/issue …` | Dedupe-check → write → label → create; or confirm-then-update an existing issue |
+| `copying-an-issue` | "copy FJ-12 to GH", "pull GH-3 into Forgejo", "resync the copy" | Copies one issue to another configured tracker (title, plus optional body, comments, labels, status) after a duplicate scan and a dry-run preview; later resyncs comments added to the source; never closes the source |
 | `triaging-issues` | "what should I work on", "what's next", "quick wins", "show open issues" | Lists and filters open issues for selection (read-only) |
 | `working-an-issue` | "let's work on #N", "start issue #N", "this is ready to test", "merge #N" | Per-issue worktree → status-label → test → promote (delegated) → finish lifecycle, with a human gate before merge |
 | `promoting-a-branch` | "promote this", "promote to qa", "open a PR for this branch", "this branch is ready" | Advances the current branch one stage up the pipeline (feature → develop → qa → main), with the hop's merge strategy, gate, test-plan halt, and CI watch |
@@ -29,6 +30,12 @@ server to install.
 | `cleaning-up-branches` | "clean up the branches", "delete merged branches", "prune old feature branches", "what branches can go" | Finds feature/bugfix/release branches already merged into a stage (ancestry, or a merged PR for squash/rebase hops), cross-checks each against its issue's status, then deletes the local ref, the remote ref, and the leftover worktree behind a preview and an explicit go-ahead |
 | `setting-up-a-repo` | "set up flight", "set up labels", "bootstrap labels", "add default labels", or a bare repo during filing | First-run and re-run setup: code coordinates + token, stage pipeline, preferences (worker model, prompt ledger, preflight gate), gitignore and the agent breadcrumb; hands the issue tracker to `add-an-issue-tracker` |
 | `add-an-issue-tracker` | "add an issue tracker", "add another tracker", "connect Jira", "track issues on GitHub too" | Adds or completes one named issue tracker — coordinates, a stable ref and aliases, its own or the shared code credential (verified with `auth check --tracker`), its starting status — and reconciles that tracker's labels, adopting existing equivalents; never moves the default |
+
+One command sits beside the skills: **`/flight:version`** (Claude Code) prints the version of the
+flight plugin the session actually loaded — read from that install's own manifest — with its
+install (`flight@<marketplace>`), its root, and the `flight` CLI on `PATH`, plus a note when the
+two disagree (after a bump, before the plugin cache is refreshed). Codex has no plugin commands;
+there, run `scripts/plugin-version.sh` from the plugin root, or `flight --version` for the CLI.
 
 ## How it works
 

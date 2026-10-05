@@ -94,6 +94,10 @@ Group by something
 meaningful (quick wins vs. larger work, or by feature-area label) if it helps, and offer a
 recommendation if one stands out.
 
+For a picked issue that carries the `blocked` status, run `flight issues blockers --number <id>`
+and name its open blockers in the write-up. Don't run it for every row: it is one or more API
+calls per issue.
+
 ## Common mistakes
 
 - Applying the workable filter when the user actually asked for *all* open issues or a

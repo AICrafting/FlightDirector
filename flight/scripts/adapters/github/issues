@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # GitHub issues adapter — verbs: list get comments create update comment
-# set-status clear-status label-add label-remove assign unassign close reopen.
+# set-status clear-status label-add label-remove assign unassign close reopen
+# dep-add dep-remove dep-list dep-blocking.
 # See ../../../references/adapter-contract.md.
 set -euo pipefail
 ADAPTER_NAME="github/issues"
@@ -308,5 +309,45 @@ case "$verb" in
     _api PATCH "/issues/${number}" "$(jq -n '{state:"open"}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add label-remove assign unassign close reopen)" ;;
+  dep-add|dep-remove|dep-list|dep-blocking)
+    # Issue dependencies (FJ-271): "N is blocked by M", both issues in this repo. GitHub's POST
+    # and DELETE name the blocker by its database id, not its number.
+    number=""; by=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --by) by="$2"; shift 2 ;;
+      *) die "issues $verb: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues $verb: --number required"
+    case "$verb" in
+      dep-add|dep-remove)
+        case "$by" in ''|*[!0-9]*) die "issues $verb: --by needs an issue number" ;; esac ;;
+    esac
+    # Only links whose other end is in this repo: the caller names issues by this tracker.
+    same_repo='[.[] | select((.repository_url // "" | ascii_downcase)
+        | endswith(("/repos/" + $o + "/" + $r) | ascii_downcase))
+      | {number: (.number | tostring), title: (.title // ""),
+         state: (if .state == "closed" then "closed" else "open" end)}]'
+    case "$verb" in
+      dep-list|dep-blocking)
+        path=blocked_by; [ "$verb" = dep-blocking ] && path=blocking
+        _api GET "/issues/${number}/dependencies/${path}?per_page=100" \
+          | jq -c --arg o "$LS_OWNER" --arg r "$LS_REPO" "$same_repo" | dep_emit
+        ;;
+      *)
+        linked="$(_api GET "/issues/${number}/dependencies/blocked_by?per_page=100" \
+          | jq -r --arg o "$LS_OWNER" --arg r "$LS_REPO" --arg b "$by" "$same_repo"' | map(select(.number == $b)) | length')"
+        if [ "$verb" = dep-add ] && [ "$linked" != 0 ]; then exit 0; fi
+        if [ "$verb" = dep-remove ] && [ "$linked" = 0 ]; then exit 0; fi
+        blocker_id="$(_api GET "/issues/${by}" | jq -r '.id')"
+        if [ "$verb" = dep-add ]; then
+          _api POST "/issues/${number}/dependencies/blocked_by" "$(jq -cn --argjson i "$blocker_id" '{issue_id: $i}')" >/dev/null
+        else
+          _api DELETE "/issues/${number}/dependencies/blocked_by/${blocker_id}" >/dev/null
+        fi
+        ;;
+    esac
+    ;;
+
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add label-remove assign unassign close reopen dep-add dep-remove dep-list dep-blocking)" ;;
 esac

@@ -43,7 +43,7 @@ import time
 import uuid
 from typing import Any
 
-from common import append_increment, append_record, main_worktree, price_usage, read_state, remove_state, stable_key, state_path, warn, write_json_atomic
+from common import append_increment, append_record, main_worktree, record_logged, price_usage, read_state, remove_state, stable_key, state_path, warn, write_json_atomic
 
 
 SUPPORTED_MODES = {"prompt", "stop", "interrupt", "subagent-stop"}
@@ -94,21 +94,43 @@ def parse_timestamp(value: Any) -> float | None:
 
 
 def save_prompt(event: dict[str, Any]) -> None:
+	"""Open the session's turn, or add to the one still open.
+
+	A message the user sends while a turn is running is delivered into that turn, and
+	Claude Code fires UserPromptSubmit for it too. Starting a new turn there would move
+	the start past the turn's earlier requests, and the one Stop would never count them
+	(FJ-269). So an open turn (no Stop has closed it) keeps its id and its start, and the
+	new prompt is appended. A turn interrupted without a Stop is covered the same way:
+	its usage lands in the next turn's row instead of being dropped."""
 	session_id = require_string(event, "session_id")
-	turn_id = str(uuid.uuid4())
-	repo_root = main_worktree(event.get("cwd"))
+	prompt = event.get("prompt")
+	path = state_path(session_id, ACTIVE)
+	state = read_state(session_id, ACTIVE)
+	# A turn whose row is already written is closed, even if its state outlived the Stop
+	# (a Stop finishing while this hook ran): reopening it would lose the next row.
+	if (
+		state is not None and isinstance(state.get("turn_id"), str) and isinstance(state.get("started_at"), (int, float))
+		and isinstance(state.get("repo_root"), str)
+		and not record_logged(Path(state["repo_root"]), stable_key("claude", session_id, state["turn_id"], "main"))
+	):
+		earlier = state.get("prompt")
+		if isinstance(prompt, str) and prompt:
+			state["prompt"] = f"{earlier}\n\n{prompt}" if isinstance(earlier, str) and earlier else prompt
+		state["queued_prompts"] = int(state.get("queued_prompts") or 0) + 1
+		write_json_atomic(path, state)
+		return
 	state = {
 		"session_id": session_id,
-		"turn_id": turn_id,
-		"prompt": event.get("prompt"),
-		"repo_root": str(repo_root),
+		"turn_id": str(uuid.uuid4()),
+		"prompt": prompt,
+		"repo_root": str(main_worktree(event.get("cwd"))),
 		"started_at": time.time(),
 	}
-	write_json_atomic(state_path(session_id, ACTIVE), state)
+	write_json_atomic(path, state)
 
 
 def empty_usage() -> dict[str, int]:
-	return {"input_tokens": 0, "output_tokens": 0, "reasoning_output_tokens": 0, "cache_creation_tokens": 0, "cache_read_tokens": 0}
+	return {"input_tokens": 0, "output_tokens": 0, "reasoning_output_tokens": 0, "cache_creation_tokens": 0, "cache_creation_1h_tokens": 0, "cache_read_tokens": 0}
 
 
 def add_usage(total: dict[str, int], usage: dict[str, Any]) -> bool:
@@ -136,6 +158,13 @@ def add_usage(total: dict[str, int], usage: dict[str, Any]) -> bool:
 	total["output_tokens"] += output
 	total["reasoning_output_tokens"] += reasoning
 	total["cache_creation_tokens"] += cache_creation
+	# `cache_creation` splits the writes by TTL; a 1-hour write costs 2x input, a
+	# 5-minute one 1.25x. Without the split every write is priced as 5-minute.
+	split = usage.get("cache_creation")
+	if isinstance(split, dict):
+		hour = split.get("ephemeral_1h_input_tokens", 0)
+		if isinstance(hour, int) and not isinstance(hour, bool) and hour > 0:
+			total["cache_creation_1h_tokens"] += min(hour, cache_creation)
 	total["cache_read_tokens"] += cache_read
 	return True
 
@@ -329,16 +358,21 @@ def make_record(event: dict[str, Any], delegated: bool) -> tuple[Path, dict[str,
 		"cache_creation_tokens": usage["cache_creation_tokens"] if usage else None,
 		"cache_read_tokens": usage["cache_read_tokens"] if usage else None,
 		"cost_usd": cost,
-		"cost_basis": auth_cost_basis() if cost is not None else None,
+		"cost_basis": auth_cost_basis() if usage else None,
 		"duration_seconds": round(duration, 3) if duration is not None else None,
 	}
 	if usage is None:
 		record["usage_missing"] = parsed["missing"]
+	else:
+		record["cache_creation_1h_tokens"] = usage["cache_creation_1h_tokens"]
 	if by_model and len(by_model) > 1:
 		record["models"] = {m: u["output_tokens"] for m, u in by_model.items()}
+		record["usage_by_model"] = by_model	# so summary can price each model again later
 	if delegated:
 		record["subagent"] = True
 		record.update(agent_lineage(transcript if isinstance(transcript, str) else None))
+	if state and isinstance(state.get("queued_prompts"), int) and state["queued_prompts"] > 0:
+		record["queued_prompts"] = state["queued_prompts"]
 	if not delegated and event.get("hook_event_name") == "Interrupt":
 		record["interrupted"] = True
 	record_key = stable_key("claude", session_id, turn_id, "subagent" if delegated else "main")
@@ -355,7 +389,12 @@ def finish(event: dict[str, Any], delegated: bool) -> None:
 		append_increment(repo_root, record)
 	else:
 		append_record(repo_root, record, record_key)
-		remove_state(record["session_id"], ACTIVE)
+		# The user's next prompt can land between the row and this cleanup, and save_prompt
+		# then writes a new turn to the same slot (the logged one is closed). Remove the
+		# state only while it is still this turn's, or that next turn goes unlogged (FJ-276).
+		state = read_state(record["session_id"], ACTIVE)
+		if state is not None and state.get("turn_id") == record["turn_id"]:
+			remove_state(record["session_id"], ACTIVE)
 
 
 def main() -> int:

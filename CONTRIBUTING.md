@@ -122,6 +122,24 @@ run by hand with a count or any `git rev-list` selection, e.g.
 CI runs two workflows on push to `develop` and on PRs: **`lint`** (yamllint +
 shellcheck) and **`tests`** (`run-tests.sh`).
 
+**The docs-only cheap path.** On a PR whose every changed path is on the allowlist in
+[`scripts/ci/docs-only.sh`](scripts/ci/docs-only.sh) — files no test reads, such as `docs/**`
+and this file — each `tests` leg still runs and reports `success`, but skips its install
+and test steps. To see which path a leg took, open its **Classify the change** step (or the
+job summary): it says `CHEAP path` or `FULL run`, and on a full run names the first file
+that forced it. A push to `develop` always runs in full, and anything the classifier cannot
+decide (no base ref, a git error, an unknown path) runs in full too. Jobs are never skipped,
+only steps: a skipped job reads as "CI verified nothing" to `flight ci watch`, and Forgejo
+posts a green status for it. `lint` has no cheap path: it takes seconds and reads `.yml` and
+scripts a docs PR can touch.
+
+Most of this repo's markdown is product, and the suite reads it — skills, references,
+`flight/CHANGELOG.md`, `flight/GUIDE.md`, the root `README.md` — so the allowlist is a list
+of paths, never a `*.md` match. To extend it, first confirm nothing under `scripts/tests/`
+reads the path (or runs a script that does), then add it to `ALLOWLIST`.
+`scripts/tests/docs-only.test.sh` fails if any test file names an allowlisted path, so a test
+that later starts reading one forces it back off the list.
+
 **Adding a check or test.** A pre-push check is any `*.sh` in `scripts/checks/`
 (`run-checks.sh` runs each that is executable). A unit test is any `*.test.sh` in
 `scripts/tests/` (`run-tests.sh` runs each). Keep unit tests out of `scripts/checks/`
@@ -131,6 +149,22 @@ A new unit test must be **self-contained**: build a `mktemp -d` sandbox, touch n
 under `$HOME` or the repo, and never `git config --global`. The runner runs files
 concurrently, so a test that reaches outside its sandbox will fail intermittently and
 blame whichever test it collided with. `run-tests.test.sh` covers the runner itself.
+
+**Markdown may be CRLF.** `.gitattributes` gives `*.md` native line endings on purpose, so on
+a Windows checkout every line of a `SKILL.md`, reference or changelog ends in `\r`. A test or
+script that reads markdown must strip it before matching: `tr -d '\r'` on a stream, or
+`sub(/\r$/, "")` first thing in an `awk` program. The usual casualties are exact-line
+comparisons (`$0 == marker`) and end-anchored patterns (`^name: foo$`, `/^```$/`). They
+pass on Linux and macOS and fail only on the Windows leg, looking like plain false asserts. To
+check locally, run the suite on a scratch copy of your committed `HEAD` with every `.md`
+converted to CRLF:
+
+```bash
+D="$(mktemp -d)" && git archive HEAD | tar -x -C "$D" && cd "$D" && git init -q \
+  && find . -name '*.md' -exec sed -i 's/\r\?$/\r/' {} + && ./scripts/run-tests.sh
+```
+
+(`sed -i` without a suffix is GNU sed. On macOS, use `sed -i ''`.)
 
 **Executable bit — important.** This repo has `core.fileMode = false`, so a plain
 `chmod +x` is **not** recorded by git; a fresh clone would get a `644` file and

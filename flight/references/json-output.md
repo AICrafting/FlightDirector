@@ -21,11 +21,11 @@ Neither probe needs a repository, a config, a token or the network.
 
 ```
 $ flight --version
-flight 0.17.0
+flight 0.17.2
 $ flight --version --json
-{"plugin":"flight","version":"0.17.0"}
+{"plugin":"flight","version":"0.17.2"}
 $ flight capabilities --json
-{"plugin":"flight","version":"0.17.0","capabilities":["version","capabilities", …]}
+{"plugin":"flight","version":"0.17.2","capabilities":["version","capabilities", …]}
 ```
 
 `flight capabilities` without `--json` prints one token per line.
@@ -39,6 +39,8 @@ $ flight capabilities --json
 | `write-json` | `issues create`, `issues comment` and `issues set-status` take `--json` |
 | `issues-json` | `issues list`, `issues get` and `issues comments` take `--json`, and `issues list` takes `--status ROLE` |
 | `issues-paging` | `issues list --json` pages with `--per-page M [--cursor C]` (below) |
+| `issues-copy` | `issues copy` and `issues resync` exist |
+| `issues-deps` | `issues block`, `unblock`, `blockers`, `blocking`, and `blocked_by` on `issues get --json` |
 
 ## Which verbs take `--json`
 
@@ -58,6 +60,11 @@ their own meaning: `prompt-log summary --json` predates this and is unchanged.
 | `issues create` | the new issue object |
 | `issues comment` | the new comment object |
 | `issues set-status` | `{number, tracker, qualified, status, label}` |
+| `issues copy` | `{source, target, copied: {body, comments, labels, status, footer, backLink}, skipped: {labels, status}}`; with `--dry-run`, `target` is null and `dryRun` is true |
+| `issues block` | `{number, by, via, status}` |
+| `issues unblock` | `{number, by, removed, status}`; a no-op unblock still prints it, with `removed: []`. `block` / `unblock` also take `--model ID` |
+| `issues blockers` / `blocking` | `{issues: [{id, title, state, via}]}`; a text-linked issue that no longer exists has `title` and `state` null (TSV: empty title, state `unknown`) |
+| `issues resync` | `{source, target, copied: {comments}, skipped: {}}`; `dryRun: true` with `--dry-run` |
 | `labels list` | an array of label objects |
 | `labels statuses` | an array of status roles |
 
@@ -83,7 +90,8 @@ their own meaning: `prompt-log summary --json` predates this and is unchanged.
   "comments": 3,             // comment count, or null where the backend doesn't give one cheaply
   "url": "https://…/issues/81",        // web link
   "body": "markdown…",       // without the flight signature; null in list rows
-  "signature": {"plugin": "flight", "version": "0.17.0", "model": "Opus/5.5"}  // or null
+  "signature": {"plugin": "flight", "version": "0.17.2", "model": "Opus/5.5"},  // or null
+  "blocked_by": [{"id": "GH-3", "title": "…", "state": "open", "via": "text"}]  // issues get only; null in list rows and when the lookup failed
 }
 ```
 
@@ -96,6 +104,9 @@ Every key is present on every backend. Notes:
   <model>]` footer Flight appends to every body it writes. It is split out of `body`, and `model`
   is null when the footer names none. Bodies Flight didn't write have `signature: null` and their
   text untouched. A `---` elsewhere in the text is left alone.
+- **`blocked_by`** is filled by `issues get --json` only, with the same lookup `issues blockers`
+  does. It is `null` in `list` rows, and when that lookup fails (`get` still succeeds, with a
+  warning on stderr).
 - **`comments`** comes straight from the issue on Forgejo, GitHub and GitLab, and from `get` on
   Jira. Jira list rows have `comments: null`.
 
@@ -112,7 +123,8 @@ Every key is present on every backend. Notes:
   row count when the backend reports one (Forgejo, GitLab), otherwise null.
 - **Filters:** `--state open|closed|all`, `--label NAME` (repeatable) and `--limit N` work as
   without `--json`. **`--status ROLE`** filters by a status role, mapped to this tracker's label
-  name. An unconfigured or declined role is a `usage` error.
+  name. On a tracker you selected (the default or `--tracker REF`), an unconfigured or declined
+  role is a `usage` error.
 - **`errors`** is always `[]` for a single tracker.
 
 **`--all-trackers --json`** lists every configured tracker into the same object:
@@ -124,8 +136,10 @@ Every key is present on every backend. Notes:
 - A tracker that fails adds `{"tracker": "GH", "code": "auth", "reason": "…"}` to `errors`, is also
   named on stderr, and the command still exits 0 with the others' rows. Only when every tracker
   fails is the result the error envelope of the first failure.
-- `--status ROLE` is mapped per tracker. A tracker without that role reports a `usage` error
-  entry.
+- `--status ROLE` is mapped per tracker. A tracker that has no label for the role (never
+  defined, or declined as `false`) contributes zero rows and a `total` of 0, with a note on
+  stderr naming the tracker and the role. It is not an `errors` entry. The text form behaves the
+  same way and still exits 0.
 
 ### Paging: `issues list --json --per-page M [--cursor C]`
 
@@ -186,6 +200,8 @@ stderr still carries the human sentence, as without `--json`. `message` is for d
 | `network` | the server couldn't be reached (curl itself failed) |
 | `backend` | the server answered with any other error (5xx, an unexpected 4xx), or the call failed in a way nothing classified |
 | `usage` | bad flags or arguments, or `--json` on a verb without a JSON form |
+| `unsupported` | an adapter's `dep-*` verb: the backend can't record a dependency here. `issues block` handles it by falling back to comments |
+| `already-copied` | `issues copy`: the ledger already records a copy of this issue on that tracker; use `issues resync`, or `--force` for a second copy |
 
 The code is decided where the cause is known, and never by matching message text. The dispatcher
 classifies config, usage and ref resolution. Each adapter's `_api` maps HTTP status and curl

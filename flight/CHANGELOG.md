@@ -13,8 +13,165 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.17.2] - 2026-10-04
+
+### Added
+- **Blocked issues** (FJ-271). `flight issues block --number FJ-12 --by GH-3` records that one
+  issue is blocked by another; `unblock` removes it, and `blockers` / `blocking` list the links.
+  Issues on the same tracker use the backend's own relationship (GitHub issue dependencies,
+  Forgejo dependencies, GitLab Premium blocking links, Jira "is blocked by" links). Where the
+  backend can't, and always across trackers, the link is a pair of signed comments. By default the
+  blocked issue's status moves to `blocked` and back to what it was; `--no-status` skips that.
+  `issues get --json` gains `blocked_by`, and `working-an-issue` warns before starting an issue
+  with an open blocker. Capability token: `issues-deps`. GitLab's native (Premium) path is
+  untested live: the test rig is on the Free tier and exercises the comment fallback. GitLab
+  allows one link per issue pair, so a pair that already shares a `relates_to` (or any other)
+  link falls back to the comment record, and `issues block` says which link is in the way
+  instead of aborting on GitLab's 409 (FJ-275).
+
+- **`/flight:version` shows which flight the session loaded** (FJ-257). The plugin's first
+  command (alongside the skills) prints the version from the loaded install's own manifest, the
+  install it came from (`flight@flightdirector-dev`, or `unknown` when the path doesn't say), the
+  plugin root, and the `flight` dispatcher on `PATH` — with a note when that dispatcher is a
+  different version or missing. `flight --version` alone can't answer this: it reports the CLI on
+  `PATH`, which in a dev checkout or after an un-refreshed bump is not the copy the skills and
+  hooks run from. Codex plugins have no commands, so on Codex run
+  `scripts/plugin-version.sh` from the plugin root (`--json` for a machine-readable report), or
+  `flight --version` for the CLI.
+
+### Changed
+- **`flight prompt-log summary` prices each row again from its stored tokens** (FJ-270), so a
+  pricing fix, bundled or in `.flightdirector/pricing.json`, also corrects turns logged before
+  it. A turn that spans models now records each model's usage (`usage_by_model`) so it can be
+  priced the same way. Rows that still cannot be priced keep their logged cost; `--as-logged`
+  sums the logged costs as before.
+
+- **Qualified ids flight writes into forge text are backticked, so GitHub no longer autolinks
+  them** (FJ-247). GitHub turns `GH-12`-shaped text into a link to the rendering repository's own
+  issue 12, so a GitHub tracker's ids pointed readers at an unrelated issue. A code PR's issue
+  line for another tracker's issue now reads ``Tracks `GH-12` ``, `issues copy`'s footer and
+  back-link read ``Copied from `FJ-12` `` / ``Copied to `GH-100` ``, and `promoting-branches`
+  backticks the ids in its batch PR title. `Closes #N` / `Ready #N` are unchanged — they must stay
+  live keywords. `add-an-issue-tracker` no longer proposes the ref `GH` for a GitHub tracker when
+  the code repository is also on GitHub, and says why. Commit subjects (`feat(GH-12): …`) and
+  merge messages are unchanged, so on GitHub those can still autolink; pick a ref other than `GH`
+  to avoid it.
+
+- **`setting-up-a-repo` no longer creates a `CLAUDE.md` stub** (FJ-246). Claude Code reads
+  `AGENTS.md` when a repo has no `CLAUDE.md`, so the backend breadcrumb now defaults to
+  `AGENTS.md` alone: a repo with only `AGENTS.md` (or neither file) gets the block in `AGENTS.md`
+  and no `CLAUDE.md`; a repo with only `CLAUDE.md` gets the block in `CLAUDE.md` as-is, with no
+  recommendation to split it out. When both files exist the block still goes in `AGENTS.md`, and
+  setup still offers to add `@AGENTS.md` to a `CLAUDE.md` that lacks it — Claude Code skips
+  `AGENTS.md` whenever `CLAUDE.md` exists.
+
+- **PR CI takes a cheap path when a change only touches inert docs** (FJ-235). This
+  repository's own `tests` workflow classifies each PR with `scripts/ci/docs-only.sh`: when
+  every changed path is on an allowlist of files no test reads (`docs/**`, `CONTRIBUTING.md`,
+  `CODE_OF_CONDUCT.md`, `SECURITY.md`), each leg skips its install and test *steps* but still
+  runs and reports `success`, so `flight ci watch` sees a real verdict rather than
+  `status=skipped`. Pushes, unknown paths, and any classifier error run the full suite; the
+  step log and job summary say which path ran and which file forced a full one. Contributor-
+  facing only — nothing changes for repos using the plugin.
+
+- **`working-an-issue` runs the repo's `code.preflight` gate before moving an issue to `to-test`**
+  (FJ-221). The interactive path was the one place a branch changed state without consulting the
+  gate, looser than the batch path. A red gate now leaves the issue `in-progress` and shows the
+  failing output; with no gate configured nothing changes.
+
+- **flight writes real headings to Jira** (FJ-178). On Jira, a body or comment line starting
+  with `#`…`######` and a space now becomes an ADF heading at that level, so the `##` sections
+  flight writes render as headings in the Jira UI rather than as literal `## ` text — and read back
+  intact. `#` lines inside fenced code blocks, and `#word` with no space, are left alone.
+
+### Fixed
+- **`issues list --all-trackers --status ROLE` no longer fails on a tracker without that role**
+  (FJ-277). A tracker that never defined the role, or declined it (`false`), used to show up as
+  `tracker X unavailable`. Under `--json` it landed in `errors[]`, and in text mode the command
+  exited non-zero. Such a tracker now contributes zero rows, with one stderr note naming the
+  tracker and the role. Asking one tracker directly (`--tracker REF`, or the default) for a role
+  it lacks is still a usage error.
+- **The secrets migration no longer drops a legacy issue token** (FJ-278). Suppose
+  `secrets.json` held a legacy `issues.token` that differed from the code token, and the target
+  tracker already had an `issueTrackers.<REF>` entry. The schema-3 secrets migration then kept
+  the entry and silently threw away the legacy token. It now refuses, naming both fields, and
+  asks you to remove one and rerun. Nothing is changed. A legacy token equal to the code token
+  is still dropped quietly, and with no existing entry the legacy token still moves. (`flight
+  reconcile` already refused such a file up front as mixed tracker secrets. The migration helper
+  now refuses it as well.)
+
+- **A message sent mid-turn no longer drops the turn's earlier usage from the prompt log**
+  (FJ-269). Claude Code fires `UserPromptSubmit` for a message sent while a turn is running, and
+  the prompt hook used to start a new turn there. The one `Stop` then counted only the requests
+  after that message. Now the open turn keeps its id and start, the prompts accumulate
+  (`queued_prompts` counts the extras), and the row covers the whole turn. An interrupted turn,
+  which gets no `Stop`, is now counted in the next turn's row instead of being lost.
+
+- **A prompt sent just as a turn ends is no longer dropped from the prompt log** (FJ-276). If
+  the next message arrived in the moment between the `Stop` hook writing its row and clearing
+  the turn's state, that cleanup deleted the new turn's state too, and the whole next turn went
+  unlogged ("no active turn recorded"). The `Stop` hook now clears the state only while it still
+  belongs to the turn it just logged.
+
+- **Prompt-log pricing matches the published Claude rates** (FJ-270). Claude Opus 5.5 was priced
+  at Claude Opus 5 rates ($5/$25, cache reads $0.50); it is now $4/$20 with $0.20 cache reads.
+  Claude Sonnet 5 and 5.5 were priced at $3/$15; they are now $2/$10 with $0.20 cache reads.
+  Claude Fable 5.1 and Mythos 5.1 cache reads are now $0.25 (they were $1, the Fable 5 rate).
+- **Cache writes are priced by TTL** (FJ-270). Claude Code rows record the 1-hour share of their
+  cache writes (`cache_creation_1h_tokens`), which is priced at the new
+  `cache_creation_1h_per_million` rate (2× input) instead of the 5-minute rate (1.25×). A model id
+  with a context tag such as `claude-opus-5-5[1m]` is priced as its base model.
+
+- **`scripts/bump-version.sh` rolls a CRLF changelog** (FJ-225). On a Windows checkout, where
+  markdown keeps native line endings, it never found `## [Unreleased]`. It still reported
+  success, after bumping the manifests and leaving the changelog unrolled. It now matches the
+  heading regardless of `\r` and writes the new lines with the file's own ending. If the heading
+  is missing, it stops before changing anything.
+
+- **`flight branches prune` drops a deleted branch's retained identity binding** (FJ-248). The
+  schema-3 migration binds every legacy `feature/<N>-…` branch to its tracker in
+  `.flightdirector/batches/work-items/identities.json`, and nothing ever removed those entries, so
+  the file only grew. Once `prune` leaves a branch gone both locally and on origin, its binding
+  goes too, reported as a `drop-binding` row (`would-drop-binding` in a preview). A binding is
+  never dropped while the branch still exists on either side — it is the only record of which
+  tracker an unqualified legacy branch belongs to — and other branches' bindings are untouched.
+  Bindings for branches that were already deleted before this release are not swept.
+
+- **`flight ci watch` no longer reports a cancelled run as a failure** (FJ-281). A run stopped
+  before it finished (most often because a newer push superseded it) used to count as `failed`,
+  so the watch ended on `status=failure` while `ci log` found no failed job to show. Cancelled
+  runs are now counted on their own `cancelled=<c>` field. With no failure, the verdict is the
+  new `status=cancelled`: not a pass, because the run verified nothing, and not a red to debug.
+  GitLab's `canceling` now counts as still pending. With `--pr`, if the PR's head moved during
+  the watch, a line on stderr names the new head so you know to watch again. `branches sync-down`
+  stops on a cancelled verdict and says so, and `promoting-a-branch` and `promoting-branches`
+  say what to do with it.
+
+- **A red preflight gate now really stops a `pr`-hop group in `promoting-branches`** (FJ-231).
+  The red-gate handler ended in a `continue` with no shell loop around it, so a literal run fell
+  through to the push. The gate now writes its verdict to a file stamped with the integration
+  branch's commit, and the push, the PR body and `pr open` run only inside a guard that reads it;
+  otherwise the group is reported skipped, with the reason, and the other groups carry on.
+
+- **Jira headings survive a read** (FJ-178). `flight issues get` and `issues comments` on Jira
+  now render an ADF heading as `#`-prefixed markdown at its own level (`## Acceptance`), instead
+  of flattening it into a plain paragraph — so the `## Acceptance` / `## Test plans` anchors the
+  skills look for are still there when an issue was written or edited in the Jira web UI.
+
+## [0.17.1] - 2026-10-03
+
 ### Added
 
+- **Copy issues between trackers** (FJ-200). `flight issues copy --from FJ-12 --to GH` copies an
+  issue to another configured tracker. The body, comments (with their original author and date),
+  name-matched labels and the status (mapped by role) are copied by default and each can be
+  turned off; an optional "Copied from" footer and "Copied to" back-link are off by default.
+  `flight issues resync` later brings over comments added to the source. A local ledger
+  (`.flightdirector/copies.jsonl`) refuses accidental second copies and lets a copy that failed
+  partway finish. The new `copying-an-issue` skill adds a duplicate scan and a dry-run preview.
+  Capability token: `issues-copy`.
 - **Cursor paging for `issues list --json`** (#262). `--per-page M` returns one page and a
   `next` cursor, and `--cursor C` fetches the page after it, so a "Load more" button no longer
   re-downloads the whole list with a growing `--limit`. Pages run newest created first, ties by

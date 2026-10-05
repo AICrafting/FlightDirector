@@ -9,6 +9,7 @@
 #              body, split out of `body` into {plugin, version, model} (null if absent)
 #   tracker / qualified   the named-tracker identity ($tracker is the ref; empty on a
 #              pre-schema-3 config, where both are null)
+#   blocked_by null here; the dispatcher fills it on `issues get --json` (FJ-271).
 # and fixes key order so every backend serialises identically.
 #
 # Invoked as: jq -c --arg mode list|get|comments|comment --arg tracker REF --argjson labels MAP
@@ -47,7 +48,7 @@ def finish_issue:
 	| {
 		number: (.number | tostring), tracker: tracker_or_null, qualified: qualified_id,
 		title, state, status: (.labels | status_role), labels,
-		author, created, updated, comments, url, body, signature
+		author, created, updated, comments, url, body, signature, blocked_by: null
 	  };
 
 def finish_comment:
