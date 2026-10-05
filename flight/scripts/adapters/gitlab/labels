@@ -27,6 +27,7 @@ case "$verb" in
       *) die "labels resolve: unknown arg '$1'" ;;
     esac; done
     [ ${#names[@]} -gt 0 ] || die "labels resolve: at least one --name required"
+    labels_load
     for n in "${names[@]}"; do
       printf '%s\t%s\n' "$n" "$(label_id "$n")"
     done

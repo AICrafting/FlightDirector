@@ -158,6 +158,12 @@ _all_labels() {
   printf '%s' "$_LABELS_CACHE"
 }
 
+# labels_load — fill _LABELS_CACHE in the CALLING process. Every lookup is written
+# `$(label_id …)`, a subshell, so a cache filled there dies with it and each lookup
+# re-fetched the whole paged label list — once per status role on every set-status
+# (FJ-301). Call this at top level before the first lookup; the subshells inherit it.
+labels_load() { _all_labels >/dev/null; }
+
 # label_id <name> — github numeric id on stdout, empty if the label doesn't exist.
 # (GitHub label endpoints use names, not ids; this exists so `labels resolve`
 # can return the contract's name⇥id shape and `create` can check existence.)

@@ -158,6 +158,23 @@ _all_labels() {
   printf '%s' "$_LABELS_CACHE"
 }
 
+# labels_load — fill _LABELS_CACHE in the CALLING process. Every lookup is written
+# `$(label_id …)`, a subshell, so a cache filled there dies with it and each lookup
+# re-fetched the whole paged label list — once per status role on every set-status
+# (FJ-301). Call this at top level before the first lookup; the subshells inherit it.
+labels_load() { _all_labels >/dev/null; }
+
+# _status_ids_on_issue <labels-json> <current-ids-json> <keep-name> — the ids of the
+# configured status labels the issue carries, except <keep-name>, one per line, in config
+# order. One jq for the whole set rather than a label_id plus an `index` test per status
+# role (FJ-301). A name resolves to its first id, as label_id does; call labels_load first.
+_status_ids_on_issue() {
+  printf '%s' "$_LABELS_CACHE" | jq -r --argjson cfg "$1" --argjson cur "$2" --arg keep "$3" '
+    (reduce .[] as $l ({}; .[$l.name] //= $l.id)) as $ids
+    | $cfg.status // {} | .[] | select(type == "string" and . != $keep)
+    | $ids[.] // empty | select(. as $i | $cur | index($i) != null)'
+}
+
 # label_id <name> — numeric id on stdout, empty if the label doesn't exist.
 label_id() {
   _all_labels | jq -r --arg n "$1" '[.[] | select(.name==$n) | .id] | first // empty'

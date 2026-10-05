@@ -146,6 +146,7 @@ case "$verb" in
       payload="$(jq -n --arg t "$title" --arg b "$body" '{title:$t, description:$b}')"
     fi
     if [ ${#labels[@]} -gt 0 ]; then
+      labels_load
       for n in "${labels[@]}"; do
         [ -n "$(label_id "$n")" ] \
           || die "issues create: label '$n' not found — create it first (labels create / bootstrapping-labels)"
@@ -277,6 +278,7 @@ case "$verb" in
     esac; done
     [ -n "$number" ] || die "issues label-add: --number required"
     [ ${#labels[@]} -gt 0 ] || die "issues label-add: at least one --label required"
+    labels_load
     for n in "${labels[@]}"; do
       [ -n "$(label_id "$n")" ] || die "issues label-add: label '$n' not found"
     done
@@ -296,6 +298,7 @@ case "$verb" in
     esac; done
     [ -n "$number" ] || die "issues label-remove: --number required"
     [ ${#labels[@]} -gt 0 ] || die "issues label-remove: at least one --label required"
+    labels_load
     for n in "${labels[@]}"; do
       [ -n "$(label_id "$n")" ] || die "issues label-remove: label '$n' not found"
     done

@@ -124,6 +124,7 @@ case "$verb" in
     fi
     if [ ${#labels[@]} -gt 0 ]; then
       ids=()
+      labels_load
       for n in "${labels[@]}"; do
         id="$(label_id "$n")"
         [ -n "$id" ] || die "issues create: label '$n' not found — create it first (labels create / bootstrapping-labels)"
@@ -222,21 +223,14 @@ case "$verb" in
     # role → configured label name; the full status set is what we manage.
     target_name="$(printf '%s' "$labels_json" | jq -r --arg r "$role" '.status[$r] // empty')"
     [ -n "$target_name" ] || die "set-status: role '$role' not found in labels.status config"
+    labels_load
     target_id="$(label_id "$target_name")"
     [ -n "$target_id" ] || die "set-status: label '$target_name' does not exist on the repo"
 
-    status_names=()
-    while IFS= read -r n; do [ -n "$n" ] && status_names+=("$n"); done \
-      < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[] | select(type == "string")')
-
     # Remove every *other* managed status label currently on the issue, then add target.
     current_ids="$(_api GET "/issues/${number}" | jq -c '[.labels[].id]')"
-    for n in "${status_names[@]}"; do
-      [ "$n" = "$target_name" ] && continue
-      id="$(label_id "$n")"; [ -n "$id" ] || continue
-      if printf '%s' "$current_ids" | jq -e --argjson id "$id" 'index($id) != null' >/dev/null; then
-        _api DELETE "/issues/${number}/labels/${id}" >/dev/null
-      fi
+    for id in $(_status_ids_on_issue "$labels_json" "$current_ids" "$target_name"); do
+      _api DELETE "/issues/${number}/labels/${id}" >/dev/null
     done
     _api POST "/issues/${number}/labels" "$(jq -n --argjson id "$target_id" '{labels:[$id]}')" >/dev/null
     ;;
@@ -250,13 +244,10 @@ case "$verb" in
     [ -n "$number" ] || die "issues clear-status: --number required"
     labels_json="${LS_LABELS_JSON:-}"; [ -n "$labels_json" ] || labels_json='{}'
     current_ids="$(_api GET "/issues/${number}" | jq -c '[.labels[].id]')"
-    while IFS= read -r n; do
-      [ -n "$n" ] || continue
-      id="$(label_id "$n")"; [ -n "$id" ] || continue
-      if printf '%s' "$current_ids" | jq -e --argjson id "$id" 'index($id) != null' >/dev/null; then
-        _api DELETE "/issues/${number}/labels/${id}" >/dev/null
-      fi
-    done < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[] | select(type == "string")')
+    labels_load
+    for id in $(_status_ids_on_issue "$labels_json" "$current_ids" ""); do
+      _api DELETE "/issues/${number}/labels/${id}" >/dev/null
+    done
     ;;
 
   label-add)
@@ -269,6 +260,7 @@ case "$verb" in
     [ -n "$number" ] || die "issues label-add: --number required"
     [ ${#labels[@]} -gt 0 ] || die "issues label-add: at least one --label required"
     ids=()
+    labels_load
     for n in "${labels[@]}"; do
       id="$(label_id "$n")"
       [ -n "$id" ] || die "issues label-add: label '$n' not found"
@@ -290,6 +282,7 @@ case "$verb" in
     [ -n "$number" ] || die "issues label-remove: --number required"
     [ ${#labels[@]} -gt 0 ] || die "issues label-remove: at least one --label required"
     ids=()
+    labels_load
     for n in "${labels[@]}"; do
       id="$(label_id "$n")"
       [ -n "$id" ] || die "issues label-remove: label '$n' not found"
