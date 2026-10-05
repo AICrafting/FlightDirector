@@ -270,4 +270,4 @@ jobs:
         shell: bash
         run: |
           export PATH="/usr/bin:/mingw64/bin:$HOME/bin:$PATH"
-          TEST_JOBS=8 bash scripts/run-tests.sh   # EXPERIMENT (FJ-301): oversubscribe 2x
+          bash scripts/run-tests.sh
