@@ -22,12 +22,27 @@ set -euo pipefail
 
 # Windows shims (jq CRLF, path form); a no-op elsewhere.
 # shellcheck source-path=SCRIPTDIR source=_portable.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+source "${BASH_SOURCE[0]%/*}/_portable.sh"
 
 die() { echo "flight: $*" >&2; exit 1; }
 note() { echo "flight: $*" >&2; }
-lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
-upper() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
+# ASCII case mapping in pure bash: bash 3.2 (macOS) has no ${x,,}, and a `tr` per call
+# was a fork plus an exec, six of them on every resolve (FJ-301). Refs, aliases, project
+# keys and ids are ASCII, which is all GNU tr's byte-wise mapping changed anyway.
+# case_to <VAR> <from-set> <to-set> <string> — assign the mapped string to VAR.
+case_to() {
+	local _s="$4" _o="" _c _p
+	while [ -n "$_s" ]; do
+		_c="${_s:0:1}"; _s="${_s:1}"
+		case "$2" in *"$_c"*) _p="${2%%"$_c"*}"; _c="${3:${#_p}:1}" ;; esac
+		_o="$_o$_c"
+	done
+	printf -v "$1" '%s' "$_o"
+}
+UC=ABCDEFGHIJKLMNOPQRSTUVWXYZ LC=abcdefghijklmnopqrstuvwxyz
+lower_to() { case_to "$1" "$UC" "$LC" "$2"; }
+lower() { local r; lower_to r "$1"; printf '%s' "$r"; }
+upper() { local r; case_to r "$LC" "$UC" "$1"; printf '%s' "$r"; }
 
 # The backend value an older Flight runtime finds in `issues.backend` after migration.
 # Pre-schema-3 dispatchers route issue/label verbs through `issues.backend`, so this
@@ -141,7 +156,7 @@ describe_trackers() {
 
 # Edit distance ≤ 1, or one a prefix of the other: close enough to suggest, never to pick.
 suggest() {
-	local want; want="$(lower "$1")"
+	local want; lower_to want "$1"
 	jq -r '.issueTrackers[] | (.ref, ((.aliases // [])[]), (if (.backend | ascii_downcase) == "jira" then (.project // empty) else empty end))' "$config" \
 		| awk -v w="$want" '
 			function lev(a, b,    i, j, la, lb, d, c, x, y, z) {
@@ -204,7 +219,7 @@ resolve() {
 	local selected="" native="" tracker="" bare prefix
 	local cand_refs=() cand_digits=() cand_json=()
 	[ -n "$number" ] || die "issues resolve: --number required"
-	raw_l="$(lower "$number")"
+	lower_to raw_l "$number"
 
 	# Every configured ref, alias and Jira project key is a candidate prefix. A tracker
 	# is a candidate at most once, even when its ref and an alias both match.
@@ -215,7 +230,7 @@ resolve() {
 		if [ "$tbackend" = jira ] && [[ "$tproject" =~ ^[A-Za-z][A-Za-z0-9_]*$ ]]; then tokens="$tokens,$tproject"; fi
 		local old_ifs="$IFS"; IFS=,
 		for token in $tokens; do
-			token_l="$(lower "$token")"
+			lower_to token_l "$token"
 			if [[ "$raw_l" =~ ^${token_l}[-#]?([0-9]+)$ ]]; then
 				digits="${BASH_REMATCH[1]}"
 				seen=0
@@ -275,9 +290,9 @@ resolve() {
 		# One tracker (#258): the prefix carries no information, so people and the forge
 		# see the issue's own name — #12 (which the forge autolinks), or PROJ-7 on Jira.
 		case "$native" in *[!0-9]*) display="$native" ;; *) display="#$native" ;; esac
-		branch_prefix="$(lower "$native")"
+		lower_to branch_prefix "$native"
 	else
-		display="$qualified"; branch_prefix="$(lower "$qualified")"
+		display="$qualified"; lower_to branch_prefix "$qualified"
 	fi
 	jq -nc --arg tracker "$selected" --arg number "$native" --arg qualified "$qualified" \
 		--arg display "$display" --arg branchPrefix "$branch_prefix" \

@@ -39,19 +39,19 @@ set -euo pipefail
 # values keep a trailing \r: the schema check, the tracker lookups and the pr-reference
 # comparison all fail against an invisible byte.
 # shellcheck source-path=SCRIPTDIR source=_portable.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+source "${BASH_SOURCE[0]%/*}/_portable.sh"
 
 die() { printf 'issue-identity: %s\n' "$1" >&2; exit "${2:-1}"; }
 command -v jq >/dev/null 2>&1 || die "jq is required"
 
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF_DIR="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
 FLIGHT="${FLIGHT_SELF:-$SELF_DIR/flight}"
 
 if [ -n "${FLIGHT_REPO_ROOT:-}" ]; then
 	ROOT="$FLIGHT_REPO_ROOT"
 else
 	COMMON="$(git rev-parse --git-common-dir 2>/dev/null)" || die "not inside a git repository"
-	ROOT="$(dirname "$(cd "$COMMON" && pwd)")"
+	ROOT="$(cd "$COMMON" && pwd)"; ROOT="${ROOT%/*}"; [ -n "$ROOT" ] || ROOT=/
 fi
 # Same config-home resolution as the dispatcher (`.lightspeed/` is the deprecated one).
 CFG_DIR="$ROOT/.flightdirector"

@@ -12,9 +12,9 @@ set -euo pipefail
 
 # Windows shims (jq CRLF, path form); a no-op elsewhere.
 # shellcheck source-path=SCRIPTDIR source=_portable.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+source "${BASH_SOURCE[0]%/*}/_portable.sh"
 
-SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+SELF_DIR="$(cd "${0%/*}" && pwd)"
 ADAPTERS_DIR="$SELF_DIR/adapters"
 
 # Failure reporting. Every failure prints one human sentence on stderr. Under
@@ -255,7 +255,7 @@ fi
 # .flightdirector/secrets.json does not exist locally). Falls back to cwd outside a repo.
 if cdir="$(git rev-parse --git-common-dir 2>/dev/null)"; then
   cdir="$(cd "$cdir" && pwd)" || die "cannot resolve git common dir: $cdir"   # absolutize (valid relative to cwd)
-  repo_root="$(dirname "$cdir")"
+  repo_root="${cdir%/*}"; [ -n "$repo_root" ] || repo_root=/
 else
   repo_root="$(pwd)"
 fi
@@ -413,8 +413,12 @@ tracker_coded() {
 # and must stay silent, so they are the one exemption.
 runtime_schema=0
 if [ -f "$cfg" ] && [ "$group" != "prompt-log" ]; then
-	jq -e . "$cfg" >/dev/null 2>&1 || die_code not-configured "$cfg_rel is not valid JSON"
-	runtime_schema="$(jq -r '.schemaVersion // 0' "$cfg")"
+	# One jq both validates and reads the schema (FJ-301). A file that is not one JSON
+	# object — malformed, empty, `null`, an array — prints nothing or fails, and either
+	# is "not valid JSON", as the separate `jq -e .` used to report.
+	runtime_schema="$(jq -r 'if type == "object" then .schemaVersion // 0 else error("not an object") end' "$cfg" 2>/dev/null)" \
+		|| die_code not-configured "$cfg_rel is not valid JSON"
+	[ -n "$runtime_schema" ] || die_code not-configured "$cfg_rel is not valid JSON"
 	case "$runtime_schema" in ''|*[!0-9]*) die "config schemaVersion must be a non-negative integer" ;; esac
 	[ "$runtime_schema" -le "$TRACKER_SCHEMA" ] || die_code not-configured "config uses schema $runtime_schema, newer than this Flight understands (schema $TRACKER_SCHEMA); update the Flight plugin"
 	if [ "$runtime_schema" -lt "$TRACKER_SCHEMA" ] && {

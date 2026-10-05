@@ -6,11 +6,11 @@
 
 # Windows shims (jq CRLF, path form); a no-op elsewhere.
 # shellcheck source-path=SCRIPTDIR source=../../_portable.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../_portable.sh"
+source "${BASH_SOURCE[0]%/*}/../../_portable.sh"
 # shellcheck source-path=SCRIPTDIR source=../_errors.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_errors.sh"
+source "${BASH_SOURCE[0]%/*}/../_errors.sh"
 # shellcheck source-path=SCRIPTDIR source=../_json.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_json.sh"
+source "${BASH_SOURCE[0]%/*}/../_json.sh"
 
 command -v curl >/dev/null 2>&1 || { echo "forgejo adapter: curl is required" >&2; exit 1; }
 command -v jq   >/dev/null 2>&1 || { echo "forgejo adapter: jq is required" >&2; exit 1; }
