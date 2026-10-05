@@ -291,7 +291,9 @@ for ISSUE_ID in <that zone's ids with status=complete>; do
     echo "$(date -u +%FT%TZ) $ZONE ticket=$ISSUE_ID status=preflight-skip note=\"no worktree\"" >> "$ZONE_LOG"
     continue
   fi
-  if ( cd "$1" && sh -c "$PREFLIGHT" ) >"$PFLOG" 2>&1; then
+  # The gate runs through the dispatcher, never as a `sh -c` here: Claude Code's safety
+  # check cannot read inside one and may stop to ask, which nobody is there to answer (FJ-307).
+  if "$DISP" preflight run --worktree "$1" --log "$PFLOG" >/dev/null 2>&1; then
     echo "$(date -u +%FT%TZ) $ZONE ticket=$ISSUE_ID status=preflight-pass" >> "$ZONE_LOG"
   else
     echo "$(date -u +%FT%TZ) $ZONE ticket=$ISSUE_ID status=preflight-fail note=\"$PFLOG\"" >> "$ZONE_LOG"

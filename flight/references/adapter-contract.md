@@ -282,6 +282,21 @@ Safety is in the verb, not in the caller:
 - Stage branches, `archived/*`, and any branch checked out in the main checkout or a worktree
   outside `.worktrees/` are protected regardless of the patterns.
 
+### `preflight` (dispatcher-owned)
+
+Runs the repo's `code.preflight` gate ([flight-setup.md](flight-setup.md) → *Repo preflight
+gate*) and checks its verdict. It lives in the dispatcher (`scripts/preflight`) so that the
+`sh -c` running the gate is never in the agent's own command line, where Claude Code's Bash
+safety check cannot read it and may stop to ask (FJ-307). The dispatcher reads the key and
+passes it to the helper; the helper never reads config.
+
+| Verb    | Args | Behaviour |
+|---------|------|-----------|
+| `run`   | `--worktree DIR [--log FILE] [--verdict FILE]` | Runs the gate in `DIR` with its output in `--log` (a temp file when omitted). Exit 0 with `preflight: passed (<cmd>)`, or `preflight: none configured` when the key is absent; exit 1 when the gate fails, printing the log's last 40 lines and `preflight: FAILED (<cmd>) — full log: <path>`. With `--verdict`, the file is removed first and then holds `pass <sha>`, `fail <sha>` or `none <sha>`, where `<sha>` is `DIR`'s `HEAD` when the gate started. A config that cannot be read fails before the gate starts and leaves no verdict. |
+| `check` | `--worktree DIR --verdict FILE` | Exit 0 only when `FILE` holds `pass` or `none` for `DIR`'s **current** `HEAD`. Otherwise exit 1, naming the reason on stderr: no verdict, a failed gate, or a verdict for an older commit. |
+
+Both exit 2 on a usage error. Advertised as the `preflight` capability.
+
 ### `issues copy` / `issues resync` (dispatcher-owned)
 
 Copy one issue to another configured tracker, and later bring that copy up to date with source

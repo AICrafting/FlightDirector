@@ -7,7 +7,7 @@
 set -euo pipefail
 ADAPTER_NAME="github/issues"
 # shellcheck source-path=SCRIPTDIR source=_common.sh
-source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+source "${0%/*}/_common.sh"
 
 verb="${1:-}"; shift || true
 
@@ -122,6 +122,7 @@ case "$verb" in
       payload="$(jq -n --arg t "$title" --arg b "$body" '{title:$t, body:$b}')"
     fi
     if [ ${#labels[@]} -gt 0 ]; then
+      labels_load
       for n in "${labels[@]}"; do
         [ -n "$(label_id "$n")" ] \
           || die "issues create: label '$n' not found — create it first (labels create / bootstrapping-labels)"
@@ -197,14 +198,13 @@ case "$verb" in
     [ -n "$target_name" ] || die "set-status: role '$role' not found in labels.status config"
     [ -n "$(label_id "$target_name")" ] || die "set-status: label '$target_name' does not exist on the repo"
 
+    # One jq picks the other status labels the issue carries, rather than one per role (FJ-301).
     current_names="$(_api GET "/issues/${number}" | jq -c '[.labels[].name]')"
     while IFS= read -r n; do
       [ -n "$n" ] || continue
-      [ "$n" = "$target_name" ] && continue
-      if printf '%s' "$current_names" | jq -e --arg n "$n" 'index($n) != null' >/dev/null; then
-        _api DELETE "/issues/${number}/labels/$(urlenc "$n")" >/dev/null
-      fi
-    done < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[] | select(type == "string")')
+      _api DELETE "/issues/${number}/labels/$(urlenc "$n")" >/dev/null
+    done < <(printf '%s' "$labels_json" | jq -r --argjson cur "$current_names" --arg keep "$target_name" \
+      '.status // {} | .[] | select(type == "string" and . != $keep) | select(. as $n | $cur | index($n) != null)')
     _api POST "/issues/${number}/labels" "$(jq -n --arg n "$target_name" '{labels:[$n]}')" >/dev/null
     ;;
 
@@ -219,10 +219,9 @@ case "$verb" in
     current_names="$(_api GET "/issues/${number}" | jq -c '[.labels[].name]')"
     while IFS= read -r n; do
       [ -n "$n" ] || continue
-      if printf '%s' "$current_names" | jq -e --arg n "$n" 'index($n) != null' >/dev/null; then
-        _api DELETE "/issues/${number}/labels/$(urlenc "$n")" >/dev/null
-      fi
-    done < <(printf '%s' "$labels_json" | jq -r '.status // {} | .[] | select(type == "string")')
+      _api DELETE "/issues/${number}/labels/$(urlenc "$n")" >/dev/null
+    done < <(printf '%s' "$labels_json" | jq -r --argjson cur "$current_names" --arg keep "" \
+      '.status // {} | .[] | select(type == "string" and . != $keep) | select(. as $n | $cur | index($n) != null)')
     ;;
 
   label-add)
@@ -234,6 +233,7 @@ case "$verb" in
     esac; done
     [ -n "$number" ] || die "issues label-add: --number required"
     [ ${#labels[@]} -gt 0 ] || die "issues label-add: at least one --label required"
+    labels_load
     for n in "${labels[@]}"; do
       [ -n "$(label_id "$n")" ] || die "issues label-add: label '$n' not found"
     done
@@ -253,6 +253,7 @@ case "$verb" in
     esac; done
     [ -n "$number" ] || die "issues label-remove: --number required"
     [ ${#labels[@]} -gt 0 ] || die "issues label-remove: at least one --label required"
+    labels_load
     for n in "${labels[@]}"; do
       [ -n "$(label_id "$n")" ] || die "issues label-remove: label '$n' not found"
     done

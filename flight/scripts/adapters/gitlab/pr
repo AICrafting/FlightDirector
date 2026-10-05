@@ -5,7 +5,7 @@
 set -euo pipefail
 ADAPTER_NAME="gitlab/pr"
 # shellcheck source-path=SCRIPTDIR source=_common.sh
-source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+source "${0%/*}/_common.sh"
 
 verb="${1:-}"; shift || true
 

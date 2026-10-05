@@ -179,7 +179,23 @@ jobs:
   script-tests-windows:
     name: script tests (Windows, MSYS)
     runs-on: windows
-    timeout-minutes: 30
+    timeout-minutes: 20
+    # Only where a Windows regression would ship (FJ-305): pull requests into qa and
+    # main — the promotions — plus a manual dispatch. Not on PRs into develop or on
+    # pushes to it: this leg takes ~11 minutes against ~1 for the others, and it set
+    # the critical path for every feature PR. A Windows-only failure therefore
+    # surfaces at promotion to qa; CONTRIBUTING.md has the local CRLF check that
+    # catches the commonest kind earlier.
+    #
+    # Not on main → qa either: that is the sync-down after a qa → main promotion, and
+    # it carries the tree that promotion's PR has just tested on Windows. Only this
+    # leg skips there; the others still run, so the sync-down's watch sees `success`
+    # and auto-merges (an all-skipped run would leave the sync PR open).
+    #
+    # A job-level skip, unlike the docs-only path's step skip: the other legs still
+    # run, so `flight ci watch` reads the run as a pass with `skipped=1`, never as
+    # "CI ran nothing".
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && ((github.base_ref == 'qa' && github.head_ref != 'main') || github.base_ref == 'main'))
     steps:
       - name: Checkout
         uses: actions/checkout@v6

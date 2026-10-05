@@ -13,7 +13,49 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- **`flight preflight run` and `flight preflight check`** (FJ-307). The skills used to run the
+  repo's `code.preflight` gate themselves as `sh -c "$GATE"`. Claude Code's Bash safety check
+  cannot read inside a `sh -c` string, so it sometimes stopped to ask, and an unattended session
+  that could not answer had the step denied at the very check the workflow depends on. The
+  dispatcher now runs the gate: `preflight run --worktree DIR [--log FILE] [--verdict FILE]`
+  reports pass, fail (with the log's tail) or "none configured", and records a verdict for the
+  commit it judged. `preflight check` accepts only a pass or none for the commit now checked out,
+  and says why otherwise. `working-an-issue`, `promoting-a-branch`, `promoting-branches` and
+  `queue-batches` (including its agent prompt) all use it, and each guard is now a one-line
+  `if flight preflight check …`. Promotions now run the gate step in ungated repos too (it records
+  `none` in a moment), since the guards read that verdict instead of re-reading the config.
+  `runtime.md` gains short rules for the commands agents write: no computed `-c`/`eval` strings,
+  no `rm` on globs or possibly-empty paths, and one readable statement per line.
+
+### Fixed
+- **Label lookups fetch the repo's label list once per command** (FJ-301). The list was meant to
+  be cached, but the cache was filled in a subshell and lost every time. Every lookup re-fetched
+  the whole paged list: once per configured status role on `issues set-status` and
+  `clear-status`, and once per `--label` on `create`, `label-add` and `label-remove`. On Forgejo,
+  GitHub and GitLab those commands now make one label-list request. A Forgejo status change
+  against a repo with several pages of labels drops from a dozen or more requests to a handful.
+- **The repo's own Windows CI leg no longer spends ~10 minutes on one test** (FJ-295). The fake
+  `curl` in `tracker-lifecycle.test.sh` matched GitHub's label list with `*page=1*`, which
+  `per_page=100` also matches, so every page came back full and the adapter paged to its
+  1000-page cap. The error was swallowed by `|| true`, so the test passed. The pattern is now
+  anchored on `[?&]page=1` at the end of the URL in that test and three others that had copied
+  it, and a new check fails if the label list is paged more than a few times. Test-only:
+  plugin behavior is unchanged.
+
+### Changed
+- **The repo's own Windows CI leg runs only on pull requests into `qa` and `main`** (FJ-305), plus
+  manual dispatches; the `main` → `qa` sync-down skips it. Feature PRs into `develop` and pushes to `develop` no longer wait ~11
+  minutes for it, so a Windows-only failure first shows up at promotion. Repo CI only: plugin
+  behavior is unchanged.
+- **Faster dispatcher on Windows** (FJ-301). Git Bash ran every `jq` call through a `tr` pipe
+  to strip the CRs that a native `jq.exe` writes, which cost three processes per call. Flight
+  now uses jq's own `-b` flag, which writes LF directly, and keeps the pipe only for a jq older
+  than 1.6. Start-up also does less work on every platform: helpers are located without
+  `dirname`, and the config and the selected tracker's fields are each read with a single `jq`.
+  Each command validates its config and selects its tracker in one launch of the tracker helper
+  instead of up to three. Result pages are processed with one `jq` each. A status change starts
+  well under half as many processes as before.
 
 ## [0.17.2] - 2026-10-04
 

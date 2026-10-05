@@ -24,7 +24,23 @@ case "${OSTYPE:-}" in
 		# Every caller runs with `set -o pipefail`, so jq's own exit status still
 		# governs the pipeline — dropping that is how this breaks `auth check`,
 		# which depends on a non-zero jq.
-		jq() { command jq "$@" | tr -d '\r'; }
+		#
+		# jq's own `-b` (`--binary`, jq 1.6+) writes LF on Windows, which removes the
+		# pipe: one process per call instead of three (a subshell, jq, tr). This leg is
+		# where every spawn is dearest, and there are ~50 jq calls in one set-status
+		# (FJ-301). Probed once per process tree: the result is exported, so every child
+		# script inherits it instead of re-probing. A jq without -b keeps the pipe.
+		# The probe runs in a subshell: bash 3.2 under `set -e` exits on a failing
+		# `command …` even inside an `if` condition, killing the caller silently.
+		if [ -z "${FLIGHT_JQ_BINARY:-}" ]; then
+			if (command jq -b -n 1) >/dev/null 2>&1; then FLIGHT_JQ_BINARY=1; else FLIGHT_JQ_BINARY=0; fi
+			export FLIGHT_JQ_BINARY
+		fi
+		if [ "$FLIGHT_JQ_BINARY" = 1 ]; then
+			jq() { command jq -b "$@"; }
+		else
+			jq() { command jq "$@" | tr -d '\r'; }
+		fi
 		;;
 esac
 

@@ -196,7 +196,7 @@ done
 printf '%s\t%s\t%s\t%s\t%s\n' "$method" "$url" "$headers" "$user" "$(printf '%s' "$data" | tr '\n' ' ')" >>"${CURL_LOG:?}"
 body='[]'
 case "$url" in
-	*/labels*page=1*) body='[{"id":11,"name":"status/new","color":"fff","description":""},{"id":12,"name":"status/triage","color":"fff","description":""},{"id":13,"name":"bug","color":"fff","description":""}]' ;;
+	*/labels*[?\&]page=1) body='[{"id":11,"name":"status/new","color":"fff","description":""},{"id":12,"name":"status/triage","color":"fff","description":""},{"id":13,"name":"bug","color":"fff","description":""}]' ;;
 	*/labels*) body='[]' ;;
 	*/issues) body='{"number":42,"title":"t","state":"open","labels":[]}' ;;
 	*/issues*) body='[]' ;;

@@ -10,11 +10,13 @@
 # So this does not grep the prose. It lifts the REAL blocks out of the skill and runs them the way
 # a fresh-shell harness does: every block in its own shell, with the real Step 1 block restated
 # on top, against a fake `flight` and `git`. Only things that survive a tool call may carry the
-# verdict (the config, a file under $SCRATCH); anything a variable carries is lost here, and
-# anything Step 1 binds is re-bound before every guard.
+# verdict (a file under $SCRATCH); anything a variable carries is lost here, and anything Step 1
+# binds is re-bound before every guard. Since FJ-307 the gate runs through `flight preflight
+# run|check`, and the fake hands both to the REAL preflight helper.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+export PREFLIGHT_HELPER="$REPO_ROOT/flight/scripts/preflight"
 SKILL="$REPO_ROOT/flight/skills/promoting-a-branch/SKILL.md"
 SANDBOX="$(mktemp -d)"
 trap 'rm -rf "$SANDBOX"' EXIT
@@ -37,18 +39,40 @@ block() {
 		|| { echo "FAIL: no fenced block containing '$2' in promoting-a-branch/SKILL.md"; exit 1; }
 }
 block step1 'git rev-parse --git-common-dir'
-block step4b 'PFLOG='
+block step4b 'flight preflight run'
 block case1 'Merge and push without touching'
 block case2 'worktree add --detach'
 block pr 'flight pr open --head'
+# FJ-307: no block runs the gate itself; Claude Code's safety check cannot read a `sh -c` string.
+for b in step4b case1 case2 pr; do
+	grep -q 'sh -c' "$SANDBOX/$b.sh" && { echo "FAIL: the $b block still runs a gate with sh -c"; exit 1; }
+done
 
+# The fake dispatcher: `preflight run` reads the gate as the real one does and hands it to the
+# real helper (an unreadable config fails the way the real dispatcher reports it, before any
+# verdict exists); `preflight check` is the real helper outright.
 cat >"$SANDBOX/bin/flight" <<'SH'
 #!/usr/bin/env bash
-[ -f "$SANDBOX/config-unreadable" ] && exit 1
 case "$*" in
-	"pr open"*) echo "DID-PR" >>"$SANDBOX/actions"; printf '7\thttp://example.invalid/7\n' ;;
-	*preflight*) cat "$SANDBOX/gate" ;;
-	*) echo '[]' ;;
+	"pr open"*)
+		echo "DID-PR" >>"$SANDBOX/actions"
+		printf '7\thttp://example.invalid/7\n'
+		;;
+	"preflight run "*)
+		if [ -f "$SANDBOX/config-unreadable" ]; then
+			echo "flight: could not read code.preflight from .flightdirector/config.json" >&2
+			exit 1
+		fi
+		shift 2
+		exec "$PREFLIGHT_HELPER" run --gate "$(cat "$SANDBOX/gate")" "$@"
+		;;
+	"preflight check "*)
+		shift 2
+		exec "$PREFLIGHT_HELPER" check "$@"
+		;;
+	*)
+		echo '[]'
+		;;
 esac
 SH
 cat >"$SANDBOX/bin/git" <<'SH'
@@ -96,27 +120,26 @@ refused() {
 # `pr` is the site that matters (the commoner hop), but every site gets every case: a gate
 # honoured at two of three sites is a gate some repos do not have.
 for SITE in case1 case2 pr; do
-	# #228: the key is absent. Promotes whether Step 4b is skipped, as its prose allows, or run.
-	fresh '';      call "$SITE";                               acted   "$SITE ungated, 4b skipped"
+	# Ungated: Step 4b records `none`, and that is what lets the guard through. Skipping 4b
+	# leaves no verdict, and the guard refuses rather than guess (FJ-307; #228's skip is gone).
 	fresh '';      call step4b; call "$SITE";                  acted   "$SITE ungated, 4b run"
+	fresh '';      call "$SITE";                               refused "$SITE ungated, 4b skipped" 'no verdict'
 	fresh 'true';  call step4b; call "$SITE";                  acted   "$SITE green gate"
 	# !232 review: red, and Step 1 is restated before the guard, as it must be to have $MAIN.
-	fresh 'false'; call step4b; call "$SITE";                  refused "$SITE red gate" 'not green'
+	fresh 'false'; call step4b; call "$SITE";                  refused "$SITE red gate" 'FAILED'
 	# A configured gate nobody ran is not a pass.
-	fresh 'true';  call "$SITE";                               refused "$SITE gated, 4b never run" 'not green'
+	fresh 'true';  call "$SITE";                               refused "$SITE gated, 4b never run" 'no verdict'
 	# A pass belongs to the commit it judged, not to the branch.
 	fresh 'true';  call step4b; echo bbb222 >"$SANDBOX/sha"
-	               call "$SITE";                               refused "$SITE stale pass, new commit" 'not green'
-	# "Could not ask" must not read as "no gate configured".
-	fresh 'true';  call step4b; touch "$SANDBOX/config-unreadable"
-	               call "$SITE";                               refused "$SITE config unreadable" 'could not read'
+	               call "$SITE";                               refused "$SITE stale pass, new commit" 'not the current'
+	# "Could not ask" must not read as "no gate configured": an unreadable config leaves no verdict.
+	fresh 'true';  touch "$SANDBOX/config-unreadable"; call step4b
+	               call "$SITE";                               refused "$SITE config unreadable" 'no verdict'
 	# The latest run is the verdict: green, then red on the SAME commit (a flaky suite, a
-	# changed environment) must not leave the earlier pass standing. 4b closes this twice over,
-	# by clearing the old verdict and by writing `fail`, and this case pins the PAIR: either
-	# alone still passes it, only losing both trips it. Keep both; the `rm -f` also covers a
-	# run aborted before any verdict is written, which cannot be staged from inside the gate.
+	# changed environment) must not leave the earlier pass standing. The helper closes this twice
+	# over, by clearing the old verdict and by writing `fail`; this case pins the pair.
 	fresh 'true';  call step4b; printf 'false' >"$SANDBOX/gate"
-	               call step4b; call "$SITE";                  refused "$SITE green, then red re-run" 'not green'
+	               call step4b; call "$SITE";                  refused "$SITE green, then red re-run" 'FAILED'
 	# Same session, branch fixed: the earlier red must not block the retry.
 	fresh 'false'; call step4b; printf 'true' >"$SANDBOX/gate"
 	               call step4b; call "$SITE";                  acted   "$SITE red, fixed, re-run"
