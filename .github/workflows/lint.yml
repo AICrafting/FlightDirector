@@ -7,6 +7,9 @@ on:
     branches: [develop]
   pull_request: {}
 
+# No docs-only cheap path here, unlike tests.yml (FJ-235): both jobs take seconds, and
+# yamllint and shellcheck read `.yml` files and scripts a docs PR can touch, so skipping
+# them would save nothing worth the risk.
 jobs:
   yamllint:
     name: yamllint

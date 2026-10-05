@@ -7,6 +7,13 @@ on:
     branches: [develop]
   pull_request: {}
 
+# The docs-only cheap path (FJ-235). On a PR whose every changed path is on the allowlist in
+# scripts/ci/docs-only.sh (files no test reads), each leg still RUNS and reports `success`,
+# but skips its install and test STEPS. Never the job: a skipped job makes `flight ci watch`
+# report `status=skipped` ("CI ran nothing"), and Forgejo posts a `success` commit status for
+# a skipped job — green for work that never ran. Each leg classifies for itself (step id
+# `cheap`), and a push — the post-merge record on develop — has no PR number, so it always
+# runs in full. The classifier fails open: any error leaves `cheap` unset or false.
 jobs:
   script-tests:
     name: script tests (${{ matrix.name }})
@@ -25,9 +32,14 @@ jobs:
           # bash 3.2 image below, so the two Linux legs differ in the
           # interpreter and nothing else — which is the point of the matrix.
           # Bump both together.
+          #
+          # `bootstrap` is what checking out and classifying need (node for the
+          # checkout action, git, a bash); `packages` is the rest, which the
+          # docs-only cheap path skips.
           - name: bash 5
             image: alpine:3.22.6
-            packages: npm bash gawk git coreutils jq python3
+            bootstrap: npm git bash
+            packages: gawk coreutils jq python3
 
           # macOS ships bash 3.2.57 and nothing newer, so `/usr/bin/env bash` there
           # is 3.2 and anything bash 4+ (mapfile, declare -A) dies at runtime (#127).
@@ -40,17 +52,32 @@ jobs:
           # turning this leg into a duplicate of the one above.
           - name: bash 3.2
             image: bash:3.2.57-alpine3.22
-            packages: npm gawk git coreutils jq python3
+            bootstrap: npm git
+            packages: gawk coreutils jq python3
     container:
       image: ${{ matrix.image }}
     steps:
-      - name: Setup tools
+      - name: Setup checkout tools
         run: |
-          # python3: the prompt-logger producers/summary (stdlib only) and their tests
-          apk add --update ${{ matrix.packages }}
+          apk add --update ${{ matrix.bootstrap }}
 
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Classify the change (docs-only cheap path?)
+        id: cheap
+        continue-on-error: true
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          bash scripts/ci/docs-only.sh --pr "$PR_NUMBER" --base "$BASE_REF"
+
+      - name: Setup tools
+        if: steps.cheap.outputs.cheap != 'true'
+        run: |
+          # python3: the prompt-logger producers/summary (stdlib only) and their tests
+          apk add --update ${{ matrix.packages }}
 
       - name: Show the interpreter under test
         run: |
@@ -59,6 +86,7 @@ jobs:
           printf 'nproc -> %s\n' "$(nproc 2>/dev/null || echo MISSING)"
 
       - name: Run script tests
+        if: steps.cheap.outputs.cheap != 'true'
         run: |
           bash scripts/run-tests.sh
 
@@ -85,6 +113,7 @@ jobs:
           SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           # Never let git block on a credential prompt: with no tty it hangs until
           # the job timeout instead of failing, which reports as a timeout and hides
@@ -98,6 +127,23 @@ jobs:
               fetch --no-tags --depth 1 origin "$SHA"
           git checkout -q FETCH_HEAD
           git --no-pager log --oneline -1
+          # The docs-only classifier compares against origin/<base>, and the auth header
+          # above is per-command, so the classifier cannot fetch it by itself. A failure
+          # here only means the classifier fails open to a full run.
+          if [ -n "$BASE_REF" ]; then
+            git -c credential.helper= -c http.extraheader="AUTHORIZATION: basic $AUTH" \
+                fetch --no-tags --depth 1 origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" \
+              || echo "could not fetch base $BASE_REF; the classifier will choose a full run"
+          fi
+
+      - name: Classify the change (docs-only cheap path?)
+        id: cheap
+        continue-on-error: true
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          bash scripts/ci/docs-only.sh --pr "$PR_NUMBER" --base "$BASE_REF"
 
       - name: Show the interpreter under test
         run: |
@@ -107,6 +153,7 @@ jobs:
           printf 'cores -> %s\n' "$(sysctl -n hw.ncpu 2>/dev/null || echo MISSING)"
 
       - name: Run script tests
+        if: steps.cheap.outputs.cheap != 'true'
         run: |
           bash scripts/run-tests.sh
 
@@ -137,16 +184,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Classify the change (docs-only cheap path?)
+        id: cheap
+        continue-on-error: true
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          export PATH="/usr/bin:/mingw64/bin:$PATH"
+          bash scripts/ci/docs-only.sh --pr "$PR_NUMBER" --base "$BASE_REF"
+
       # python3 for the prompt-logger producers and their tests. winget is not
       # usable here (the runner is a service account with no interactive source
       # agreement), so use the action; node is present on this runner, unlike the
       # macOS one, so JS actions do run.
       - name: Set up python3
+        if: steps.cheap.outputs.cheap != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
       - name: Install jq
+        if: steps.cheap.outputs.cheap != 'true'
         shell: bash
         run: |
           # The sha256 is the one jq publishes in the release's own sha256sum.txt
@@ -169,6 +229,7 @@ jobs:
           fi
 
       - name: Show the environment under test
+        if: steps.cheap.outputs.cheap != 'true'
         shell: bash
         run: |
           export PATH="/usr/bin:/mingw64/bin:$HOME/bin:$PATH"
@@ -205,6 +266,7 @@ jobs:
           esac
 
       - name: Run script tests
+        if: steps.cheap.outputs.cheap != 'true'
         shell: bash
         run: |
           export PATH="/usr/bin:/mingw64/bin:$HOME/bin:$PATH"
