@@ -29,6 +29,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   plugin behavior is unchanged.
 
 ### Changed
+- **The repo's own Windows CI leg runs only on pull requests into `qa` and `main`** (FJ-305), plus
+  manual dispatches. Feature PRs into `develop` and pushes to `develop` no longer wait ~11
+  minutes for it, so a Windows-only failure first shows up at promotion. Repo CI only: plugin
+  behavior is unchanged.
 - **Faster dispatcher on Windows** (FJ-301). Git Bash ran every `jq` call through a `tr` pipe
   to strip the CRs that a native `jq.exe` writes, which cost three processes per call. Flight
   now uses jq's own `-b` flag, which writes LF directly, and keeps the pipe only for a jq older
