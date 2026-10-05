@@ -329,7 +329,7 @@ check "the skill no longer offers to create a CLAUDE.md containing @AGENTS.md" \
 check "the skill no longer recommends splitting a CLAUDE.md-only repo" \
 	"$(! grep -qi 'Recommend the split' "$SETUP_SKILL" && echo 1 || echo 0)"
 check "the description no longer says AGENTS.md is imported by CLAUDE.md" \
-	"$(! sed -n '/^description:/p' "$SETUP_SKILL" | grep -q 'imported by CLAUDE.md' && echo 1 || echo 0)"
+	"$(! grep -q 'imported by CLAUDE.md' <<<"$(sed -n '/^description:/p' "$SETUP_SKILL")" && echo 1 || echo 0)"
 
 section "skill inventories"
 skills_dir="$(find "$REPO_ROOT/flight/skills" -mindepth 2 -maxdepth 2 -name SKILL.md | sed 's#/SKILL.md$##; s#.*/##' | sort)"
