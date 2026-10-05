@@ -155,8 +155,11 @@ a Windows checkout every line of a `SKILL.md`, reference or changelog ends in `\
 script that reads markdown must strip it before matching: `tr -d '\r'` on a stream, or
 `sub(/\r$/, "")` first thing in an `awk` program. The usual casualties are exact-line
 comparisons (`$0 == marker`) and end-anchored patterns (`^name: foo$`, `/^```$/`). They
-pass on Linux and macOS and fail only on the Windows leg, looking like plain false asserts. To
-check locally, run the suite on a scratch copy of your committed `HEAD` with every `.md`
+pass on Linux and macOS and fail only on the Windows leg, looking like plain false asserts.
+That leg runs only on pull requests into `qa` and `main` (not the `main` → `qa` sync-down)
+and on a manual dispatch of the `tests` workflow, never on feature PRs into `develop`
+(FJ-305), so a Windows-only failure first shows up when `develop` is promoted. To catch it
+before then, run the suite on a scratch copy of your committed `HEAD` with every `.md`
 converted to CRLF:
 
 ```bash
