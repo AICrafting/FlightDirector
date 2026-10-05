@@ -167,7 +167,7 @@ check "a cross-tracker issue can never close the same-number code issue" "$([ "$
 # No case-in-$(…) here: bash 3.2 cannot parse a case pattern's ")" inside a substitution.
 span="$(tracks GH-3 | cut -d' ' -f2)"
 check "the qualified id is a code span, so GitHub cannot autolink it to the code repo (#247)" \
-	"$(printf '%s' "$out" | grep -qF -- "$span" && echo 1 || echo 0)" "$out"
+	"$(grep -qF -- "$span" <<<"$out" && echo 1 || echo 0)" "$out"
 check "…while Closes #N stays a live keyword (no backticks)" \
 	"$([ "$(run pr-reference --identity "$fj" --closes true | tr -d "$BT")" = "$(run pr-reference --identity "$fj" --closes true)" ] && echo 1 || echo 0)"
 check "a Jira issue gets its qualified id, not a #N" "$([ "$(run pr-reference --identity "$jir" --closes true)" = "$(tracks JIR-3)" ] && echo 1 || echo 0)"
