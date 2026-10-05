@@ -1,0 +1,339 @@
+#!/usr/bin/env bash
+#
+# flight `issues block|unblock|blockers|blocking` — "this issue is blocked by that one" (FJ-271).
+#
+#   flight issues block    --number ID --by ID [--no-status] [--model ID]
+#   flight issues unblock  --number ID --by ID [--no-status] [--model ID]
+#   flight issues blockers --number ID
+#   flight issues blocking --number ID
+#
+# Dispatcher-owned, like issue-copy: every read and write goes back through the dispatcher
+# ($FLIGHT_SELF), one tracker per call. Two issues on the same tracker use its native
+# relationship (the adapters' dep-* verbs). When that backend can't record one (`unsupported`),
+# and always across trackers, the link is a pair of signed comments instead:
+#   on the blocked issue  **Blocked by GH-3**: <title>   /  **No longer blocked by GH-3**
+#   on the blocker        **Blocks FJ-12**: <title>      /  **No longer blocks FJ-12**
+# Per pair the latest signed comment wins. Status follows the link unless --no-status: block
+# sets the tracker's `blocked` role and records `(was <role>)`; the last unblock restores it.
+# Invoked by the dispatcher, which exports FLIGHT_REPO_ROOT and FLIGHT_SELF.
+#
+# Design: docs/superpowers/specs/2026-10-03-issue-dependencies-design.md
+set -euo pipefail
+
+# Windows shims (jq CRLF, path form); a no-op elsewhere.
+# shellcheck source-path=SCRIPTDIR source=_portable.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+
+: "${FLIGHT_REPO_ROOT:?FLIGHT_REPO_ROOT not set (dispatcher must export it)}"
+: "${FLIGHT_SELF:?FLIGHT_SELF not set (dispatcher must export it)}"
+# Titles come from `issues get --json`, which would look the blockers up again: never from here.
+export FLIGHT_NO_DEPS=1
+
+VERB="${1:-}"; [ $# -eq 0 ] || shift
+case "$VERB" in block|unblock|blockers|blocking) ;; *) echo "flight issues: unknown dependency verb '$VERB' (expected: block unblock blockers blocking)" >&2; exit 1 ;; esac
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/flight-deps.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+
+# fail CODE MESSAGE — one sentence on stderr, plus the --json envelope when one was asked for.
+fail() {
+	echo "flight issues $VERB: $2" >&2
+	if [ -n "${FLIGHT_ERROR_FILE:-}" ]; then
+		jq -cn --arg c "$1" --arg m "flight issues $VERB: $2" '{error:{code:$c, message:$m}}' \
+			>"$FLIGHT_ERROR_FILE" 2>/dev/null || true
+	fi
+	exit 1
+}
+die() { fail usage "$*"; }
+note() { echo "flight issues $VERB: $*" >&2; }
+
+# fl ARGS… — one --json dispatcher call. Prints its output, or stops with the code it reported.
+# Always assign its output on a line of its own (never `local x="$(fl …)"`), so a failure stops
+# the script.
+fl() {
+	local out rc=0 code msg
+	out="$("$FLIGHT_SELF" "$@" --json)" || rc=$?
+	if [ "$rc" -ne 0 ]; then
+		code="$(jq -r '.error.code // empty' <<<"$out" 2>/dev/null || true)"
+		msg="$(jq -r '.error.message // empty' <<<"$out" 2>/dev/null || true)"
+		fail "${code:-backend}" "${msg:-flight $1 $2 failed (exit $rc)}"
+	fi
+	printf '%s\n' "$out"
+}
+
+# fl_try ARGS… — like fl, but a failure prints `!CODE<TAB>MESSAGE` instead of stopping. Used
+# where one code (`unsupported`, `not-found`) changes the plan rather than ending it.
+fl_try() {
+	local out rc=0
+	out="$("$FLIGHT_SELF" "$@" --json)" || rc=$?
+	if [ "$rc" -ne 0 ]; then
+		printf '!%s\t%s\n' "$(jq -r '.error.code // "backend"' <<<"$out" 2>/dev/null || echo backend)" \
+			"$(jq -r '.error.message // empty' <<<"$out" 2>/dev/null || true)"
+		return 0
+	fi
+	printf '%s\n' "$out"
+}
+err_code() { printf '%s' "${1#!}" | cut -f1; }
+err_msg() { printf '%s' "$1" | cut -f2-; }
+upper() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
+
+NUMBER=""; BY=""; WANT_STATUS=1; MODEL_ARGS=()
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--number) [ $# -ge 2 ] || die "--number needs an issue id"; NUMBER="$2"; shift 2 ;;
+		--by)
+			case "$VERB" in block|unblock) ;; *) die "--by applies to block and unblock only" ;; esac
+			[ $# -ge 2 ] || die "--by needs an issue id"; BY="$2"; shift 2 ;;
+		--no-status)
+			case "$VERB" in block|unblock) ;; *) die "--no-status applies to block and unblock only" ;; esac
+			WANT_STATUS=0; shift ;;
+		--model) [ $# -ge 2 ] || die "--model needs a model id"; MODEL_ARGS=(--model "$2"); shift 2 ;;
+		*) die "unknown argument '$1'" ;;
+	esac
+done
+[ -n "$NUMBER" ] || die "usage: flight issues $VERB --number ID${BY:+ --by ID}"
+case "$VERB" in block|unblock) [ -n "$BY" ] || die "usage: flight issues $VERB --number ID --by ID" ;; esac
+
+ISSUE="$(fl issues resolve --number "$NUMBER")"
+Q="$(jq -r '.qualified' <<<"$ISSUE")"; T="$(jq -r '.tracker' <<<"$ISSUE")"
+UQ="$(upper "$Q")"
+
+# text_links COMMENTS_JSON SIDE — the qualified ids (upper case) the text record links, one
+# per line. SIDE `blocked` reads the "Blocked by" comments (this issue's blockers); `mirror`
+# reads the "Blocks" comments (the issues this one blocks). Only flight-signed comments count,
+# and per id the latest one wins.
+text_links() {
+	jq -r --arg side "$2" '
+		[.[] | select(.signature != null)
+		 | ((.body // "") | split("\n")[0] | sub("\r$"; "")) as $first
+		 | ([$first | capture("^(\\*\\*)?(?<kind>Blocked by|No longer blocked by|Blocks|No longer blocks) (?<id>[A-Za-z][A-Za-z0-9]*-[0-9]+)(\\*\\*)?(:.*)?$"; "i")] | first) // empty
+		 | .kind |= ascii_downcase
+		 | select(if $side == "blocked" then (.kind | endswith("blocked by")) else (.kind | endswith("blocks")) end)]
+		| reduce .[] as $m ({}; .[$m.id | ascii_upcase] = ($m.kind | startswith("no longer") | not))
+		| to_entries[] | select(.value) | .key' <<<"$1"
+}
+
+# Both "already recorded?" checks below ask the same question: does the latest record for this
+# pair say `(was WAS)`, where WAS is the status the issue has *right now*? Only such a record is
+# worth keeping — it is what a rerun after a partial failure left behind, and the unblock that
+# consumes it will restore the right status. A record naming any other status is stale: the
+# pair was blocked and unblocked before, and the issue's status has moved since. Reusing it
+# would make the next unblock restore the earlier cycle's status. Matching the status, not just
+# the blocker id, tells the two cases apart; the `(was …)` line is matched on its own line, so a
+# title such as "Regression (was fine before)" is never mistaken for a record.
+
+# has_status_record COMMENTS_JSON ID WAS — does the latest signed "Blocked by ID" marker carry a
+# `Status: blocked (was WAS)` line?
+has_status_record() {
+	jq -e --arg id "$2" --arg was "$3" '
+		[.[] | select(.signature != null) | ((.body // "") | split("\n") | map(sub("\r$"; "")))
+		 | select(.[0] | test("^(\\*\\*)?(Blocked by|No longer blocked by) \($id)(\\*\\*)?(:.*)?$"; "i"))]
+		| last // [] | any(.[]; . == "Status: blocked (was \($was))")' <<<"$1" >/dev/null
+}
+
+# has_status_comment COMMENTS_JSON ID WAS — does Q's latest signed `**Status: blocked**` comment
+# name ID as the blocker and WAS as the status it replaced?
+has_status_comment() {
+	jq -e --arg id "$2" --arg was "$3" '
+		[.[] | select(.signature != null) | ((.body // "") | split("\n")[0] | sub("\r$"; ""))
+		 | select(startswith("**Status: blocked**"))]
+		| last // "" | ascii_downcase == ("**Status: blocked** (was \($was)), blocked by \($id)" | ascii_downcase)' <<<"$1" >/dev/null
+}
+
+# collect blockers|blocking — this issue's links as [{id, title, state, via}]: the native rows
+# first (skipped when the backend has none), then the text record's ids not already listed.
+collect() {
+	local verb=dep-list side=blocked native rows comments id got
+	if [ "$1" = blocking ]; then verb=dep-blocking; side=mirror; fi
+	native="$(fl_try issues "$verb" --number "$Q")"
+	case "$native" in
+		'!unsupported'*) native='[]' ;;
+		'!'*) fail "$(err_code "$native")" "$(err_msg "$native")" ;;
+	esac
+	rows="$(jq -c --arg t "$T" '[.[] | {id: "\($t)-\(.number | split("-") | last)", title, state, via: "native"}]' <<<"$native")"
+	comments="$(fl issues comments --number "$Q")"
+	while IFS= read -r id; do
+		[ -n "$id" ] || continue
+		if jq -e --arg i "$id" 'any(.[]; (.id | ascii_upcase) == $i)' <<<"$rows" >/dev/null; then continue; fi
+		got="$(fl_try issues get --number "$id")"
+		case "$got" in
+			'!not-found'*) rows="$(jq -c --arg i "$id" '. + [{id: $i, title: null, state: null, via: "text"}]' <<<"$rows")" ;;
+			'!'*) fail "$(err_code "$got")" "$(err_msg "$got")" ;;
+			*) rows="$(jq -c --arg i "$id" --argjson g "$got" '. + [{id: ($g.qualified // $i), title: $g.title, state: $g.state, via: "text"}]' <<<"$rows")" ;;
+		esac
+	done < <(text_links "$comments" "$side")
+	printf '%s\n' "$rows"
+}
+
+# post QUALIFIED TEXT — one signed comment (signed even where a repo turned signatures off:
+# reading the record back depends on it).
+post() {
+	local r
+	r="$(post_try "$@")"
+	[ -z "$r" ] || fail "$(err_code "$r")" "$(err_msg "$r")"
+}
+
+# post_try QUALIFIED TEXT — post, but a failure prints `!CODE<TAB>MESSAGE` and returns, so the
+# caller can say what is already done (a partial write names the missing piece).
+post_try() {
+	local r
+	printf '%s\n' "$2" >"$TMP/body.md"
+	r="$(fl_try issues comment --number "$1" --body-file "$TMP/body.md" --signature ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"})"
+	case "$r" in '!'*) printf '%s\n' "$r" ;; esac
+}
+
+# partial DONE WHAT_FAILED ISSUE RESULT — stop with the failed call's code, saying what is
+# already done, what failed, and that rerunning the verb finishes it.
+partial() {
+	fail "$(err_code "$4")" "$1 but $2 on $3 failed ($(err_msg "$4")); rerun 'flight issues $VERB --number $Q --by $BQ'"
+}
+
+# status_roles TRACKER — the tracker's configured status roles, {role: label} (declined roles left out).
+status_roles() { fl issues tracker --tracker "$1" | jq -c '.labels.status // {} | with_entries(select(.value | type == "string"))'; }
+
+if [ "$VERB" = blockers ] || [ "$VERB" = blocking ]; then
+	ROWS="$(collect "$VERB")"
+	if [ "${LS_JSON:-}" = 1 ]; then jq -c '{issues: .}' <<<"$ROWS"
+	else jq -r '.[] | [.id, (.title // ""), (.state // "unknown"), .via] | @tsv' <<<"$ROWS"
+	fi
+	exit 0
+fi
+
+BLOCKER="$(fl issues resolve --number "$BY")"
+BQ="$(jq -r '.qualified' <<<"$BLOCKER")"; BT="$(jq -r '.tracker' <<<"$BLOCKER")"; BN="$(jq -r '.number' <<<"$BLOCKER")"
+UBQ="$(upper "$BQ")"
+[ "$UBQ" != "$UQ" ] || die "an issue cannot block itself ($Q)"
+ROLES="{}"; [ "$WANT_STATUS" = 0 ] || ROLES="$(status_roles "$T")"
+
+if [ "$VERB" = block ]; then
+	ISSUE_J="$(fl issues get --number "$Q")"
+	BY_J="$(fl issues get --number "$BQ")"
+	VIA=text
+	if [ "$(upper "$BT")" = "$(upper "$T")" ]; then
+		R="$(fl_try issues dep-add --number "$Q" --by "$BN")"
+		case "$R" in
+			'!unsupported'*) note "native dependencies unavailable on $T ($(err_msg "$R")); using comments" ;;
+			'!'*) fail "$(err_code "$R")" "$(err_msg "$R")" ;;
+			*) VIA=native ;;
+		esac
+	fi
+
+	# Status: what `blocked` replaces, recorded so the last unblock can put it back.
+	SET_TO=""; WAS=""
+	if [ "$WANT_STATUS" = 1 ]; then
+		if ! jq -e 'has("blocked")' <<<"$ROLES" >/dev/null; then
+			note "tracker $T has no blocked status role; status unchanged"
+		elif [ "$(jq -r '.status // ""' <<<"$ISSUE_J")" != blocked ]; then
+			SET_TO=blocked; WAS="$(jq -r '.status // "none"' <<<"$ISSUE_J")"
+		fi
+	fi
+
+	RECORDED=0
+	if [ "$VIA" = text ]; then
+		QC="$(fl issues comments --number "$Q")"
+		LINKS="$(text_links "$QC" blocked)"
+		if grep -Fxq -- "$UBQ" <<<"$LINKS"; then
+			if [ -n "$SET_TO" ] && has_status_record "$QC" "$BQ" "$WAS"; then RECORDED=1; fi
+		else
+			BODY="**Blocked by $BQ**: $(jq -r '.title' <<<"$BY_J")"
+			if [ -n "$SET_TO" ]; then BODY="$BODY"$'\n\n'"Status: blocked (was $WAS)"; RECORDED=1; fi
+			post "$Q" "$BODY"
+		fi
+		BC="$(fl issues comments --number "$BQ")"
+		MIRROR="$(text_links "$BC" mirror)"
+		if ! grep -Fxq -- "$UQ" <<<"$MIRROR"; then
+			R="$(post_try "$BQ" "**Blocks $Q**: $(jq -r '.title' <<<"$ISSUE_J")")"
+			[ -z "$R" ] || partial "posted the marker on $Q" "the mirror" "$BQ" "$R"
+		fi
+	fi
+	if [ -n "$SET_TO" ]; then
+		DONE="added the native link"; [ "$VIA" = native ] || DONE="posted the comments"
+		if [ "$RECORDED" != 1 ]; then
+			QC="$(fl issues comments --number "$Q")"
+			if ! has_status_comment "$QC" "$BQ" "$WAS"; then
+				R="$(post_try "$Q" "**Status: blocked** (was $WAS), blocked by $BQ")"
+				[ -z "$R" ] || partial "$DONE" "the status comment" "$Q" "$R"
+			fi
+		fi
+		R="$(fl_try issues set-status --number "$Q" --status blocked)"
+		case "$R" in '!'*) partial "$DONE" "setting the status" "$Q" "$R" ;; esac
+	fi
+
+	if [ "${LS_JSON:-}" = 1 ]; then
+		jq -cn --arg n "$Q" --arg b "$BQ" --arg v "$VIA" --arg s "$SET_TO" '{number: $n, by: $b, via: $v, status: (if $s == "" then null else $s end)}'
+	else
+		echo "$Q blocked by $BQ ($VIA)"
+	fi
+	exit 0
+fi
+
+# unblock
+REMOVED=()
+if [ "$(upper "$BT")" = "$(upper "$T")" ]; then
+	R="$(fl_try issues dep-list --number "$Q")"
+	case "$R" in
+		'!unsupported'*) ;;
+		'!'*) fail "$(err_code "$R")" "$(err_msg "$R")" ;;
+		*)
+			if jq -e --arg b "$BN" 'any(.[]; .number == $b)' <<<"$R" >/dev/null; then
+				fl issues dep-remove --number "$Q" --by "$BN" >/dev/null
+				REMOVED+=(native)
+			fi ;;
+	esac
+fi
+QC="$(fl issues comments --number "$Q")"
+LINKS="$(text_links "$QC" blocked)"
+if grep -Fxq -- "$UBQ" <<<"$LINKS"; then
+	R="$(post_try "$Q" "**No longer blocked by $BQ**")"
+	if [ -n "$R" ]; then
+		case " ${REMOVED[*]-} " in
+			*" native "*) partial "removed the native link" "the comment" "$Q" "$R" ;;
+			*) fail "$(err_code "$R")" "$(err_msg "$R")" ;;
+		esac
+	fi
+	REMOVED+=(text)
+fi
+# A blocker that no longer exists has no comments to mirror onto: skip, don't stop.
+BC="$(fl_try issues comments --number "$BQ")"
+MIRROR=""
+case "$BC" in
+	'!not-found'*) ;;
+	'!'*) fail "$(err_code "$BC")" "$(err_msg "$BC")" ;;
+	*) MIRROR="$(text_links "$BC" mirror)" ;;
+esac
+if grep -Fxq -- "$UQ" <<<"$MIRROR"; then
+	R="$(post_try "$BQ" "**No longer blocks $Q**")"
+	[ -z "$R" ] || partial "posted the comment on $Q" "the mirror" "$BQ" "$R"
+	case " ${REMOVED[*]-} " in *" text "*) ;; *) REMOVED+=(text) ;; esac
+fi
+
+RESTORED=""; REMAINING="[]"
+# Assigned on its own line (not inside a condition) so a failed read stops the verb.
+if [ "${#REMOVED[@]}" != 0 ] && [ "$WANT_STATUS" = 1 ]; then REMAINING="$(collect blockers)"; fi
+if [ "${#REMOVED[@]}" = 0 ]; then
+	note "$Q was not blocked by $BQ"
+elif [ "$WANT_STATUS" = 1 ] && [ "$REMAINING" = "[]" ]; then
+	CURRENT="$(fl issues get --number "$Q")"
+	if [ "$(jq -r '.status // ""' <<<"$CURRENT")" = blocked ]; then
+		WAS="$(fl issues comments --number "$Q" | jq -r '[.[] | select(.signature != null) | (.body // "")
+			| ((split("\n") | map(sub("\r$"; ""))) as $ls
+				| [($ls[] | capture("^Status: blocked \\(was (?<r>[a-z0-9-]+)\\)$")), ($ls[0] | capture("^\\*\\*Status: blocked\\*\\* \\(was (?<r>[a-z0-9-]+)\\), blocked by "))]
+				| first // empty | .r)] | last // empty')"
+		if [ -n "$WAS" ] && [ "$WAS" != none ] && [ "$WAS" != blocked ] && jq -e --arg r "$WAS" 'has($r)' <<<"$ROLES" >/dev/null; then
+			RESTORED="$WAS"
+		elif jq -e 'has("new")' <<<"$ROLES" >/dev/null; then
+			RESTORED=new
+		fi
+		if [ -n "$RESTORED" ]; then
+			fl issues set-status --number "$Q" --status "$RESTORED" >/dev/null
+		else
+			FLIGHT_NO_DEPS=1 "$FLIGHT_SELF" issues clear-status --number "$Q" >/dev/null || fail backend "could not clear the status of $Q"
+		fi
+	fi
+fi
+
+if [ "${LS_JSON:-}" = 1 ]; then
+	jq -cn --arg n "$Q" --arg b "$BQ" --arg s "$RESTORED" --argjson r "$(printf '%s\n' ${REMOVED[@]+"${REMOVED[@]}"} | jq -Rsc 'split("\n") | map(select(length > 0))')" \
+		'{number: $n, by: $b, removed: $r, status: (if $s == "" then null else $s end)}'
+elif [ "${#REMOVED[@]}" != 0 ]; then
+	echo "$Q no longer blocked by $BQ"
+fi

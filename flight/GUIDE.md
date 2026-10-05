@@ -7,7 +7,8 @@ it, **how to install** it, and **how to use** it, with a full worked example.
 > New to the plugin? Start here. For the at-a-glance skill list and the config schema, see the
 > [README](README.md), [flight-setup.md](references/flight-setup.md),
 > [adapter-contract.md](references/adapter-contract.md), and — for per-backend config,
-> token-creation URLs, and minimum scopes — [backends.md](references/backends.md).
+> token-creation URLs, and minimum scopes — [backends.md](references/backends.md). Building a
+> tool on top of flight? The `--json` contract is [json-output.md](references/json-output.md).
 
 ---
 
@@ -25,16 +26,17 @@ the whole lifecycle into the session:
 - **An opinionated lifecycle with a human gate.** Each issue runs through branch → in-progress →
   ready-to-test → merge → done, and **Claude never merges without your explicit go-ahead.**
 - **Parallel work via git worktrees.** Each issue is developed in its own
-  `.worktrees/<N>-<slug>` worktree, so you can have several in flight without stashing or
-  branch-juggling.
+  `.worktrees/<ref>-<N>-<slug>` worktree (e.g. `.worktrees/fj-42-export-button`), so you can
+  have several in flight without stashing or branch-juggling.
 - **A promotion pipeline that matches how you ship.** Define your stages once
   (`feature → develop → qa → main`), and the same "promote" command advances a branch one hop —
   direct-merging where you want speed, opening a PR + watching CI where you want a gate.
 - **No MCP server, no vendor lock-in.** Everything runs through a small `curl` + `jq` adapter
   behind a backend-agnostic contract — the backend is one field in your config. Forgejo/Gitea,
-  GitHub, and GitLab have full parity (issues, labels, PRs/MRs, CI); Jira can serve the issues
-  axis alongside a git host. See [backends.md](references/backends.md) for the current list.
-  Your only secret is a **per-repo, least-privilege** API token.
+  GitHub, and GitLab have full parity (issues, labels, PRs/MRs, CI); Jira can be an issue
+  tracker alongside a git host, and one repo can have several trackers (a private backlog and a
+  public intake, say). See [backends.md](references/backends.md) for the current list.
+  Your only secrets are **per-repo, least-privilege** API tokens.
 
 ---
 
@@ -48,10 +50,14 @@ the whole lifecycle into the session:
 - **`curl`** and **`jq`** on your `PATH` (plus **`python3`**, standard library only, if you turn
   on the optional [cost ledger](#cost-ledger-optional)).
 - A repo you can push to on a **supported backend** — Forgejo/Gitea (self-hosted), GitHub, or
-  GitLab (gitlab.com or self-managed). Issues can optionally live in Jira instead.
+  GitLab (gitlab.com or self-managed). Issues can live on the same repo, in another repo, in
+  Jira — or in several of those at once.
 - A **per-repo, least-privilege API token** for that backend. Scope it to the one repository and
   to just what the skills call — never an all-orgs admin token. (Why per-repo? A misfire then
-  fails with a hard `403` instead of writing to the wrong place.) Where to create it and the
+  fails with a hard `403` instead of writing to the wrong place, and an agent steered by a
+  prompt injection in an issue or comment can't reach your other repos. That's also why GitHub
+  uses its own token rather than your `gh` CLI login; see
+  [backends.md](references/backends.md#github-full-parity).) Where to create it and the
   minimum scopes, per backend:
 
   | Backend | Create the token at | Minimum |
@@ -81,6 +87,11 @@ the whole lifecycle into the session:
 2. That's it — no server to run. The skills activate automatically when you say things that match
    them (see the workflow below).
 
+3. To check which flight the session loaded, run **`/flight:version`**. It prints the plugin's
+   version from the installed copy's own manifest, the install it came from (e.g.
+   `flight@flightdirector`), its root, and the `flight` CLI on `PATH` — with a note when that CLI
+   is a different version (say, after an upgrade before the session restarted).
+
 ## Install in Codex
 
 1. Add the same marketplace, then install the plugin — from the shell:
@@ -99,6 +110,10 @@ the whole lifecycle into the session:
 3. Invoke skills by name with `$filing-issues`, `$working-an-issue`, `$queue-batches`, …, or just
    describe what you want — the same natural-language triggers work in both harnesses.
 
+Codex plugins carry skills and hooks but no slash commands, so there is no `/flight:version`
+there. The same report comes from the script behind it — `bash <plugin root>/scripts/plugin-version.sh`
+(add `--json` for a machine-readable copy) — and `flight --version` gives the CLI's version.
+
 Allow the configured forge hostname when Codex requests network permission. Parallel queues
 (`queue-batches`) require Codex multi-agent support; every other workflow runs without it.
 
@@ -112,33 +127,66 @@ From inside the repo, tell Claude:
 
 That triggers **`setting-up-a-repo`**, which walks you through setup:
 
-1. **Coordinates** — it reads your git remote to detect the backend (Forgejo/Gitea, GitHub, or
-   GitLab), propose the `owner/repo` and the API base, and asks you to confirm.
+1. **Coordinates** — it reads your git remote to detect the code backend (Forgejo/Gitea, GitHub,
+   or GitLab), propose the `owner/repo` and the API base, and asks you to confirm.
 2. **Token** — it asks for the per-repo token, adds `.flightdirector/secrets*`,
-   `.flightdirector/config.local.json` **and** `.worktrees/` to your `.gitignore`, writes the
-   token to the gitignored secrets file, and
-   verifies it with `flight auth check` (identity, repo access, per-capability permissions,
-   expiry) before going further.
+   `.flightdirector/config.local.json`, `.flightdirector/batches/` **and** `.worktrees/` to your
+   `.gitignore`, writes the token to the gitignored secrets file, and verifies it with
+   `flight auth check` (identity, repo access, per-capability permissions, expiry).
 3. **Pipeline preset** — it asks which stage pipeline you want:
    - **(a) Simple** — `develop → main`
    - **(b) Multi-stage** — `develop → qa → main`
    - **(c) Advanced** — a custom ordered set of stages, or hand-edit afterward.
-4. **Preferences** — the default worker model for parallel batches; whether to turn on the
-   prompt ledger (see [Cost ledger](#cost-ledger-optional)); whether newly filed issues get a
-   **starting status** such as `status/new` (see [File it](#1-file-it)); and whether flight
-   should run a **check command** before it merges (see
-   [the preflight gate](#4-promote-toward-release)). Every answer is recorded, "no" included,
-   so a re-run asks only what's new.
-5. **Labels** — it reconciles a default label taxonomy against what your repo already has,
-   *adopting your existing names* (if you already call a state `status/qa`, it keeps that),
-   shows you a plan, and creates only what's missing.
+4. **Preferences** — the worker models for parallel batches, in order of preference (one per
+   harness if you use both Claude Code and Codex); whether to turn on the
+   prompt ledger (see [Cost ledger](#cost-ledger-optional)); and whether flight should run a
+   **check command** before it merges (see [the preflight gate](#4-promote-toward-release)).
+   Every answer is recorded, "no" included, so a re-run asks only what's new.
+5. **The issue tracker** — it hands over to **`add-an-issue-tracker`**, which sets up where your
+   issues live: usually this same repo (sharing the token), or another repo or a Jira project
+   with its own token. The tracker gets a short, permanent **ref** — `FJ`, `GH`, `GL`, or the
+   Jira project key — that appears in issue ids (`FJ-42`) and branch names, and becomes the
+   **default** tracker, so a plain `#42` means it. It asks whether newly filed issues get a
+   **starting status** such as `status/new` (see [File it](#1-file-it)), then reconciles the
+   default label taxonomy against what the tracker already has, *adopting your existing names*
+   (if you already call a state `status/qa`, it keeps that), shows you a plan, and creates only
+   what's missing.
 
 When it's done you'll have two files in the `.flightdirector/` folder: a committable **`.flightdirector/config.json`**
-(coordinates, the `stages` pipeline, and your label names) and a gitignored
-**`.flightdirector/secrets.json`** (the token). Every other skill reads `.flightdirector/config.json`, so they
+(code coordinates, the `stages` pipeline, and your trackers with their label names) and a
+gitignored **`.flightdirector/secrets.json`** (the tokens). Every other skill reads `.flightdirector/config.json`, so they
 all speak your repo's conventions. A third, optional file — a gitignored
 **`.flightdirector/config.local.json`** — holds per-machine overrides; see
 [Where your config lives](#where-your-config-lives).
+
+**More than one tracker?** Say *"add another tracker"* or *"connect Jira"* at any time and
+**`add-an-issue-tracker`** adds it beside the first — its own ref, token and labels — without
+touching the others; the default only changes if you ask. Then `GH-12` or `KAN-7` names an issue
+on that tracker, `#12` still means the default, and `flight issues list --all-trackers` lists every
+tracker at once.
+
+**Copying an issue to another tracker.** Say *"copy GH-3 into Forgejo"*, and
+**`copying-an-issue`** checks the target for an existing copy, shows a preview, and copies it. Or
+run it yourself:
+
+```
+flight issues copy --from GH-3 --to FJ --dry-run      # preview
+flight issues copy --from GH-3 --to FJ                # copy (prints e.g. FJ-271)
+flight issues resync --from GH-3 --to FJ              # later: bring over new comments
+```
+
+Body, comments, labels and status come along unless you pass `--no-body`, `--no-comments`,
+`--no-labels` or `--no-status`. Nothing names the source on the copy unless you add `--footer`
+or `--back-link`, which matters when copying from a private tracker to a public one.
+
+### Blocked issues
+
+Record that one issue waits on another with `flight issues block --number FJ-12 --by GH-3`, and
+remove it with `flight issues unblock`. `flight issues blockers --number FJ-12` and `blocking`
+list the links. Flight uses the backend's own relationship where it has one, and a pair of signed
+comments otherwise (always across trackers). The blocked issue's status moves to `blocked` and
+back unless you pass `--no-status`. `working-an-issue` warns you about open blockers before it
+starts.
 
 ---
 
@@ -153,7 +201,9 @@ all speak your repo's conventions. A third, optional file — a gitignored
 | "promote each zone", "promote issues 18, 93, 12", "batch promote" | **promoting-branches** | Promote a selected group of first-hop feature branches into `stages[0]` at once (direct → N merges; pr → one PR per group) |
 | `/queue-batches NxM`, "work N issues in parallel", "batch these" | **queue-batches** | Dispatch N background agents × M issues each; isolated worktrees (zones), stop at to-test, then a batch hand-off to promoting-branches |
 | "clean up the branches", "delete merged branches", "what branches can go" | **cleaning-up-branches** | Find branches already merged into a stage, cross-check their issues, then delete refs + worktrees on your go-ahead |
-| "set up flight", "bootstrap labels" | **setting-up-a-repo** | First-run setup (above) |
+| "set up flight", "bootstrap labels" | **setting-up-a-repo** | First-run setup (above); re-run after an upgrade to answer new questions |
+| "add an issue tracker", "connect Jira", "track issues on GitHub too" | **add-an-issue-tracker** | Add or complete one named tracker — ref, credential, starting status, labels — keeping the default |
+| "copy GH-3 into Forgejo", "resync the copy" | **copying-an-issue** | Duplicate scan → dry-run preview → copy to another tracker; later, bring over new comments |
 
 You never type the underlying commands — you talk to Claude, and the skills drive the forge for
 you.
@@ -194,7 +244,9 @@ in QA is filtered out) so you can pick:
 
 **working-an-issue** creates a dedicated worktree off your first stage and flips the board:
 
-- `git worktree add .worktrees/42-export-button -b feature/42-export-button develop`
+- `git worktree add .worktrees/42-export-button -b feature/42-export-button develop`. With
+  more than one issue tracker the branch carries the tracker's ref, `feature/fj-42-…`, so the
+  same number on another tracker can never share a branch.
 - sets the issue to **`status/in progress`**
 
 You and Claude make the change inside that worktree. Because it's a separate worktree, you could
@@ -256,7 +308,8 @@ If you give flight your repo's check command, it runs it first:
 "code": { "preflight": "./scripts/run-checks.sh" }
 ```
 
-**promoting-a-branch** runs it from the branch's worktree just before the merge (or before
+**working-an-issue** runs it before moving an issue to `to-test`, and a red result keeps the
+issue `in-progress`. **promoting-a-branch** runs it from the branch's worktree just before the merge (or before
 opening the PR, on a `pr` hop). Only the exit code counts: zero carries on, anything else stops
 the promotion and shows you the failing output. **promoting-branches** depends on the hop: on a
 `direct` hop it runs it per branch, so one red branch is skipped while the clean ones still
@@ -300,7 +353,7 @@ branches one at a time with promoting-a-branch).
 ### 5. Sweep up
 
 Merged branches don't remove themselves — `working-an-issue` clears the *worktree*, but the
-`feature/<N>-<slug>` ref stays on origin (and usually locally) forever. Every so often:
+`feature/<ref>-<N>-<slug>` ref stays on origin (and usually locally) forever. Every so often:
 
 > **You:** "clean up the branches"
 
@@ -313,27 +366,34 @@ deleted until you say go, and deleting on **origin** is a separate yes from dele
 
 ## Where your config lives
 
-- **`.flightdirector/config.json`** (commit it) — backend + coordinates, the `stages` pipeline, and your
-  role→label-name map. See [flight-setup.md](references/flight-setup.md) for the schema.
-- **`.flightdirector/secrets.json`** (gitignored) — your API token(s). If flight ever finds this
-  file tracked by git, it warns you on every run. Rotating a token? Write the new one to
-  `.flightdirector/secrets-new.json`, run `flight auth check --secrets .flightdirector/secrets-new.json`,
-  and move it into place only once every line is a `✓`.
+- **`.flightdirector/config.json`** (commit it) — code backend + coordinates, the `stages`
+  pipeline, and the `issueTrackers` list: each tracker's ref, coordinates and role→label-name
+  map, one of them the default. See [flight-setup.md](references/flight-setup.md) for the schema.
+  A config from before trackers had names is converted automatically the next time a skill
+  runs (`flight reconcile`).
+- **`.flightdirector/secrets.json`** (gitignored) — your API tokens: the code token, plus one per
+  tracker that doesn't share it. If flight ever finds this file tracked by git, it warns you on
+  every run. Rotating a token? Write the new one to `.flightdirector/secrets-new.json`, run
+  `flight auth check --secrets .flightdirector/secrets-new.json` (add `--tracker <REF>` for a
+  tracker's token), and move it into place only once every line is a `✓`.
 - **`.flightdirector/config.local.json`** (gitignored, optional) — per-machine overrides of
   `config.json`: a fork's `owner`, a self-hosted `api`, `promptLog.enabled`, a `ciWatchTimeout`.
   It is layered over the committed file on every read, the way Claude Code layers
   `settings.local.json` over `settings.json`. Only list the keys you change — nested objects
   merge key by key, while scalars **and arrays** replace wholesale (a local `code.stages`
-  replaces the whole pipeline). `reconcile` never writes local values into `config.json`, an
-  invalid local file is an error, and a tracked one warns on every run. Merge rules in full:
+  replaces the whole pipeline, a local `issueTrackers` the whole tracker list). Issue trackers
+  carry their own coordinates, so a local `code.api` or `code.owner` override moves the code
+  axis only — to repoint a tracker on this machine, give a complete local `issueTrackers` array.
+  `reconcile` never writes local values into `config.json`, an invalid local file is an error,
+  and a tracked one warns on every run. Merge rules in full:
   [flight-setup.md](references/flight-setup.md#flightdirectorconfiglocaljson--optional-gitignored).
 
 - **`code.signature.enabled`** (optional, default `true`) — the tracker signature described in
   [step 3](#3-work-it). `false` writes bare bodies.
 - **`code.preflight`** (optional, off by default) — your repo's check command, run before a
   merge; see [the preflight gate](#4-promote-toward-release).
-- **`labels.status.new`** (optional, off by default) — the starting status given to newly filed
-  issues; see [File it](#1-file-it).
+- **`labels.status.new`** on a tracker (optional, off by default) — the starting status given to
+  issues newly filed on that tracker; see [File it](#1-file-it).
 
 Want a different pipeline later? Edit `code.stages` in `.flightdirector/config.json` — e.g. add a `qa`
 stage between `develop` and `main`. The skills pick it up immediately. For worked setups at 1, 2, 3,
@@ -358,22 +418,47 @@ estimated cost — to a gitignored `.flightdirector/prompt-log.jsonl`. **Claude 
 write the same file with the same schema**, so a project worked from both (even at once) has one
 ledger, and `flight prompt-log summary --session <id>` renders the per-model totals the
 ledger comment pastes in. Cost is priced from a bundled table you can extend per repo
-(`.flightdirector/pricing.json`); under a subscription login it is labelled `api-equivalent` —
+(`.flightdirector/pricing.json`), and `summary` prices each row again from its tokens, so a
+pricing fix also corrects turns already logged; under a subscription login it is labelled `api-equivalent` —
 what the tokens *would* cost via the API, good for comparing issues, not a bill. Unknown models
 and unreadable transcripts show up as `null` with a warning, never as a silent zero. Full schema
 and semantics: [prompt-log.md](references/prompt-log.md).
 
 ---
 
+## Driving flight from another tool (`--json`)
+
+A dashboard, editor panel or script can drive the same dispatcher the skills use, without ever
+seeing a token or calling a forge API. Add `--json` to the read and write verbs and every
+backend answers with the same shape:
+
+```sh
+flight capabilities --json                    # {"plugin","version","capabilities":[…]}: feature-detect here
+flight issues list --state open --json        # {"issues":[…], "truncated", "total"}
+flight issues get --number 42 --json          # one issue: labels, status role, body, signature split out
+flight issues comments --number 42 --json     # [{id, author, created, updated, url, body, signature}]
+flight labels statuses --json                 # this repo's status roles → label names and colours
+flight issues comment --number 42 --body hi --json   # the new comment, same shape as above
+```
+
+A failure under `--json` prints one `{"error":{"code","message"}}` object on stdout and exits
+non-zero. The code is one of `not-configured`, `auth`, `not-found`, `network`, `backend` or
+`usage`, so a UI can show "set this repo up" or "fix your token" instead of raw stderr. Without
+`--json`, the tab-separated output agents rely on is unchanged. Every field, verb and edge
+case: [json-output.md](references/json-output.md).
+
+---
+
 ## Tips
 
-- **Issues elsewhere than code?** `.flightdirector/config.json` has two axes — `code` and `issues` — so you
-  can point issues at a different repo, or a different backend such as Jira, while code stays
-  put. By default `issues` inherits `code`. See [backends.md](references/backends.md).
+- **Issues elsewhere than code — or in several places?** Code stays on `code`; issues live in
+  one or more named trackers (another repo, another backend, a Jira project), each with its own
+  ref, token and labels. Add one with *"add an issue tracker"*. See
+  [backends.md](references/backends.md).
 - **The merge gate is real.** If you want something merged, say so explicitly — "merge #N" /
   "promote …". Claude will leave work at *ready-to-test* and stop otherwise.
 - **Re-running setup is safe — and useful after an upgrade.** `setting-up-a-repo` is
-  idempotent: it only adds what's missing and never renames or deletes your existing labels.
-  It also asks only the setup questions your config has no answer for yet, so a re-run is how a
+  idempotent: it only adds what's missing, never renames or deletes your existing labels, and
+  keeps your trackers and your default as they are. It also asks only the setup questions your config has no answer for yet, so a re-run is how a
   repo picks up an option added in a newer release (the prompt ledger, say) without being
   re-asked the ones it already answered.

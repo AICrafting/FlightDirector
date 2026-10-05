@@ -8,7 +8,8 @@ description: Use when clearing out branches whose work has already shipped — "
 Before the first command, follow [runtime preflight](../../references/runtime.md).
 
 `working-an-issue` and `promoting-branches` remove an issue's **worktree** when it merges;
-nothing removes the **branch**. So every worked issue leaves a `feature/<N>-<slug>` on origin
+nothing removes the **branch**. So every worked issue leaves a `feature/<branchPrefix>-<slug>`
+(`feature/fj-71-…`; `feature/71-…` from before the repo moved to named issue trackers) on origin
 and usually a local ref; `release/*` fold branches and the `batch/*` integration branches
 `promoting-branches` opens on a `pr` hop pile up the same way. This skill finds
 the ones whose work has demonstrably landed and — after a preview and your go-ahead — deletes
@@ -84,7 +85,7 @@ Each row is `branch⇥where⇥merged-into⇥pr⇥issue⇥worktree`:
 | `where` | `local`, `remote`, or `local+remote` |
 | `merged-into` | the stage its work landed in |
 | `pr` | the merged PR number when the evidence came from the backend, else `-` |
-| `issue` | the `#N` parsed out of `<prefix>/<N>-<slug>`, else `-` |
+| `issue` | the branch's issue as a qualified id (`FJ-71`, `JIR-4`), `unbound` for a legacy `feature/71-…` branch whose tracker cannot be recovered, `error` when the lookup itself failed (the reason is on stderr), else `-`. It comes from the shared identity helper — the branch name, or the migration's binding for a legacy branch — never from whichever tracker is the default now. (A repo still on a pre-schema-3 config shows the bare `71`.) |
 | `worktree` | the `.worktrees/` path still holding it, else `-` |
 
 **Merged** means one of two things, and the `pr` column says which:
@@ -102,21 +103,28 @@ Anything else is simply absent from the list. Unmerged branches are not this ski
 
 A branch can be merged while its issue was never moved along — a promotion that half-ran, a
 hand-merge, a status label set by hand. The branch is then *evidence* of a workflow gap, and
-deleting it destroys that evidence. So for every row with an issue number, confirm the issue
+deleting it destroys that evidence. So for every row with a qualified issue identity, confirm the issue
 is **at or past** the `issueStatus` of the stage it merged into, or **closed**.
 
-Resolve the accepted set once, with a bounded number of calls rather than one per branch. For
-the merged stage at index `<i>` and every stage after it, read the status role and its label
-name, then list what carries it:
+Two trackers can both have an issue 71, and each spells its status labels its own way, so work
+**per tracker** — the ref before the `-` in the qualified id — with a bounded number of calls per
+tracker, never one per branch, and never compare `GH-71` with `FJ-71` because both are 71. For the
+merged stage at index `<i>` and every stage after it, read the status role, then that tracker's
+label for it, then list what carries it:
 
 ```
-flight config '.code.stages[<i>].issueStatus // empty'      # e.g. to-test
-flight config '.labels.status["to-test"]'                   # e.g. "status/to test"
+flight config '.code.stages[<i>].issueStatus // empty'                              # e.g. to-test
+flight issues tracker --tracker FJ | jq -r '.labels.status["to-test"] // empty'     # e.g. "status/to test"
 
-flight issues list --state closed --limit 200               # closed → past everything
-flight issues list --state open --label "status/to test" --limit 200
-flight issues list --state open --label "status/qa"    --limit 200   # …and each later stage
+flight issues list --tracker FJ --state closed --limit 200               # closed → past everything
+flight issues list --tracker FJ --state open --label "status/to test" --limit 200
+flight issues list --tracker FJ --state open --label "status/qa"    --limit 200   # …and each later stage
 ```
+
+Those rows carry the tracker's **native** ids in column 1 (`71`; `PROJ-71` on Jira), so compare
+each row's identity by its native number — `flight issues resolve --number FJ-71 | jq -r .number`
+— within its own tracker's lists only. A role that tracker leaves unmapped (empty) has no label
+to match: an issue can only satisfy it by being closed or carrying a later stage's label.
 
 `--limit 200` really does fetch up to 200 rows: the adapter pages underneath the limit. If one of
 these prints `warning: showing 200 of N rows …` on stderr, the accepted set is incomplete — raise
@@ -125,15 +133,24 @@ end looks like a board mismatch and gets skipped for the wrong reason.
 
 Then judge each row:
 
+- `unbound` → a legacy `feature/71-…` branch whose tracker cannot be recovered. **Ask the user
+  which tracker it belongs to** — never assume the current default — then retain the answer with
+  `"$ISSUE_IDENTITY" from-branch --branch "<branch>" --tracker <REF>` (the helper from
+  [runtime preflight](../../references/runtime.md)) and cross-check it like any other row. If
+  nobody knows, treat it like a row with no issue: the user decides it on its own.
+- `error` → the identity lookup failed (typically a binding that names a tracker no longer in the
+  config); the reason is on stderr. **Skip it and flag it with that reason** — it is NOT a
+  no-issue row, and a branch is never deleted on a lookup that did not run. Fix the config or
+  bindings and re-list.
 - Issue is **closed**, or **open carrying the merged stage's status or any later stage's** →
   the branch is a genuine leftover. Keep it in the delete set.
 - Issue is **open with an earlier status** (`status/in progress`, `status/blocked`) or **no
   status at all** → **skip it and flag it.** Say plainly which issue and what it says, e.g.
-  *"`feature/71-…` is merged into develop but #71 is still `status/in progress` — the promotion
+  *"`feature/fj-71-…` is merged into develop but FJ-71 is still `status/in progress` — the promotion
   never relabelled it. Skipping; fix the board first."*
-- Issue number is present but the issue **doesn't exist** (renumbered repo, hand-named branch)
+- Identity is present but the issue **doesn't exist** on its retained tracker (renumbered repo, hand-named branch)
   → skip and flag.
-- **No issue number** (`-`) — a `release/*` fold branch, a `batch/*` integration branch, or a
+- **No issue identity** (`-`) — a `release/*` fold branch, a `batch/*` integration branch, or a
   hand-named branch. There is nothing to cross-check, so say so and let the user decide that
   row on its own. A `batch/*` branch is flight's own: `promoting-branches` opened it to carry a
   group of features through one PR, so once that PR is merged it is safe — but the user still
@@ -169,14 +186,14 @@ set explicitly with `--branch` (repeatable) so a branch that appeared between th
 the go-ahead cannot ride along:
 
 ```
-flight branches prune --branch feature/71-widget --branch feature/74-gadget \
+flight branches prune --branch feature/fj-71-widget --branch feature/fj-74-gadget \
     --worktrees --local
 ```
 
 Add `--remote` only if the user agreed to the remote:
 
 ```
-flight branches prune --branch feature/71-widget --remote
+flight branches prune --branch feature/fj-71-widget --remote
 ```
 
 Order is fixed and not yours to change: **worktree → local ref → remote ref**. Git refuses to
@@ -190,6 +207,7 @@ Each action prints one TSV line — `action⇥branch⇥detail`:
 | `remove-worktree` | the `.worktrees/` entry was removed |
 | `delete-local` | `git branch -d` succeeded |
 | `delete-remote` | `git push origin --delete` succeeded |
+| `drop-binding` | the branch is gone locally *and* on origin, so its retained issue-identity binding was removed (schema 3); a binding is never dropped while either ref remains |
 | `would-*` | preview only (a bare `prune`, or `--dry-run`); nothing was written |
 | `skip` | deliberately left alone; the detail says why |
 
@@ -205,7 +223,7 @@ Say what went and what stayed:
   is the useful output, so don't bury it;
 - skipped for a git refusal: the branch and the exact reason, plus what the user would have to
   do by hand;
-- anything with no issue number that the user chose to keep.
+- anything with no issue identity that the user chose to keep.
 
 If the board-mismatch list is non-empty, name the pattern rather than just the rows — several
 issues stuck at `status/in progress` behind merged branches usually means one promotion run
@@ -221,10 +239,12 @@ died halfway, and that is worth an issue of its own.
   disagrees that the work is merged, which is precisely the case where deleting is unsafe.
 - `git worktree remove --force` on a worktree that wouldn't come off cleanly. That silently
   discards uncommitted work; report the path instead.
+- Cross-checking `FJ-71`'s branch against `GH-71`, or reading one tracker's status labels for
+  another tracker's issue. Each identity is checked on its own tracker, with its own labels.
 - Skipping Step 3 because the ancestry check "already proves" the work merged. It proves the
   *code* merged; it says nothing about whether the issue was ever moved along, and a merged
   branch behind a `status/in progress` issue is a bug report about the workflow.
-- Treating a branch with no issue number as a free deletion. `release/*` fold branches and
+- Treating a branch with no issue identity as a free deletion. `release/*` fold branches and
   `batch/*` integration branches often are safe, but "no cross-check was possible" is something the user should hear, not something
   to quietly resolve in favour of deleting.
 - Running a bare `git branch -d` / `git push origin --delete` instead of `flight branches

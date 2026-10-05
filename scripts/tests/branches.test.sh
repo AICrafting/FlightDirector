@@ -29,8 +29,10 @@ STUB="$SANDBOX/flight-stub"
 cat >"$STUB" <<'EOF'
 #!/usr/bin/env bash
 # Stand-in for the dispatcher's `pr list` — prints $PR_ROWS when the requested
-# --head matches $PR_HEAD, nothing otherwise. Any other group exits non-zero,
-# which is what a Jira-style backend with no `pr` adapter does.
+# --head matches $PR_HEAD, nothing otherwise. `issues resolve|tracker` (the offline
+# identity verbs issue-identity.sh uses, #198) go to the real dispatcher. Any other
+# group exits non-zero, which is what a Jira-style backend with no `pr` adapter does.
+if [ "$1" = issues ] && { [ "$2" = resolve ] || [ "$2" = tracker ]; }; then exec "$FLIGHT_REAL" "$@"; fi
 [ "$1" = pr ] && [ "$2" = list ] || exit 2
 head=""
 while [ $# -gt 0 ]; do case "$1" in --head) head="$2"; shift 2 ;; *) shift ;; esac; done
@@ -38,6 +40,7 @@ while [ $# -gt 0 ]; do case "$1" in --head) head="$2"; shift 2 ;; *) shift ;; es
 printf '%s\n' "${PR_ROWS:-}"
 EOF
 chmod +x "$STUB"
+export FLIGHT_REAL="$DISPATCH"
 
 # ── the sandbox repo ─────────────────────────────────────────────────────────
 ORIGIN="$SANDBOX/origin.git"; R="$SANDBOX/repo"
@@ -145,6 +148,71 @@ check "a branch with a worktree reports its path" \
 	"$([ -n "$wt7" ] && [ "${wt7%/.worktrees/7-worktree}" != "$wt7" ] \
 		&& grep -q "^feature/7-worktree	local+remote	develop	-	7	$wt7\$" <<<"$out" \
 		&& echo 1 || echo 0)" "out=$out; wt7=$wt7"
+
+printf '\033[1m── schema 3: qualified issue identities (#198) ──\033[0m\n'
+# Two trackers' issue 10, a Jira issue, and the legacy branches above: the issue column
+# comes from issue-identity.sh — bindings, then qualified names, then the migrated
+# legacy default — and never from whichever tracker is the default now.
+for b in feature/fj-10-first feature/gh-10-second feature/jir-4-jira; do
+	branch "$b" "$(printf '%s' "$b" | tr '/' '-')"
+done
+git -C "$R" switch -q develop
+for b in feature/fj-10-first feature/gh-10-second feature/jir-4-jira; do git -C "$R" merge -q --no-ff -m "merge $b" "$b"; done
+git -C "$R" push -q origin develop
+cp "$R/.flightdirector/config.json" "$SANDBOX/config.legacy"
+cat >"$R/.flightdirector/config.json" <<'EOF'
+{
+  "schemaVersion": 3,
+  "code": {
+    "backend": "forgejo", "owner": "o", "repo": "r", "api": "http://fake",
+    "stages": [ { "name": "develop" }, { "name": "qa" }, { "name": "main" } ]
+  },
+  "issueTrackers": [
+    {"ref":"FJ","name":"Code issues","default":true,"backend":"forgejo","api":"http://fake","owner":"o","repo":"r"},
+    {"ref":"GH","name":"Public issues","backend":"github","api":"https://api.github.com","owner":"o","repo":"r"},
+    {"ref":"JIR","name":"Jira","backend":"jira","api":"https://jira.example.com","project":"PROJ","email":"bot@example.com"}
+  ]
+}
+EOF
+cp "$R/.flightdirector/config.json" "$SANDBOX/config.s3"
+BINDINGS="$R/.flightdirector/batches/work-items/identities.json"
+mkdir -p "$(dirname "$BINDINGS")"
+printf '%s\n' '{"schemaVersion":1,"legacyDefaultTracker":"FJ","branches":{"feature/7-worktree":{"tracker":"GH","number":"7","qualified":"GH-7","branchPrefix":"gh-7","legacy":true}},"manifests":{}}' >"$BINDINGS"
+row() { grep "^$1	" <<<"$2" | cut -f5; }
+out="$(run list)"
+check "same-number branches on two trackers report distinct identities" \
+	"$([ "$(row feature/fj-10-first "$out")" = FJ-10 ] && [ "$(row feature/gh-10-second "$out")" = GH-10 ] && echo 1 || echo 0)" "out=$out"
+check "a Jira branch reports its qualified id" "$([ "$(row feature/jir-4-jira "$out")" = JIR-4 ] && echo 1 || echo 0)" "out=$out"
+check "a legacy branch uses the migrated legacy default" "$([ "$(row feature/1-merged "$out")" = FJ-1 ] && echo 1 || echo 0)" "out=$out"
+check "a reconcile binding wins over the legacy default" "$([ "$(row feature/7-worktree "$out")" = GH-7 ] && echo 1 || echo 0)" "out=$out"
+check "a non-issue branch still reports no issue" "$([ "$(row batch/zone-0919 "$out")" = - ] && echo 1 || echo 0)" "out=$out"
+jq '.issueTrackers |= map(.default = (.ref == "GH"))' "$SANDBOX/config.s3" >"$R/.flightdirector/config.json"
+out="$(run list)"
+check "a default change moves no existing branch's identity" \
+	"$([ "$(row feature/1-merged "$out")" = FJ-1 ] && [ "$(row feature/fj-10-first "$out")" = FJ-10 ] && echo 1 || echo 0)" "out=$out"
+printf '%s\n' '{"schemaVersion":1,"branches":{},"manifests":{}}' >"$BINDINGS"
+out="$(run list)"
+check "a legacy branch with no recoverable binding reports unbound" "$([ "$(row feature/1-merged "$out")" = unbound ] && echo 1 || echo 0)" "out=$out"
+check "…while qualified branches need no binding" "$([ "$(row feature/gh-10-second "$out")" = GH-10 ] && echo 1 || echo 0)" "out=$out"
+# A lookup that FAILS (here: the binding's legacy default names a tracker since removed
+# from the config) is not "no issue" — the column says `error` and the reason reaches
+# stderr, so the cleanup skill cannot wave the branch through as issue-less.
+printf '%s\n' '{"schemaVersion":1,"legacyDefaultTracker":"OLD","branches":{},"manifests":{}}' >"$BINDINGS"
+errf="$SANDBOX/branches.err"
+out="$(run list)"
+FLIGHT_REPO_ROOT="$R" FLIGHT_CONFIG="$R/.flightdirector/config.json" FLIGHT_SELF="$STUB" \
+	bash "$BRANCHES" list --no-fetch >/dev/null 2>"$errf" || true
+check "a failed identity lookup reports error, not no-issue" "$([ "$(row feature/1-merged "$out")" = error ] && echo 1 || echo 0)" "out=$out"
+check "…and forwards the helper's reason to stderr" \
+	"$(grep -q 'feature/1-merged' "$errf" && grep -q "unknown tracker 'OLD'" "$errf" && echo 1 || echo 0)" "err=$(cat "$errf")"
+check "…while qualified branches are unaffected" "$([ "$(row feature/gh-10-second "$out")" = GH-10 ] && echo 1 || echo 0)" "out=$out"
+# Back to the pre-schema-3 fixture the rest of this file expects.
+cp "$SANDBOX/config.legacy" "$R/.flightdirector/config.json"
+rm -rf "$R/.flightdirector/batches"
+for b in feature/fj-10-first feature/gh-10-second feature/jir-4-jira; do
+	git -C "$R" branch -q -D "$b"; git -C "$R" push -q origin --delete "$b"
+done
+git -C "$R" fetch -q --prune origin
 
 check "--merged-into narrows to that one stage" \
 	"$(out2="$(run list --merged-into develop)"; grep -q '^bugfix/3-merged' <<<"$out2" && echo 0 || echo 1)" \
@@ -301,6 +369,58 @@ check "a worktree outside .worktrees/ is skipped as not-ours" \
 check "…and that branch survives" \
 	"$(git -C "$R" rev-parse -q --verify refs/heads/feature/9-current >/dev/null && echo 1 || echo 0)"
 git -C "$R" worktree remove -q "$SANDBOX/mine" 2>/dev/null || git -C "$R" worktree remove --force "$SANDBOX/mine"
+
+printf '\033[1m── schema 3: prune drops identity bindings (#248) ──\033[0m\n'
+# A retained binding goes only when its branch is gone locally AND on origin; one whose
+# branch survives on either side — and every other branch's — is left alone.
+for b in feature/11-gone feature/12-kept; do branch "$b" "$(printf '%s' "$b" | tr '/' '-')"; done
+git -C "$R" switch -q develop
+for b in feature/11-gone feature/12-kept; do git -C "$R" merge -q --no-ff -m "merge $b" "$b"; done
+git -C "$R" push -q origin develop
+cp "$R/.flightdirector/config.json" "$SANDBOX/config.legacy2"
+cp "$SANDBOX/config.s3" "$R/.flightdirector/config.json"
+mkdir -p "$(dirname "$BINDINGS")"
+cat >"$BINDINGS" <<'EOF'
+{"schemaVersion":1,"legacyDefaultTracker":"FJ","manifests":{},"branches":{
+ "feature/11-gone":{"tracker":"GH","number":"11","qualified":"GH-11","branchPrefix":"gh-11","legacy":true},
+ "feature/12-kept":{"tracker":"GH","number":"12","qualified":"GH-12","branchPrefix":"gh-12","legacy":true},
+ "feature/99-elsewhere":{"tracker":"FJ","number":"99","qualified":"FJ-99","branchPrefix":"fj-99","legacy":true}}}
+EOF
+has_binding() { jq -e --arg b "$1" '.branches | has($b)' "$BINDINGS" >/dev/null 2>&1 && echo 1 || echo 0; }
+
+out="$(run prune --branch feature/11-gone)"
+check "a preview of a full prune shows would-drop-binding with the retained id" \
+	"$(grep -q '^would-drop-binding	feature/11-gone	retained identity GH-11$' <<<"$out" && echo 1 || echo 0)" "out=$out"
+check "…and the preview leaves the binding in place" "$(has_binding feature/11-gone)"
+out="$(run prune --local --dry-run --branch feature/11-gone)"
+check "a --local preview (remote stays) does not offer to drop the binding" \
+	"$(grep -q 'drop-binding' <<<"$out" && echo 0 || echo 1)" "out=$out"
+
+out="$(run prune --local --remote --branch feature/11-gone)"
+check "a full prune (local + remote) drops the branch's binding" \
+	"$(grep -q '^drop-binding	feature/11-gone	retained identity GH-11$' <<<"$out" && [ "$(has_binding feature/11-gone)" = 0 ] && echo 1 || echo 0)" \
+	"out=$out; bindings=$(cat "$BINDINGS")"
+check "…other branches' bindings are untouched" \
+	"$([ "$(has_binding feature/12-kept)" = 1 ] && [ "$(has_binding feature/99-elsewhere)" = 1 ] \
+		&& [ "$(jq -r '.legacyDefaultTracker' "$BINDINGS")" = FJ ] && echo 1 || echo 0)" "bindings=$(cat "$BINDINGS")"
+
+out="$(run prune --local --branch feature/12-kept)"
+check "a local-only prune keeps the binding while origin still has the branch" \
+	"$(grep -q '^delete-local	feature/12-kept' <<<"$out" && ! grep -q 'drop-binding' <<<"$out" \
+		&& [ "$(has_binding feature/12-kept)" = 1 ] && echo 1 || echo 0)" "out=$out"
+forget_rc=0
+FLIGHT_REPO_ROOT="$R" FLIGHT_SELF="$STUB" "$REPO_ROOT/flight/scripts/issue-identity.sh" forget --branch feature/12-kept >/dev/null 2>&1 || forget_rc=$?
+check "issue-identity forget refuses while the branch remains on origin" \
+	"$([ "$forget_rc" = 1 ] && [ "$(has_binding feature/12-kept)" = 1 ] && echo 1 || echo 0)" "rc=$forget_rc"
+out="$(run prune --remote --branch feature/12-kept)"
+check "pruning the last remaining (remote) ref then drops it" \
+	"$(grep -q '^drop-binding	feature/12-kept' <<<"$out" && [ "$(has_binding feature/12-kept)" = 0 ] \
+		&& [ "$(has_binding feature/99-elsewhere)" = 1 ] && echo 1 || echo 0)" "out=$out"
+check "no work-items lock is left behind" "$([ ! -e "$BINDINGS.lock" ] && echo 1 || echo 0)"
+
+# Back to the pre-schema-3 fixture.
+cp "$SANDBOX/config.legacy2" "$R/.flightdirector/config.json"
+rm -rf "$R/.flightdirector/batches"
 
 printf '\033[1m── dispatcher wiring ──\033[0m\n'
 

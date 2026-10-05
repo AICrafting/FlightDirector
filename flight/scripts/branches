@@ -253,13 +253,40 @@ merged_pr() {
 	return 1
 }
 
-# issue_number <branch> — the leading number of the slug: feature/90-cleaning-up → 90.
-# Empty when the branch does not carry one; the skill treats that as "cross-check by hand".
-issue_number() {
-	local slug="${1#*/}"
-	case "$slug" in
-		[0-9]*) printf '%s\n' "${slug%%[!0-9]*}" ;;
+# issue_id <branch> — the branch's issue, for the skill's cross-check. Schema 3 (#198):
+# the qualified identity from the shared helper (issue-identity.sh — bindings, qualified
+# names, the migrated legacy default; never the current default): feature/fj-90-x →
+# FJ-90. `unbound` = a legacy unqualified branch whose tracker cannot be recovered — the
+# skill asks which tracker rather than guessing. `error` = the lookup itself failed (a
+# binding naming a tracker no longer configured, an unreadable config…); the helper's
+# message is forwarded to stderr, so a broken lookup never reads as "no issue". Before
+# schema 3: the slug's leading number, as always. Empty when the branch carries no
+# issue ("cross-check by hand").
+SCHEMA="$(jq -r '.schemaVersion // 1' "$CFG" 2>/dev/null || echo 1)"
+case "$SCHEMA" in ''|*[!0-9]*) SCHEMA=1 ;; esac
+issue_id() {
+	local slug="${1#*/}" id err rc=0
+	if [ "$SCHEMA" -lt 3 ]; then
+		case "$slug" in
+			[0-9]*) printf '%s\n' "${slug%%[!0-9]*}" ;;
+		esac
+		return 0
+	fi
+	err="$(mktemp "${TMPDIR:-/tmp}/flight-branches.XXXXXX")"
+	id="$(FLIGHT_REPO_ROOT="$ROOT" FLIGHT_SELF="$FLIGHT_SELF" \
+		"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/issue-identity.sh" from-branch --branch "$1" 2>"$err")" || rc=$?
+	case "$rc" in
+		0) jq -r '.qualified' <<<"$id" ;;
+		3) ;;
+		4) printf 'unbound\n' ;;
+		*)
+			warn "cannot read $1's issue identity:"
+			cat "$err" >&2
+			printf 'error\n'
+			;;
 	esac
+	rm -f "$err"
+	return 0
 }
 
 # ── row assembly ───────────────────────────────────────────────────────────────
@@ -286,7 +313,7 @@ collect_rows() {
 			continue          # not merged anywhere we were asked about — leave it alone
 		fi
 
-		issue="$(issue_number "$b")"; issue="${issue:--}"
+		issue="$(issue_id "$b")"; issue="${issue:--}"
 		wt="$(map_get "$WT_PATH" "$b")"; wt="${wt:--}"
 		printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$b" "$where" "$stage" "$pr" "$issue" "$wt"
 	done
@@ -306,6 +333,30 @@ fi
 
 act() { # act <verb> <branch> <detail>
 	printf '%s\t%s\t%s\n' "$1" "$2" "$3"
+}
+
+# drop_binding <branch> — schema 3 (#248): once a branch is gone both locally and on
+# origin, its retained identity binding (reconcile's legacy record, or `remember`'s)
+# goes too, so the bindings file does not grow forever. issue-identity.sh `forget`
+# re-checks that no local or origin ref remains and refuses otherwise — a binding is
+# the only record of an unqualified legacy branch's tracker. A branch with no binding
+# prints nothing. Returns 1 only when a binding could not be dropped.
+IDENTITY_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/issue-identity.sh"
+drop_binding() {
+	local b="$1" out r=0
+	[ "$SCHEMA" -ge 3 ] || return 0
+	if [ "$dry_run" = 1 ]; then
+		out="$(FLIGHT_REPO_ROOT="$ROOT" FLIGHT_SELF="$FLIGHT_SELF" "$IDENTITY_HELPER" bound --branch "$b" 2>/dev/null)" || return 0
+		act would-drop-binding "$b" "retained identity $(jq -r '.qualified // "?"' <<<"$out" 2>/dev/null)"
+		return 0
+	fi
+	out="$(FLIGHT_REPO_ROOT="$ROOT" FLIGHT_SELF="$FLIGHT_SELF" "$IDENTITY_HELPER" forget --branch "$b" 2>&1)" || r=$?
+	case "$r" in
+		0) act drop-binding "$b" "retained identity $(jq -r '.qualified // "?"' <<<"$out" 2>/dev/null)" ;;
+		3) ;;
+		*) act skip "$b" "identity binding kept: ${out##*issue-identity: }"; return 1 ;;
+	esac
+	return 0
 }
 
 rc=0
@@ -346,32 +397,45 @@ while IFS=$'\t' read -r b where stage pr issue wt; do
 		fi
 	fi
 
+	# Whether the branch is (or, in a preview, would be) gone on each side — the
+	# identity binding below may only go once BOTH are.
+	local_gone=1; remote_gone=1
 	if set_has "$HAS_LOCAL" "$b"; then
+		local_gone=0
 		if [ "$do_local" = 1 ] && [ "$dry_run" = 0 ]; then
 			# `-d`, never `-D`: git's own merged check is the last line of defence, and
 			# a refusal here means our "merged" verdict disagreed with git's.
 			if out="$(g branch -d "$b" 2>&1)"; then
 				act delete-local "$b" "merged into $stage"
+				local_gone=1
 			else
 				act skip "$b" "git branch -d refused: ${out##*: }"
 				rc=1
 			fi
 		elif [ "$do_local" = 1 ] || [ "$prune_preview_only" = 1 ]; then
 			act would-delete-local "$b" "merged into $stage"
+			local_gone=1
 		fi
 	fi
 
 	if set_has "$HAS_REMOTE" "$b"; then
+		remote_gone=0
 		if [ "$do_remote" = 1 ] && [ "$dry_run" = 0 ]; then
 			if out="$(g push origin --delete "$b" 2>&1)"; then
 				act delete-remote "$b" "merged into $stage"
+				remote_gone=1
 			else
 				act skip "$b" "push --delete failed: $(printf '%s' "$out" | tail -n1)"
 				rc=1
 			fi
 		elif [ "$do_remote" = 1 ] || [ "$prune_preview_only" = 1 ]; then
 			act would-delete-remote "$b" "merged into $stage"
+			remote_gone=1
 		fi
+	fi
+
+	if [ "$local_gone" = 1 ] && [ "$remote_gone" = 1 ]; then
+		drop_binding "$b" || rc=1
 	fi
 done < <(collect_rows)
 

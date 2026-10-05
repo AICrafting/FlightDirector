@@ -2,7 +2,7 @@
 #
 # Jira Cloud issues adapter (REST v3) — verbs: list get comments create update
 # comment set-status clear-status label-add label-remove assign unassign close
-# reopen.
+# reopen dep-add dep-remove dep-list dep-blocking.
 #
 # Jira specifics (see ../../../references/adapter-contract.md, "Jira backend"):
 #   - The `--number` value is a Jira KEY (e.g. KAN-123), treated as an opaque id.
@@ -17,16 +17,43 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 
 verb="${1:-}"; shift || true
 
+# Base objects for --json (#253; ../_json.sh). One mapping per resource, so list,
+# get and comments cannot drift apart. `number` is the native KEY; state comes from
+# the status category exactly as `get` derives it (a missing category is an error,
+# never a silent "open"); links are built from the site URL, which the API does not
+# return; text fields go through the ADF shim.
+# shellcheck disable=SC2016  # jq programs
+ISSUE_JQ="$JSON_JQ$ADF_JQ"'
+def text: if type == "string" then . elif . == null then "" else adf_to_text end;
+def base_issue($site): {
+  number: .key, title: (.fields.summary // ""),
+  state: (.fields.status.statusCategory.key
+    | if . == null then error("issues: no status category in the response")
+      elif . == "done" then "closed" else "open" end),
+  labels: (.fields.labels // []),
+  author: (.fields.reporter.displayName // .fields.creator.displayName // null),
+  created: (.fields.created | utc), updated: (.fields.updated | utc),
+  comments: (.fields.comment.total // null), url: "\($site)/browse/\(.key)",
+  body: (.fields.description | text)
+};
+def base_comment($site; $key): {
+  id: (.id | tostring), author: (.author.displayName // .author.emailAddress // null),
+  created: (.created | utc), updated: (.updated | utc),
+  url: "\($site)/browse/\($key)?focusedCommentId=\(.id)", body: (.body | text)
+};'
+
 # jql_quote <s> — quote a JQL string literal (escape backslash and double-quote).
 jql_quote() { printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"; }
 
 case "$verb" in
   list)
-    state="open"; limit="50"; labels=()
+    state="open"; limit="50"; labels=(); per_page=""; cursor=""
     while [ $# -gt 0 ]; do case "$1" in
       --state) state="$2"; shift 2 ;;
       --limit) limit="$2"; shift 2 ;;
       --label) labels+=("$2"); shift 2 ;;
+      --per-page) per_page="$2"; shift 2 ;;
+      --cursor) cursor="$2"; shift 2 ;;
       *) die "issues list: unknown arg '$1'" ;;
     esac; done
     jql="project = $(jql_quote "$LS_PROJECT")"
@@ -45,8 +72,29 @@ case "$verb" in
     # Enhanced-JQL search endpoint. (The legacy POST /rest/api/3/search was
     # decommissioned by Atlassian; /search/jql is its replacement.) It pages with
     # an opaque nextPageToken, which _jql_search follows up to --limit.
-    _jql_search "$jql" '["summary","labels"]' "$limit" \
-      | jq -r '[.key, (.fields.summary // ""), ((.fields.labels // []) | join(","))] | @tsv'
+    # Cursor paging (#262): Jira pages forward by token only; see cursor_page_token.
+    if [ -n "$per_page$cursor" ]; then
+      json_mode || die "issues list: --per-page and --cursor need --json"
+      per_page="$(per_page_arg "${per_page:-50}")" || exit 1
+      _cursor_fetch() {
+        _api POST "/rest/api/3/search/jql" "$(jq -n --arg j "$jql" --argjson m "$2" --arg t "$1" \
+          --argjson f '["summary","labels","status","created","updated","reporter","creator"]' \
+          '{jql:$j, maxResults:$m, fields:$f} + (if $t == "" then {} else {nextPageToken:$t} end)')"
+      }
+      meta="$(page_meta_init)"
+      FLIGHT_PAGE_META="$meta" cursor_page_token _cursor_fetch '.issues[]?' '[(.fields.created | utc), (.key | split("-") | last | tonumber)]' \
+          "$per_page" "$cursor" "jira $LS_API $jql" \
+        | jq -c --arg site "$SITE" "$ISSUE_JQ"'base_issue($site) | .body = null' | emit_list "$meta"
+      exit 0
+    fi
+    if json_mode; then
+      meta="$(page_meta_init)"
+      FLIGHT_PAGE_META="$meta" _jql_search "$jql" '["summary","labels","status","created","updated","reporter","creator"]' "$limit" \
+        | jq -c --arg site "$SITE" "$ISSUE_JQ"'base_issue($site) | .body = null' | emit_list "$meta"
+    else
+      _jql_search "$jql" '["summary","labels"]' "$limit" \
+        | jq -r '[.key, (.fields.summary // ""), ((.fields.labels // []) | join(","))] | @tsv'
+    fi
     ;;
 
   get)
@@ -63,6 +111,11 @@ case "$verb" in
     # A missing category is an error, not an "open": Jira is the only backend that
     # DERIVES state rather than reading it, and defaulting to open is the one
     # direction that would let a done issue pass a caller's open/closed check.
+    if json_mode; then
+      _api GET "/rest/api/3/issue/${number}?fields=summary,description,status,labels,created,updated,reporter,creator,comment" \
+        | jq -c --arg site "$SITE" "$ISSUE_JQ"'base_issue($site)'
+      exit 0
+    fi
     _api GET "/rest/api/3/issue/${number}?fields=summary,description,status" \
       | jq -r "$ADF_JQ"'
           ([.key, (.fields.summary // ""),
@@ -85,6 +138,11 @@ case "$verb" in
     # Paged to exhaustion: this endpoint returns 50 comments per request and the
     # thread renders oldest-first, so an unpaged fetch drops the NEWEST comments —
     # precisely the ones "the later comment wins" depends on.
+    if json_mode; then
+      _offset_get "/rest/api/3/issue/${number}/comment" "" comments "" \
+        | jq -cs --arg site "$SITE" --arg key "$number" "$ISSUE_JQ"'map(base_comment($site; $key))'
+      exit 0
+    fi
     _offset_get "/rest/api/3/issue/${number}/comment" "" comments "" \
       | jq -r "$ADF_JQ"'
           ([(.author.displayName // .author.emailAddress // "?"), (.created // "")] | @tsv),
@@ -163,7 +221,12 @@ case "$verb" in
     else
       adf="$(md_to_adf_json "$body")"
     fi
-    _api POST "/rest/api/3/issue/${number}/comment" "$(jq -n --argjson b "$adf" '{body:$b}')" >/dev/null
+    if json_mode; then
+      _api POST "/rest/api/3/issue/${number}/comment" "$(jq -n --argjson b "$adf" '{body:$b}')" \
+        | jq -c --arg site "$SITE" --arg key "$number" "$ISSUE_JQ"'base_comment($site; $key)'
+    else
+      _api POST "/rest/api/3/issue/${number}/comment" "$(jq -n --argjson b "$adf" '{body:$b}')" >/dev/null
+    fi
     ;;
 
   set-status)
@@ -303,5 +366,46 @@ case "$verb" in
     _api POST "/rest/api/3/issue/${number}/transitions" "$(jq -n --arg id "$tid" '{transition:{id:$id}}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get comments create update comment set-status clear-status label-add label-remove assign unassign close reopen)" ;;
+  dep-add|dep-remove|dep-list|dep-blocking)
+    # Issue dependencies (FJ-271) as issue links. The link type is found by its inward text
+    # ("is blocked by"), else by the name "Blocks": an admin can rename either. Seen from an
+    # issue's `issuelinks`, an entry holding `inwardIssue` reads "<this issue> is blocked by
+    # <inwardIssue>", and one holding `outwardIssue` reads "<this issue> blocks <outwardIssue>".
+    # Creating "N is blocked by M" therefore posts M as the inward issue (pinned on the live
+    # rig: test-rig/jira/smoke.sh).
+    number=""; by=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --by) by="$2"; shift 2 ;;
+      *) die "issues $verb: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues $verb: --number required"
+    case "$verb" in dep-add|dep-remove) [ -n "$by" ] || die "issues $verb: --by required" ;; esac
+    ltype="$(_api GET "/rest/api/3/issueLinkType" | jq -c '
+      ([.issueLinkTypes[]? | select((.inward // "" | ascii_downcase) == "is blocked by")]
+       + [.issueLinkTypes[]? | select(.name == "Blocks")]) | first // empty')"
+    [ -n "$ltype" ] || fail unsupported "this Jira site has no \"is blocked by\" issue link type"
+    links="$(_api GET "/rest/api/3/issue/${number}?fields=issuelinks" | jq -c --argjson t "$ltype" --arg p "$LS_PROJECT" '
+      [.fields.issuelinks[]? | select(.type.id == $t.id)
+       | if .inwardIssue then {id: .id, side: "blocked_by", issue: .inwardIssue} else {id: .id, side: "blocks", issue: .outwardIssue} end
+       | select(.issue.key | startswith($p + "-"))
+       | {side, link: .id, number: .issue.key, title: (.issue.fields.summary // ""),
+          state: (if .issue.fields.status.statusCategory.key == "done" then "closed" else "open" end)}]')"
+    case "$verb" in
+      dep-list)     jq -c '[.[] | select(.side == "blocked_by") | {number, title, state}]' <<<"$links" | dep_emit ;;
+      dep-blocking) jq -c '[.[] | select(.side == "blocks") | {number, title, state}]' <<<"$links" | dep_emit ;;
+      dep-add)
+        [ "$(jq --arg b "$by" '[.[] | select(.side == "blocked_by" and .number == $b)] | length' <<<"$links")" = 0 ] || exit 0
+        _api POST "/rest/api/3/issueLink" \
+          "$(jq -cn --argjson t "$ltype" --arg b "$by" --arg n "$number" '{type: {id: $t.id}, inwardIssue: {key: $b}, outwardIssue: {key: $n}}')" >/dev/null
+        ;;
+      dep-remove)
+        link="$(jq -r --arg b "$by" '[.[] | select(.side == "blocked_by" and .number == $b)] | first | .link // empty' <<<"$links")"
+        [ -n "$link" ] || exit 0
+        _api DELETE "/rest/api/3/issueLink/${link}" >/dev/null
+        ;;
+    esac
+    ;;
+
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment set-status clear-status label-add label-remove assign unassign close reopen dep-add dep-remove dep-list dep-blocking)" ;;
 esac

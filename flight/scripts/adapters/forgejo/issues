@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Forgejo issues adapter — verbs: list get comments create update comment attach
-# set-status clear-status label-add label-remove assign unassign close reopen.
+# set-status clear-status label-add label-remove assign unassign close reopen
+# dep-add dep-remove dep-list dep-blocking.
 # See ../../../references/adapter-contract.md.
 set -euo pipefail
 ADAPTER_NAME="forgejo/issues"
@@ -10,13 +11,32 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 
 verb="${1:-}"; shift || true
 
+# Base objects for --json (#253; ../_json.sh). One mapping per resource, so list,
+# get and comments cannot drift apart.
+# shellcheck disable=SC2016  # jq programs
+ISSUE_JQ="$JSON_JQ"'
+def base_issue: {
+  number: (.number | tostring), title: (.title // ""),
+  state: (if .state == "closed" then "closed" else "open" end),
+  labels: [.labels[]?.name], author: (.user.login // null),
+  created: (.created_at | utc), updated: (.updated_at | utc),
+  comments: (.comments // null), url: (.html_url // null), body: (.body // "")
+};
+def base_comment: {
+  id: (.id | tostring), author: (.user.login // null),
+  created: (.created_at | utc), updated: (.updated_at | utc),
+  url: (.html_url // null), body: (.body // "")
+};'
+
 case "$verb" in
   list)
-    state="open"; limit="50"; labels=()
+    state="open"; limit="50"; labels=(); per_page=""; cursor=""
     while [ $# -gt 0 ]; do case "$1" in
       --state) state="$2"; shift 2 ;;
       --limit) limit="$2"; shift 2 ;;
       --label) labels+=("$2"); shift 2 ;;
+      --per-page) per_page="$2"; shift 2 ;;
+      --cursor) cursor="$2"; shift 2 ;;
       *) die "issues list: unknown arg '$1'" ;;
     esac; done
     # Every interpolated value is percent-encoded: `status/to test` and friends
@@ -27,10 +47,27 @@ case "$verb" in
       for l in "${labels[@]}"; do enc+=("$(urlenc "$l")"); done
       old="$IFS"; IFS=,; q="${q}&labels=${enc[*]}"; IFS="$old"
     fi
+    # Cursor paging (#262): one page per call, newest created first; see cursor_page.
+    if [ -n "$per_page$cursor" ]; then
+      json_mode || die "issues list: --per-page and --cursor need --json"
+      per_page="$(per_page_arg "${per_page:-50}")" || exit 1
+      _cursor_fetch() { _api GET "/issues?${q}&limit=$2&page=$1";  }
+      meta="$(page_meta_init)"
+      FLIGHT_PAGE_META="$meta" cursor_page _cursor_fetch '.[]' '[(.created_at | utc), .number]' "$per_page" "$cursor" \
+          "forgejo $LS_API $LS_OWNER/$LS_REPO $q" x-total-count \
+        | jq -c "$ISSUE_JQ"'base_issue | .body = null' | emit_list "$meta"
+      exit 0
+    fi
     # _paged_get honours --limit as a ceiling and pages underneath it, so a limit
     # above the server's cap returns what it says rather than one clamped page.
-    _paged_get "/issues" "$q" "$limit" \
-      | jq -r '[(.number|tostring), .title, ([.labels[].name] | join(","))] | @tsv'
+    if json_mode; then
+      meta="$(page_meta_init)"
+      FLIGHT_PAGE_META="$meta" _paged_get "/issues" "$q" "$limit" \
+        | jq -c "$ISSUE_JQ"'base_issue | .body = null' | emit_list "$meta"
+    else
+      _paged_get "/issues" "$q" "$limit" \
+        | jq -r '[(.number|tostring), .title, ([.labels[].name] | join(","))] | @tsv'
+    fi
     ;;
 
   get)
@@ -40,8 +77,12 @@ case "$verb" in
       *) die "issues get: unknown arg '$1'" ;;
     esac; done
     [ -n "$number" ] || die "issues get: --number required"
-    _api GET "/issues/${number}" \
-      | jq -r '([(.number|tostring), .title, .state] | @tsv), "", (.body // "")'
+    if json_mode; then
+      _api GET "/issues/${number}" | jq -c "$ISSUE_JQ"'base_issue'
+    else
+      _api GET "/issues/${number}" \
+        | jq -r '([(.number|tostring), .title, .state] | @tsv), "", (.body // "")'
+    fi
     ;;
 
   comments)
@@ -57,8 +98,12 @@ case "$verb" in
     # the whole thread (verified against a 53-comment issue), so a page-until-empty
     # loop would re-fetch the same rows forever. The GitHub and GitLab adapters do
     # page their comment endpoints, which cap for real.
-    _api GET "/issues/${number}/comments" \
-      | jq -r '.[] | ([(.user.login // "?"), .created_at] | @tsv), (.body // ""), ""'
+    if json_mode; then
+      _api GET "/issues/${number}/comments" | jq -c "$ISSUE_JQ"'map(base_comment)'
+    else
+      _api GET "/issues/${number}/comments" \
+        | jq -r '.[] | ([(.user.login // "?"), .created_at] | @tsv), (.body // ""), ""'
+    fi
     ;;
 
   create)
@@ -129,10 +174,10 @@ case "$verb" in
     code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
       -H "Authorization: token ${LS_TOKEN}" \
       -F "attachment=@${file};filename=${name}" \
-      "${REPO_API}/issues/${number}/assets")" || { rm -f "$tmp"; die "attach: curl failed"; }
+      "${REPO_API}/issues/${number}/assets")" || { rm -f "$tmp"; fail network "attach: curl failed"; }
     if [ "$code" -ge 400 ]; then
       msg="$(jq -r '.message // empty' "$tmp" 2>/dev/null || true)"; rm -f "$tmp"
-      die "attach → HTTP $code${msg:+: $msg}"
+      http_fail "$code" "attach → HTTP $code${msg:+: $msg}"
     fi
     jq -r '.browser_download_url' "$tmp"; rm -f "$tmp"
     ;;
@@ -152,7 +197,11 @@ case "$verb" in
     else
       payload="$(jq -n --arg b "$body" '{body:$b}')"
     fi
-    _api POST "/issues/${number}/comments" "$payload" >/dev/null
+    if json_mode; then
+      _api POST "/issues/${number}/comments" "$payload" | jq -c "$ISSUE_JQ"'base_comment'
+    else
+      _api POST "/issues/${number}/comments" "$payload" >/dev/null
+    fi
     ;;
 
   set-status)
@@ -299,5 +348,46 @@ case "$verb" in
     _api PATCH "/issues/${number}" "$(jq -n '{state:"open"}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add label-remove assign unassign close reopen)" ;;
+  dep-add|dep-remove|dep-list|dep-blocking)
+    # Issue dependencies (FJ-271): "N is blocked by M", both issues in this repo. A repo with
+    # dependencies switched off answers these endpoints with 404, which would read as a missing
+    # issue, so the repo setting is checked first and reported as `unsupported`.
+    number=""; by=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --by) by="$2"; shift 2 ;;
+      *) die "issues $verb: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues $verb: --number required"
+    case "$verb" in
+      dep-add|dep-remove)
+        case "$by" in ''|*[!0-9]*) die "issues $verb: --by needs an issue number" ;; esac ;;
+    esac
+    enabled="$(_api GET "" | jq -r '.internal_tracker.enable_issue_dependencies // false')"
+    [ "$enabled" = true ] || fail unsupported "issue dependencies are switched off for ${LS_OWNER}/${LS_REPO}"
+    # Only links whose other end is in this repo: the caller names issues by this tracker. One
+    # page of 50 is enough; an issue with more blockers than that is not worth paging for.
+    same_repo='[.[] | select((.repository.owner // "" | ascii_downcase) == ($o | ascii_downcase)
+        and (.repository.name // "" | ascii_downcase) == ($r | ascii_downcase))
+      | {number: (.number | tostring), title: (.title // ""),
+         state: (if .state == "closed" then "closed" else "open" end)}]'
+    case "$verb" in
+      dep-list|dep-blocking)
+        path=dependencies; [ "$verb" = dep-blocking ] && path=blocks
+        _api GET "/issues/${number}/${path}?limit=50" \
+          | jq -c --arg o "$LS_OWNER" --arg r "$LS_REPO" "$same_repo" | dep_emit
+        ;;
+      *)
+        linked="$(_api GET "/issues/${number}/dependencies?limit=50" \
+          | jq -r --arg o "$LS_OWNER" --arg r "$LS_REPO" --arg b "$by" "$same_repo"' | map(select(.number == $b)) | length')"
+        if [ "$verb" = dep-add ] && [ "$linked" != 0 ]; then exit 0; fi
+        if [ "$verb" = dep-remove ] && [ "$linked" = 0 ]; then exit 0; fi
+        method=POST; [ "$verb" = dep-remove ] && method=DELETE
+        _api "$method" "/issues/${number}/dependencies" \
+          "$(jq -cn --arg o "$LS_OWNER" --arg r "$LS_REPO" --argjson i "$by" '{owner: $o, repo: $r, index: $i}')" >/dev/null
+        ;;
+    esac
+    ;;
+
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add label-remove assign unassign close reopen dep-add dep-remove dep-list dep-blocking)" ;;
 esac

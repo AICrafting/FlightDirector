@@ -1,9 +1,10 @@
 # Default label taxonomy
 
-The `setting-up-a-repo` skill reads this file and reconciles it against a repo's
-existing labels, creating only the ones that are missing (or whose equivalent isn't
-already present). **This is the one place to edit the defaults** — change a color, add a
-label, drop one — without touching skill prose.
+The `add-an-issue-tracker` skill (run by `setting-up-a-repo` for a repo's first tracker) reads
+this file and reconciles it against **each issue tracker's** existing labels separately,
+creating only the ones that are missing (or whose equivalent isn't already present) on that
+tracker. **This is the one place to edit the defaults** — change a color, add a label, drop
+one — without touching skill prose.
 
 Conventions (decided for this plugin):
 - **Type/category labels are flat**: `bug`, `feature`, `tech-debt`.
@@ -74,9 +75,11 @@ Listed here so a bootstrap can offer to create them too, but they're optional �
 don't use a status workflow.
 
 Each status label fills a **role** the skills reference (e.g. the "awaiting-test" role).
-The name below is the plugin default; if a repo already has an equivalent, bootstrap adopts
-**that** name for the role and records it in the per-repo config (see flight-setup.md), so
-the skills use your name, not the plugin's.
+The name below is the plugin default; if a tracker already has an equivalent, setup adopts
+**that** name for the role and records it in that tracker's `labels` map in the config (see
+flight-setup.md), so the skills use your name, not the plugin's — and two trackers can call the
+same role differently. On a Jira tracker the names must be space-free single tokens
+(`status/in-progress`, `status/to-test`).
 
 | Role | Default label | Color | Description | Adopt the repo's label if it has… |
 |---|---|---|---|---|
@@ -89,10 +92,12 @@ the skills use your name, not the plugin's.
 | qa | `status/qa` | `#0e7490` | Merged, awaiting real-world verification | `qa`, `awaiting-qa` |
 | done | `status/done` | `#216e39` | Shipped / released — the terminal close state | `done`, `shipped`, `released`, `complete` |
 
-**The `new` role is opt-in and off by default.** Unlike the others it is not seeded: absent from
-`labels.status`, the feature simply does not exist for that repo, which is every repo configured
-before it was added. `setting-up-a-repo` asks, and only then creates the label and writes the key.
-When it *is* configured, `flight issues create` applies it, so a freshly filed issue is
+**The `new` role is opt-in and off by default, per tracker.** Unlike the others it is not
+seeded: absent from a tracker's `labels.status`, the feature simply does not exist for that
+tracker, which is every tracker configured before it was added. `add-an-issue-tracker` asks —
+on each tracker separately — and only then creates the label and writes the key; a "no" is
+written as `"new": false` so it isn't asked again. When it *is* configured, `flight issues
+create` applies it on that tracker, so a freshly filed issue is
 distinguishable from one whose label someone forgot — and "what is untriaged?" becomes a label
 query. It is a status like any other: the first `set-status` (normally to `in-progress`, when
 `working-an-issue` picks the issue up) removes it. Issues filed outside flight — the web UI,

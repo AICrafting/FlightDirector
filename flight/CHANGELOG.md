@@ -15,6 +15,360 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 _Nothing yet._
 
+## [0.17.2] - 2026-10-04
+
+### Added
+- **Blocked issues** (FJ-271). `flight issues block --number FJ-12 --by GH-3` records that one
+  issue is blocked by another; `unblock` removes it, and `blockers` / `blocking` list the links.
+  Issues on the same tracker use the backend's own relationship (GitHub issue dependencies,
+  Forgejo dependencies, GitLab Premium blocking links, Jira "is blocked by" links). Where the
+  backend can't, and always across trackers, the link is a pair of signed comments. By default the
+  blocked issue's status moves to `blocked` and back to what it was; `--no-status` skips that.
+  `issues get --json` gains `blocked_by`, and `working-an-issue` warns before starting an issue
+  with an open blocker. Capability token: `issues-deps`. GitLab's native (Premium) path is
+  untested live: the test rig is on the Free tier and exercises the comment fallback. GitLab
+  allows one link per issue pair, so a pair that already shares a `relates_to` (or any other)
+  link falls back to the comment record, and `issues block` says which link is in the way
+  instead of aborting on GitLab's 409 (FJ-275).
+
+- **`/flight:version` shows which flight the session loaded** (FJ-257). The plugin's first
+  command (alongside the skills) prints the version from the loaded install's own manifest, the
+  install it came from (`flight@flightdirector-dev`, or `unknown` when the path doesn't say), the
+  plugin root, and the `flight` dispatcher on `PATH` — with a note when that dispatcher is a
+  different version or missing. `flight --version` alone can't answer this: it reports the CLI on
+  `PATH`, which in a dev checkout or after an un-refreshed bump is not the copy the skills and
+  hooks run from. Codex plugins have no commands, so on Codex run
+  `scripts/plugin-version.sh` from the plugin root (`--json` for a machine-readable report), or
+  `flight --version` for the CLI.
+
+### Changed
+- **`flight prompt-log summary` prices each row again from its stored tokens** (FJ-270), so a
+  pricing fix, bundled or in `.flightdirector/pricing.json`, also corrects turns logged before
+  it. A turn that spans models now records each model's usage (`usage_by_model`) so it can be
+  priced the same way. Rows that still cannot be priced keep their logged cost; `--as-logged`
+  sums the logged costs as before.
+
+- **Qualified ids flight writes into forge text are backticked, so GitHub no longer autolinks
+  them** (FJ-247). GitHub turns `GH-12`-shaped text into a link to the rendering repository's own
+  issue 12, so a GitHub tracker's ids pointed readers at an unrelated issue. A code PR's issue
+  line for another tracker's issue now reads ``Tracks `GH-12` ``, `issues copy`'s footer and
+  back-link read ``Copied from `FJ-12` `` / ``Copied to `GH-100` ``, and `promoting-branches`
+  backticks the ids in its batch PR title. `Closes #N` / `Ready #N` are unchanged — they must stay
+  live keywords. `add-an-issue-tracker` no longer proposes the ref `GH` for a GitHub tracker when
+  the code repository is also on GitHub, and says why. Commit subjects (`feat(GH-12): …`) and
+  merge messages are unchanged, so on GitHub those can still autolink; pick a ref other than `GH`
+  to avoid it.
+
+- **`setting-up-a-repo` no longer creates a `CLAUDE.md` stub** (FJ-246). Claude Code reads
+  `AGENTS.md` when a repo has no `CLAUDE.md`, so the backend breadcrumb now defaults to
+  `AGENTS.md` alone: a repo with only `AGENTS.md` (or neither file) gets the block in `AGENTS.md`
+  and no `CLAUDE.md`; a repo with only `CLAUDE.md` gets the block in `CLAUDE.md` as-is, with no
+  recommendation to split it out. When both files exist the block still goes in `AGENTS.md`, and
+  setup still offers to add `@AGENTS.md` to a `CLAUDE.md` that lacks it — Claude Code skips
+  `AGENTS.md` whenever `CLAUDE.md` exists.
+
+- **PR CI takes a cheap path when a change only touches inert docs** (FJ-235). This
+  repository's own `tests` workflow classifies each PR with `scripts/ci/docs-only.sh`: when
+  every changed path is on an allowlist of files no test reads (`docs/**`, `CONTRIBUTING.md`,
+  `CODE_OF_CONDUCT.md`, `SECURITY.md`), each leg skips its install and test *steps* but still
+  runs and reports `success`, so `flight ci watch` sees a real verdict rather than
+  `status=skipped`. Pushes, unknown paths, and any classifier error run the full suite; the
+  step log and job summary say which path ran and which file forced a full one. Contributor-
+  facing only — nothing changes for repos using the plugin.
+
+- **`working-an-issue` runs the repo's `code.preflight` gate before moving an issue to `to-test`**
+  (FJ-221). The interactive path was the one place a branch changed state without consulting the
+  gate, looser than the batch path. A red gate now leaves the issue `in-progress` and shows the
+  failing output; with no gate configured nothing changes.
+
+- **flight writes real headings to Jira** (FJ-178). On Jira, a body or comment line starting
+  with `#`…`######` and a space now becomes an ADF heading at that level, so the `##` sections
+  flight writes render as headings in the Jira UI rather than as literal `## ` text — and read back
+  intact. `#` lines inside fenced code blocks, and `#word` with no space, are left alone.
+
+### Fixed
+- **`issues list --all-trackers --status ROLE` no longer fails on a tracker without that role**
+  (FJ-277). A tracker that never defined the role, or declined it (`false`), used to show up as
+  `tracker X unavailable`. Under `--json` it landed in `errors[]`, and in text mode the command
+  exited non-zero. Such a tracker now contributes zero rows, with one stderr note naming the
+  tracker and the role. Asking one tracker directly (`--tracker REF`, or the default) for a role
+  it lacks is still a usage error.
+- **The secrets migration no longer drops a legacy issue token** (FJ-278). Suppose
+  `secrets.json` held a legacy `issues.token` that differed from the code token, and the target
+  tracker already had an `issueTrackers.<REF>` entry. The schema-3 secrets migration then kept
+  the entry and silently threw away the legacy token. It now refuses, naming both fields, and
+  asks you to remove one and rerun. Nothing is changed. A legacy token equal to the code token
+  is still dropped quietly, and with no existing entry the legacy token still moves. (`flight
+  reconcile` already refused such a file up front as mixed tracker secrets. The migration helper
+  now refuses it as well.)
+
+- **A message sent mid-turn no longer drops the turn's earlier usage from the prompt log**
+  (FJ-269). Claude Code fires `UserPromptSubmit` for a message sent while a turn is running, and
+  the prompt hook used to start a new turn there. The one `Stop` then counted only the requests
+  after that message. Now the open turn keeps its id and start, the prompts accumulate
+  (`queued_prompts` counts the extras), and the row covers the whole turn. An interrupted turn,
+  which gets no `Stop`, is now counted in the next turn's row instead of being lost.
+
+- **A prompt sent just as a turn ends is no longer dropped from the prompt log** (FJ-276). If
+  the next message arrived in the moment between the `Stop` hook writing its row and clearing
+  the turn's state, that cleanup deleted the new turn's state too, and the whole next turn went
+  unlogged ("no active turn recorded"). The `Stop` hook now clears the state only while it still
+  belongs to the turn it just logged.
+
+- **Prompt-log pricing matches the published Claude rates** (FJ-270). Claude Opus 5.5 was priced
+  at Claude Opus 5 rates ($5/$25, cache reads $0.50); it is now $4/$20 with $0.20 cache reads.
+  Claude Sonnet 5 and 5.5 were priced at $3/$15; they are now $2/$10 with $0.20 cache reads.
+  Claude Fable 5.1 and Mythos 5.1 cache reads are now $0.25 (they were $1, the Fable 5 rate).
+- **Cache writes are priced by TTL** (FJ-270). Claude Code rows record the 1-hour share of their
+  cache writes (`cache_creation_1h_tokens`), which is priced at the new
+  `cache_creation_1h_per_million` rate (2× input) instead of the 5-minute rate (1.25×). A model id
+  with a context tag such as `claude-opus-5-5[1m]` is priced as its base model.
+
+- **`scripts/bump-version.sh` rolls a CRLF changelog** (FJ-225). On a Windows checkout, where
+  markdown keeps native line endings, it never found `## [Unreleased]`. It still reported
+  success, after bumping the manifests and leaving the changelog unrolled. It now matches the
+  heading regardless of `\r` and writes the new lines with the file's own ending. If the heading
+  is missing, it stops before changing anything.
+
+- **`flight branches prune` drops a deleted branch's retained identity binding** (FJ-248). The
+  schema-3 migration binds every legacy `feature/<N>-…` branch to its tracker in
+  `.flightdirector/batches/work-items/identities.json`, and nothing ever removed those entries, so
+  the file only grew. Once `prune` leaves a branch gone both locally and on origin, its binding
+  goes too, reported as a `drop-binding` row (`would-drop-binding` in a preview). A binding is
+  never dropped while the branch still exists on either side — it is the only record of which
+  tracker an unqualified legacy branch belongs to — and other branches' bindings are untouched.
+  Bindings for branches that were already deleted before this release are not swept.
+
+- **`flight ci watch` no longer reports a cancelled run as a failure** (FJ-281). A run stopped
+  before it finished (most often because a newer push superseded it) used to count as `failed`,
+  so the watch ended on `status=failure` while `ci log` found no failed job to show. Cancelled
+  runs are now counted on their own `cancelled=<c>` field. With no failure, the verdict is the
+  new `status=cancelled`: not a pass, because the run verified nothing, and not a red to debug.
+  GitLab's `canceling` now counts as still pending. With `--pr`, if the PR's head moved during
+  the watch, a line on stderr names the new head so you know to watch again. `branches sync-down`
+  stops on a cancelled verdict and says so, and `promoting-a-branch` and `promoting-branches`
+  say what to do with it.
+
+- **A red preflight gate now really stops a `pr`-hop group in `promoting-branches`** (FJ-231).
+  The red-gate handler ended in a `continue` with no shell loop around it, so a literal run fell
+  through to the push. The gate now writes its verdict to a file stamped with the integration
+  branch's commit, and the push, the PR body and `pr open` run only inside a guard that reads it;
+  otherwise the group is reported skipped, with the reason, and the other groups carry on.
+
+- **Jira headings survive a read** (FJ-178). `flight issues get` and `issues comments` on Jira
+  now render an ADF heading as `#`-prefixed markdown at its own level (`## Acceptance`), instead
+  of flattening it into a plain paragraph — so the `## Acceptance` / `## Test plans` anchors the
+  skills look for are still there when an issue was written or edited in the Jira web UI.
+
+## [0.17.1] - 2026-10-03
+
+### Added
+
+- **Copy issues between trackers** (FJ-200). `flight issues copy --from FJ-12 --to GH` copies an
+  issue to another configured tracker. The body, comments (with their original author and date),
+  name-matched labels and the status (mapped by role) are copied by default and each can be
+  turned off; an optional "Copied from" footer and "Copied to" back-link are off by default.
+  `flight issues resync` later brings over comments added to the source. A local ledger
+  (`.flightdirector/copies.jsonl`) refuses accidental second copies and lets a copy that failed
+  partway finish. The new `copying-an-issue` skill adds a duplicate scan and a dry-run preview.
+  Capability token: `issues-copy`.
+- **Cursor paging for `issues list --json`** (#262). `--per-page M` returns one page and a
+  `next` cursor, and `--cursor C` fetches the page after it, so a "Load more" button no longer
+  re-downloads the whole list with a growing `--limit`. Pages run newest created first, ties by
+  number, on every backend and never overlap. An issue filed between loads doesn't repeat a
+  row, and on Forgejo, GitHub and GitLab one that leaves the list doesn't make a row get
+  skipped. The cursor is opaque and tied to its query; reusing it with other filters or another
+  tracker is a `usage` error, as is combining paging with `--limit` or `--all-trackers`.
+  Feature-detect it with the new `issues-paging` capability.
+
+### Changed
+
+- **One issue tracker means plain issue numbers again** (#258). While a repo has a single
+  tracker that is Jira or the code repository's own, the tracker prefix carried no information,
+  so flight leaves it out: issues are `#12` (`PROJ-7` on Jira) in commit scopes, pickup lines,
+  reports and `issues list --all-trackers` rows, and branches are `feature/12-<slug>`, which
+  the forge autolinks. `issues resolve` gains a `display` field that holds that name (the
+  qualified id when there are several trackers) and returns the matching `branchPrefix`.
+  `qualified` stays `FJ-12` everywhere, including the `--json` output, and qualified ids are
+  still accepted as input. A single tracker in another forge repository keeps its prefix, since
+  a bare `#12` would link the code repository's issue. Adding a second tracker switches new work
+  to qualified names; branches started before keep resolving through their bindings.
+
+## [0.17.0] - 2026-10-02
+
+### Added
+
+- **`flight --version` and `flight capabilities`** (#254). `flight --version` prints the
+  plugin version; before, it printed the usage line. `--version --json` prints
+  `{"plugin","version"}`. `flight capabilities --json` adds a list of feature tokens, so a
+  program driving the dispatcher can check for a feature instead of comparing versions.
+  Neither needs a repo, config, token or network. Contract:
+  `flight/references/json-output.md`.
+- **`issues create`, `comment` and `set-status` take `--json`** (#252). `create` returns the new
+  issue in the `issues get --json` shape. A failed read-back still reports success with the known
+  fields, so a caller doesn't file it twice. `comment` returns the new comment, with its signature
+  split out. `set-status` echoes `{number, tracker, qualified, status, label}`.
+- **`labels list --json` and `labels statuses`** (#250).
+  - `labels list --json` returns `[{name, color, description}]` on every backend, with colours as
+    `#rrggbb`.
+  - The new `labels statuses` lists the tracker's status roles in config order, each with its
+    label name and colour (`role⇥label⇥color`, or `--json`), so a UI can build its status filter
+    without assuming a repo's label names.
+- **`issues list`, `get` and `comments` take `--json`** (#253). They return one object shape on
+  Forgejo, GitHub, GitLab and Jira, for programs that drive the dispatcher instead of calling a
+  forge. The fields are `number` (always a string), `tracker`, `qualified`, `title`, `state`,
+  `status`, `labels`, `author`, `created`, `updated` (UTC), `comments`, `url`, `body` and
+  `signature`.
+  - `status` is the issue's status *role* through the tracker's label map.
+  - The flight signature footer is split out of `body` into `signature`.
+  - `list` adds `truncated`/`total` and is ordered newest created first.
+  - `--all-trackers --json` reports each failing tracker in `errors` instead of failing the
+    whole listing.
+  - New dispatcher filter: `issues list --status ROLE`, mapped per tracker.
+  - The text output is unchanged.
+- **Structured errors under `--json`** (#251). A failing `--json` call exits non-zero and
+  prints one `{"error":{"code","message"}}` object on stdout, and nothing else. The codes are
+  `not-configured`, `auth`, `not-found`, `network`, `backend` and `usage`. Each code is decided
+  where the cause is known: the dispatcher for config, usage and ref resolution, and the adapters'
+  shared `_errors.sh` for HTTP status and curl failure. Without `--json` nothing changes, except
+  that an adapter missing a coordinate or token now says so in its usual
+  `<adapter>: <message>` form.
+
+- **The queue-batches worker model can be an ordered list** (#236).
+  `code.queueBatches.defaultModel` now takes an array such as `["sonnet", "luna"]`, and
+  `queue-batches` uses the first model the running harness can dispatch. A repo worked from both
+  Claude Code and Codex no longer has one side asking for a model it can't use. If a dispatch
+  fails because a model isn't available (plan, access, retirement), the next entry is tried.
+  If nothing in the list is usable, you're asked. The approval plan names the chosen model and
+  any skipped entries. A plain string still works as before. New dispatcher verb:
+  `flight config worker-model --harness claude|codex`. `setting-up-a-repo` now asks for the list. With no setting, the default is
+  `["sonnet", "luna"]`, so Codex gets a default worker model too (it used to be `sonnet` only).
+
+- **A repo can have several named issue trackers** (#197; ships together with #198's
+  tracker-aware work lifecycle and #199's tracker setup). Config schema 3 replaces the single
+  `issues` object and top-level `labels` map with an `issueTrackers` array: each tracker has a
+  stable `ref` (`GH`, `FJ`, or a Jira project key), optional aliases, its own coordinates, its
+  own credential and its own label map, and exactly one is the default. `code` still owns code,
+  PRs, CI and the stage pipeline. Several trackers may share a backend. The dispatcher routes
+  every issue and label verb to one tracker: a bare number means the default; `GH-12`, `GH12`,
+  `GH#12` or a Jira key such as `PROJ-7` name their tracker; `--tracker REF` selects explicitly.
+  Ambiguous or unknown refs fail with suggestions — flight never guesses where to write. New
+  dispatcher verbs: `issues resolve` (the canonical `{tracker, number, qualified, branchPrefix}`
+  identity), `issues tracker` (the selected entry), `issues list --all-trackers` (every tracker,
+  each row prefixed with its qualified id; a tracker that cannot be reached is reported and fails
+  the listing instead of looking empty), and `auth check --tracker REF`.
+
+  **Migration is automatic.** The next `flight reconcile` (every skill runs it first) converts
+  the repo: the old issue settings, inherited code coordinates and the complete label map
+  (including a `new` starting status as a string, `false`, or absent) become one default
+  tracker; a legacy `config.local.json` override and the gitignored `secrets.json` are converted
+  on each machine — onto the tracker the repo migrated from (`legacyIssueTracker`), even if the
+  default has changed since — without local values reaching the committed file and without
+  printing a token; pre-schema-3 `feature/<N>-…` branches and batch manifests are recorded in
+  `.flightdirector/batches/work-items/identities.json` (already gitignored by setup) as belonging
+  to the tracker that was the default at migration, so changing the default later never
+  re-points old work. The migration runs every check before its first write (a refusal leaves
+  every file untouched), writes the committed config last, and is safe to re-run; a repeat run
+  changes nothing.
+
+  **Compatibility:**
+  - **Update every clone and harness together.** Commit the migrated `config.json` only once
+    everyone uses a Flight with schema-3 support. Older Flight versions do not know schema 3;
+    migration leaves an `issues.backend: "requires-newer-flight"` stub so they stop with a
+    "no 'issues' adapter" error instead of acting on the code repository, but they cannot use
+    the trackers. This Flight in turn refuses any config newer than schema 3.
+  - **Issues on the code host keep sharing the code token** — the code repository or a sibling
+    repository on the same backend and api host — including `LS_TOKEN` / `FLIGHT_TOKEN` /
+    `FORGEJO_TOKEN` environment overrides, so CI and env-token setups work unchanged (the
+    tracker gets `credentialRef: "code"`). A tracker that had its own issue token, or one on
+    another host, gets its own credential under `secrets.issueTrackers.<REF>`, which environment
+    tokens never override; the issue token is moved there, and the code token is never copied.
+    On another host with no issue token, reconcile says the tracker needs one.
+  - **A `config.local.json` that only overrides `code` coordinates no longer steers the issue
+    tracker.** Before, the issues axis followed a local code `api`/`owner` override; now the
+    tracker keeps its committed coordinates and reconcile says so once. To point a tracker at a
+    local route, put a complete `issueTrackers` array in `config.local.json` (arrays replace
+    wholesale — a local array missing a tracker hides it, and every tracker-routed command warns).
+  - A clone whose legacy local override or issue credential cannot be attached safely — the
+    config has no `legacyIssueTracker`, it names no configured tracker, or the credential was
+    used with another host — is refused with a repairable error, nothing changed.
+  - `issues list` without `--all-trackers`, and every existing unqualified command, keep their
+    exact output and act on the default tracker. `auth check --axis issues` checks the default
+    tracker.
+  - Anything that read `.labels` or `.issues` through `flight config` must read the tracker
+    instead, e.g. `flight issues tracker | jq -r '.labels.status["to-test"]'`; the bundled
+    skills are updated by #198/#199.
+
+- **Issue work stays attached to the tracker it started on** (#198; ships with #197 and #199).
+  Every workflow skill resolves the issue you name **once** — `12` means the default tracker,
+  `GH-12` / `PROJ-7` name theirs — and then passes that tracker and native id on every later
+  write: comments, the work ledger, model labels, status changes, assignment and close. Changing
+  the default tracker mid-work therefore redirects nothing, and two trackers' issue 12 never
+  collide:
+  - **New branches and worktrees always carry the tracker**, the default's included:
+    `feature/fj-12-<slug>` in `.worktrees/fj-12-<slug>`, and `feature/proj-7-<slug>` for Jira.
+    Commits are written `feat(FJ-12): …`. Existing `feature/12-…` branches keep working: they
+    belong to the tracker the repo migrated from (the bindings #197's migration records), and a
+    legacy branch whose tracker cannot be recovered makes the skill **ask** instead of assuming
+    the current default.
+  - **Promotion only writes `Closes #N` / `Ready #N` for an issue in the code repository
+    itself** (same backend, host and owner/repo) — a PR can no longer close the code repo's
+    unrelated issue 12 because a different tracker's issue 12 was worked. Other trackers' issues
+    get a non-linking `Tracks GH-12` line and are updated on their own tracker by the promotion.
+    Issue bodies, comments, ledgers and tracker URLs are not copied into PRs.
+  - Triage, filing's duplicate scan and queue planning list **every** tracker (`FJ-12`, `JIR-7`)
+    and filter each by its own status labels; a tracker that cannot be reached is reported as
+    unavailable, not shown as an empty backlog.
+  - `flight branches list` reports the qualified issue (`FJ-12`, `unbound`, or `error` with the
+    reason on stderr when the lookup fails) in its issue column, and batch manifests record full identities (`batch-manifest groups` prints
+    `zone⇥FJ-7,GH-12`); manifests written before the upgrade keep working through the same
+    bindings. Both behave exactly as before on a config that has not migrated yet.
+  - New helper `scripts/issue-identity.sh` (the one place branch names, manifest entries and
+    history references become an identity), used by the scripts and skills alike. A bare `#12`
+    found in history maps to the tracker the repo migrated from only while that is also the
+    code repo's own tracker (or there is none); otherwise it is ambiguous and the promotion asks
+    which tracker it means.
+
+- **New `add-an-issue-tracker` skill, and setup writes named trackers** (#199; ships with #197
+  and #198). Say "add an issue tracker", "connect Jira" or "track issues on GitHub too" to add a
+  second (or tenth) tracker beside the first: it collects the coordinates, proposes a stable
+  ref — the Jira project key for a Jira project, otherwise `FJ` / `GH` / `GL` — and asks for
+  another when that ref or an alias is already taken, instead of suffixing one silently. A
+  tracker on the code repository shares the code token (`credentialRef: "code"`, so env tokens
+  and CI keep working); any other gets its own token under `secrets.issueTrackers.<REF>`,
+  checked with `flight auth check --tracker <REF>`. It then reconciles **that tracker's** labels
+  on their own — adopting the names it already uses, creating only what is missing after one
+  preview, never renaming or deleting a label — and records the full role map in the tracker's
+  entry. Adding a tracker never moves the default; changing it is an explicit request.
+  `setting-up-a-repo` keeps the code coordinates, stage pipeline and repo preferences (worker
+  model, prompt ledger, preflight gate) and hands the first tracker to the new skill, which
+  makes it the default. A fresh setup now writes a schema-3 config (with the
+  `requires-newer-flight` stub, so an older Flight stops loudly rather than acting on the wrong
+  repository); an existing repo is converted by `flight reconcile`, never by hand.
+  - **The starting-status question moved into tracker setup and is asked per tracker** — one
+    tracker can use `status/new` while another declines. An existing answer carries over
+    unchanged through migration: a label name stays configured, `false` stays declined, and a
+    tracker that was never asked is asked on the next setup re-run.
+  - **Re-running setup preserves everything already answered** — trackers, refs, credentials,
+    label names and the default — and asks each tracker only the questions it has no answer for
+    yet (a migrated tracker is typically offered aliases).
+  - The breadcrumb setup writes into `AGENTS.md` now names the trackers and the
+    tracker-qualified branch form (`feature/fj-12-…`); re-run setup to refresh an existing one.
+
+### Changed
+
+- **Docs: why GitHub uses a repo-scoped token, not your `gh` login** (#243). `backends.md` now
+  explains that `gh` picks credentials per host rather than per repo, that its login token is
+  user-wide, and why that matters when an agent reading untrusted issue text holds it.
+
+### Fixed
+
+- **A failed label or list fetch no longer reads as an empty result** (#250). `labels list`
+  (and every lookup of a label by name) loaded the label cache in a way that turned off `set -e`.
+  The pagers' page requests also ran inside command substitutions, which don't inherit it. A
+  network error or a 401 therefore came back as "no labels", exit 0, or as a misleading "label not
+  found". Both now fail with the real reason.
+
 ## [0.16.0] - 2026-09-21
 
 ### Added
@@ -38,14 +392,15 @@ _Nothing yet._
   records a declined offer as `"preflight": false`, which behaves exactly like leaving it out, so
   an existing repo picks the question up on its next setup re-run.
 
-- **A repo can nominate a starting status for newly filed issues** (#193). `setting-up-a-repo`
-  now offers it: a freshly filed issue gets a `status/*` label so a board can tell "nobody has
+- **A repo can nominate a starting status for newly filed issues** (#193). Setup offers it — per
+  tracker, from `add-an-issue-tracker` (#199), which `setting-up-a-repo` runs for the first one: a
+  freshly filed issue gets a `status/*` label so a board can tell "nobody has
   looked at this yet" apart from "someone forgot the label", and "what is untriaged?" becomes a
   label query. The suggested name is `status/new`, but like every other status role it is
   **mappable** — point the role at whatever you already call that state (`status/triage`,
   `status/open`, `status/backlog`), and an equivalent label you already have is adopted rather
-  than duplicated. **Opt-in and off unless asked for**: with no `labels.status.new` in the config
-  nothing changes, which is every repo configured before this. When it is on, `flight issues
+  than duplicated. **Opt-in and off unless asked for**: with no `labels.status.new` on a tracker
+  nothing changes for it, which is every repo configured before this. When it is on, `flight issues
   create` applies the label; passing a `status/*` label of your own leaves it alone, and
   `--no-status` skips it for one issue. It is an ordinary status, so the first `set-status` —
   normally when `working-an-issue` starts — removes it, and `triaging-issues` deliberately does

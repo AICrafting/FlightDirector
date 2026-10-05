@@ -2,7 +2,8 @@
 
 The boundary between skills and backends, per [ADR 0001](../../docs/adr/0001-curl-over-mcp-and-adapter-architecture.md).
 Skills never embed a backend's endpoints — they invoke **verbs** through a single dispatcher,
-which resolves the right backend for the axis and execs that backend's adapter.
+which resolves the right target — `code`, or one named issue tracker — and execs that
+backend's adapter.
 
 ## Layout
 
@@ -15,7 +16,7 @@ flight/scripts/
   adapters/
     forgejo/
       _common.sh             # shared: _api(), label_id(), auth, error handling (sourced)
-      issues                 # subcommands: list get create comment set-status close reopen
+      issues                 # subcommands: list get create comment set-status close reopen dep-add dep-remove dep-list dep-blocking
       pr                     # subcommands: open merge list   (pull request; "MR" on GitLab)
       ci                     # subcommands: watch log
       labels                 # subcommands: resolve
@@ -36,15 +37,21 @@ flight <group> <verb> [--flag value …]
 
 The dispatcher:
 
-1. Reads `.flightdirector/config.json` (config) and `.flightdirector/secrets.json` (token), from repo root.
-2. Picks the **axis** for the group — `issues`/`labels` → `issues.*`, `pr`/`ci`/`auth`/`branches` → `code.*`
-   (`auth check --axis issues` overrides that one) — applying `code → issues` inheritance when the
-   `issues` block is omitted.
+1. Reads `.flightdirector/config.json` (config) and `.flightdirector/secrets.json` (token), from repo
+   root, and refuses a `schemaVersion` newer than it understands (currently 3).
+2. Picks the **axis** for the group — `issues`/`labels` → the issue side, `pr`/`ci`/`auth`/`branches` →
+   `code.*` (`auth check --axis issues` or `--tracker` overrides that one). On a schema-2 config the
+   issue side is `issues.*` with `code → issues` inheritance. On schema 3 it is **one named
+   tracker** from `issueTrackers` — see **Named tracker routing** below — and the config is
+   validated first, so an invalid tracker list never reaches an adapter.
 3. Exports the resolved coordinates + token into the adapter's environment: `LS_API`,
-   `LS_OWNER`, `LS_REPO`, `LS_TOKEN`, `LS_TOKEN_SOURCE`, `LS_TRUNK` (code's trunk branch),
-   `LS_LABELS_JSON` (the `labels` map, for role→name resolution), and `LS_BACKEND`. Token
-   precedence: `LS_TOKEN` / `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a
-   legacy name), else the secrets file (axis, `code → issues`). `LS_TOKEN_SOURCE` names which
+   `LS_OWNER`, `LS_REPO`, `LS_PROJECT`, `LS_EMAIL`, `LS_TOKEN`, `LS_TOKEN_SOURCE`, `LS_TRUNK` (code's
+   trunk branch), `LS_LABELS_JSON` (the selected tracker's `labels` map — schema 2: the top-level
+   one — for role→name resolution), and `LS_BACKEND`. Token precedence: `LS_TOKEN` /
+   `FLIGHT_TOKEN` env override (`FORGEJO_TOKEN` is still honoured as a legacy name), else the
+   secrets file (axis, `code → issues`; for a schema-3 tracker with `credentialRef: "code"`,
+   `secrets.code`). A schema-3 tracker with **its own credential** skips the env override
+   entirely and reads only `secrets.issueTrackers.<REF>`. `LS_TOKEN_SOURCE` names which
    of those won — the env var as `$FLIGHT_TOKEN` (leading `$`), or the secrets file's path in a
    form that resolves from wherever the caller ran: absolute for the repo's own (gitignored,
    main-checkout-only) file, or exactly the argument when `auth check --secrets` supplied a
@@ -60,7 +67,35 @@ The dispatcher:
 5. Execs `adapters/<backend>/<group> <verb> [args…]`.
 
 So adapters are pure: they read coordinates/token from `LS_*` env, never parse config, never
-know which axis they serve. Swapping `forgejo` for `github` changes nothing above the adapter.
+know which axis — or which named tracker — they serve. Swapping `forgejo` for `github` changes
+nothing above the adapter.
+
+## Named tracker routing (schema 3, dispatcher-owned)
+
+Config and credential rules are in [flight-setup.md](flight-setup.md#named-issue-trackers-config-schema-3).
+On a schema-3 config the dispatcher, not the adapter, chooses the tracker for every `issues` and
+`labels` verb and for `auth check --tracker REF` / `--axis issues`:
+
+- **`--tracker REF`** (any `issues`/`labels` verb, `auth check`) — select by `ref` or alias,
+  case-insensitively. Stripped before the adapter runs. Given twice → error. Unknown → error
+  naming near matches and every configured tracker; no network call is made. `pr`/`ci` do not
+  take it: they always use `code`. `auth check --tracker REF --axis code` is a conflict.
+- **`--number INPUT`** on any `issues` verb is resolved first: a bare `12`/`#12` means the default
+  tracker (or the `--tracker` one); `GH12`, `GH-12`, `GH#12` or a Jira key `PROJ-7` names its
+  tracker. The adapter receives the **native** id (`12`, or `PROJ-7` for Jira). A qualified id
+  naming a different tracker than `--tracker` is an error.
+- Without `--tracker` or a qualified id, the default tracker is used — so every existing
+  unqualified call keeps working, with unchanged output.
+- On a schema-2 config, `--tracker`, `--all-trackers`, `issues resolve` and `issues tracker`
+  fail with "run flight reconcile" rather than falling back to the single-tracker path.
+
+Dispatcher-owned verbs:
+
+| Verb | Args | stdout |
+|------|------|--------|
+| `issues resolve` | `--number INPUT` `[--tracker REF]` | one line of JSON: `{"tracker":"FJ","number":"12","qualified":"FJ-12","display":"FJ-12","branchPrefix":"fj-12"}`. `tracker` is the canonical ref; `number` the native id as a string (`"PROJ-7"` for Jira, leading zeros stripped otherwise); `qualified` is `REF-<digits>`, always — the routing key. `display` is the name people and commits use and `branchPrefix` the branch/worktree prefix: with several trackers, `qualified` and `qualified` lowercased; when the repo has **one** tracker that is Jira or the code repository's own issue tracker (#258), the issue's own name — `display` `#12` (Jira: `PROJ-7`), `branchPrefix` `12` (`proj-7`). A single tracker in another forge repository stays qualified, because a bare `#12` would autolink to the code repository's issue. No coordinates, URLs or secrets. No network call. Ambiguous input (`A12` with refs `A` and `A1`) fails listing the candidates unless `--tracker` picks one |
+| `issues tracker` | `[--tracker REF]` | the selected tracker's config entry as one line of JSON (config only — never secrets), e.g. to read its label map: `flight issues tracker --tracker GH \| jq -r '.labels.status["to-test"]'` |
+| `issues list` | `--all-trackers` plus the ordinary `list` flags | every tracker in config order, each dispatched with its own coordinates, credential and label map. Each row is that tracker's ordinary `list` row with the issue's `display` id prepended: `FJ-12⇥12⇥title⇥labels` (Jira: `JIR-1⇥PROJ-1⇥…`), or `#12⇥12⇥…` in a single-tracker repo (see `issues resolve`). Every issue verb accepts that first column as `--number`. A tracker that fails is reported on stderr as `flight: tracker REF unavailable: <reason>` and makes the exit status non-zero; the other trackers' rows are still printed — a failure is never an empty backlog. A tracker that succeeds keeps its stderr too (the "showing N of M rows" truncation warning, the `FORGEJO_TOKEN` note), each line prefixed `flight: tracker REF: `. Cannot be combined with `--tracker`; only `issues list` accepts it |
 
 ## Output & exit conventions (every verb)
 
@@ -73,6 +108,14 @@ know which axis they serve. Swapping `forgejo` for `github` changes nothing abov
 - **Exit code**: `0` success; non-zero on any failure (network, HTTP ≥ 400, bad args), with a
   one-line reason on stderr. Skills must check it — a non-zero exit is a hard stop, never a
   silent no-op.
+- **`LS_JSON=1`** (set by the dispatcher for a `--json` call) asks an adapter's `issues list`,
+  `get` and `comments` for *base objects* instead of TSV: the backend's fields mapped onto the
+  shared shape (`adapters/_json.sh`; list rows plus pager `truncated`/`total`). The dispatcher
+  finishes them (`scripts/issue-json.jq`). Failures go through `adapters/_errors.sh`, so the
+  dispatcher can report a coded error.
+- **Programs, not agents,** use the opt-in `--json` forms and the `flight --version` /
+  `flight capabilities` probes. Their contract is in [json-output.md](json-output.md); the
+  default output above never changes because of them.
 
 ## URL encoding
 
@@ -129,7 +172,7 @@ GitLab comment endpoints do cap, and are paged.
 
 | Verb        | Args                                   | stdout |
 |-------------|----------------------------------------|--------|
-| `list`      | `--state open\|closed\|all` `--limit N` `--label NAME` (repeatable) | one row per issue: `number⇥title⇥comma,labels`. `--limit` is a true ceiling: the adapter pages underneath it (see **Paging**), so `--limit 200` returns up to 200 rows rather than one server-clamped page |
+| `list`      | `--state open\|closed\|all` `--limit N` `--label NAME` (repeatable); JSON only: `--per-page M [--cursor C]` | one row per issue: `number⇥title⇥comma,labels`. `--limit` is a true ceiling: the adapter pages underneath it (see **Paging**), so `--limit 200` returns up to 200 rows rather than one server-clamped page. Under `LS_JSON`, `--per-page`/`--cursor` return one cursor page instead, through `cursor_page` (page-numbered backends) or `cursor_page_token` (Jira) in `_json.sh` (#262; contract in [json-output.md](json-output.md)) |
 | `get`       | `--number N`                           | `number⇥title⇥state` then a blank line then the raw body (the one verb that emits a body). `state` is **normalized to exactly `open` or `closed`** on every backend, so a caller can ask "is #N open?" in one call; it is field 3 because appending leaves `cut -f1`/`cut -f2` readers untouched |
 | `comments`  | `--number N`                           | one block per comment, oldest-first: `author⇥created_at` header line, the raw comment body, then a blank separator line. Empty output (exit 0) = no comments. Unbounded: the thread is always returned whole, because oldest-first rendering means a truncated fetch drops the **newest** comments, and "the later comment wins" depends on those |
 | `create`    | `--title T` `--body B` (or `--body-file PATH`) `--label NAME` (repeatable) | the new issue `number`; labels resolved name→id, applied at creation |
@@ -144,6 +187,10 @@ GitLab comment endpoints do cap, and are paged.
 | `unassign`  | `--number N`                           | (nothing) — removes all assignees |
 | `close`     | `--number N`                           | (nothing) |
 | `reopen`    | `--number N`                           | (nothing) — inverse of `close`; sets the issue's state back to open |
+| `dep-add`   | `--number N` `--by M`                  | (nothing) — records "N is blocked by M", both on this tracker; idempotent. Fails `unsupported` where the backend can't (Forgejo with dependencies switched off, GitLab Free tier, a GitLab pair already joined by a link of another type such as `relates_to` — GitLab allows one link per pair, and an unexpected 409 from its links endpoint maps here too — a Jira site with no "is blocked by" link type) |
+| `dep-remove`| `--number N` `--by M`                  | (nothing) — removes that link; idempotent |
+| `dep-list`  | `--number N`                           | one row per issue blocking N: `number⇥title⇥state`; under `LS_JSON` an array of `{number, title, state}`. Links to another repo/project are left out |
+| `dep-blocking` | `--number N`                        | the issues N blocks, same shape |
 
 ### `labels`
 
@@ -172,7 +219,7 @@ GitLab comment endpoints do cap, and are paged.
 
 | Verb    | Args                                          | stdout |
 |---------|-----------------------------------------------|--------|
-| `check` | `[--secrets PATH]` `[--axis code\|issues]`     | one `✓`/`✗`/`-` line per check: `<mark> <label>  <detail>`. Exit non-zero if any check failed |
+| `check` | `[--secrets PATH]` `[--axis code\|issues]` `[--tracker REF]` | one `✓`/`✗`/`-` line per check: `<mark> <label>  <detail>`. Exit non-zero if any check failed |
 
 `auth check` verifies a token **before** anything relies on it: the identity the backend reports,
 whether the repo/project named in `config.json` is reachable, one probe per capability group the
@@ -187,8 +234,9 @@ skills exercise, and the token's expiry where the backend exposes it. Rules:
 - Failures carry the **backend's own wording**, which is what actually names the fix — GitLab's
   `insufficient_granular_scope … [Work Item: Read]`, GitHub's per-resource 403.
 - The **token is never printed** beyond its first 8 characters.
-- Both flags are dispatcher-owned. `--axis` selects which axis's coordinates and token to check
-  (default `code`). `--secrets PATH` points the token lookup at a **candidate** file so a new
+- All three flags are dispatcher-owned. `--axis` selects which axis's coordinates and token to
+  check (default `code`; on schema 3 `issues` means the default tracker). `--tracker REF`
+  (schema 3) checks that tracker with its own credential selection. `--secrets PATH` points the token lookup at a **candidate** file so a new
   token is verified before it replaces the live one; precedence is `--secrets` > `LS_SECRETS_FILE`
   > the normal resolution (`LS_TOKEN`/`FLIGHT_TOKEN` env, then the repo's secrets file) — an
   explicit candidate file deliberately beats an ambient env token.
@@ -199,7 +247,7 @@ skills exercise, and the token's expiry where the backend exposes it. Rules:
 
 | Verb    | Args                                              | stdout |
 |---------|---------------------------------------------------|--------|
-| `watch` | `--pr N` \| `--sha SHA` `[--status-file PATH] [--timeout SECS]` | one line per state change: `ci runs=<n> pending=<p> failed=<f> skipped=<s> status=<pending\|success\|failure\|skipped>`; **aggregates all runs** for the SHA — stays watching while any is pending, verdict is `failure` if any run failed. Exits 0 once none pending (the exit code says a terminal state was reached, not that it was green — read `status=`). **Skipped is its own verdict, never a pass**: `skipped` runs are counted on their own axis, and a SHA whose runs were *all* skipped reports `status=skipped` rather than `success`, because nothing executed. A partial skip still reports `success`, with `skipped=<s>` naming how much did not run. `--pr` resolves the PR's head SHA (the SHA the run reports — prefer it; a local `--sha` may be unpushed). **Two clocks**: `--timeout` (env `LS_CI_WATCH_TIMEOUT` / config `code.ciWatchTimeout`; default 900; 0 disables) bounds how long a run may **execute**, while `--queue-timeout` (env `LS_CI_QUEUE_TIMEOUT` / config `code.ciQueueTimeout`; default 3600; 0 disables) bounds time in which every job of every non-terminal run is waiting for a runner. Queued time does not count against `--timeout`, so a healthy run serialized behind a scarce runner is no longer reported as a hang; each message names which cap fired and the key that raises it. The run-level status cannot tell the two apart — every backend reports a run as running once ANY job starts — so a run that looks executing is confirmed against its own job list (`/actions/runs/{id}/jobs`, GitLab `/pipelines/{id}/jobs`), and anything unreadable counts as executing, i.e. keeps the shorter cap in charge. "No run found at all" is a trigger/push problem rather than a queue and stays bounded by `--timeout`. **Superseded runs don't count**: only the latest attempt per (workflow, trigger event) is scored — a retried-to-green flake watches green — and a newest manual re-dispatch (`workflow_dispatch`; GitLab: `web` pipeline) supersedes that workflow's earlier runs outright. Background-friendly for the `Monitor` tool. |
+| `watch` | `--pr N` \| `--sha SHA` `[--status-file PATH] [--timeout SECS]` | one line per state change: `ci runs=<n> pending=<p> failed=<f> skipped=<s> cancelled=<c> status=<pending\|success\|failure\|cancelled\|skipped>`; **aggregates all runs** for the SHA — stays watching while any is pending, verdict is `failure` if any run failed. Exits 0 once none pending (the exit code says a terminal state was reached, not that it was green — read `status=`). **Skipped is its own verdict, never a pass**: `skipped` runs are counted on their own axis, and a SHA whose runs were *all* skipped reports `status=skipped` rather than `success`, because nothing executed. A partial skip still reports `success`, with `skipped=<s>` naming how much did not run. **Cancelled is its own verdict too** (FJ-281): a run stopped before it finished is counted as `cancelled=<c>`, not as failed, and with no failure the verdict is `status=cancelled`, ahead of `skipped` and `success`. Nothing failed, so `ci log` has nothing to show, but nothing was verified either. With `--pr`, if the PR's head moved during the watch (a push mid-run is also what usually cancels a run), a line on **stderr** names the new head: the verdict is for the old one, so watch again. `--pr` resolves the PR's head SHA (the SHA the run reports — prefer it; a local `--sha` may be unpushed). **Two clocks**: `--timeout` (env `LS_CI_WATCH_TIMEOUT` / config `code.ciWatchTimeout`; default 900; 0 disables) bounds how long a run may **execute**, while `--queue-timeout` (env `LS_CI_QUEUE_TIMEOUT` / config `code.ciQueueTimeout`; default 3600; 0 disables) bounds time in which every job of every non-terminal run is waiting for a runner. Queued time does not count against `--timeout`, so a healthy run serialized behind a scarce runner is no longer reported as a hang; each message names which cap fired and the key that raises it. The run-level status cannot tell the two apart — every backend reports a run as running once ANY job starts — so a run that looks executing is confirmed against its own job list (`/actions/runs/{id}/jobs`, GitLab `/pipelines/{id}/jobs`), and anything unreadable counts as executing, i.e. keeps the shorter cap in charge. "No run found at all" is a trigger/push problem rather than a queue and stays bounded by `--timeout`. **Superseded runs don't count**: only the latest attempt per (workflow, trigger event) is scored — a retried-to-green flake watches green — and a newest manual re-dispatch (`workflow_dispatch`; GitLab: `web` pipeline) supersedes that workflow's earlier runs outright. Background-friendly for the `Monitor` tool. |
 | `log`   | `--pr N` \| `--sha SHA` \| `--failed BRANCH`      | failed jobs' plaintext logs to stdout, one `── job <id>: <name> ──` header per job, fetched via the backend's per-job logs API (Forgejo 16+: `/actions/jobs/{id}/logs`). `--pr` resolves the PR/MR head commit exactly as `watch --pr` does, and is the form to use after a red `watch --pr`. `--pr` and `--sha` dump **every failed run** on the commit, oldest first, each under a `run <id>` line — a commit usually carries one run per workflow, often started in the same second, so "the latest run" is as likely to be the green one. `--failed BRANCH` takes the latest failed run under the branch ref, and when there is none falls back to the branch's head commit: runs triggered by a pull-request event (Forgejo) or merge-request pipelines (GitLab) carry the PR/MR ref, never `refs/heads/<branch>` (GitHub's `?branch=` filter already matches both). A commit whose runs all passed prints `(no failed jobs for run …)` and exits 0; no run at all is a non-zero `no CI run found`. |
 
 ### `branches` (dispatcher-owned, not a backend adapter)
@@ -214,8 +262,8 @@ behaves identically when invoked from a linked worktree. Driven by the
 
 | Verb    | Args | stdout |
 |---------|------|--------|
-| `list`  | `[--merged-into STAGE] [--pattern GLOB]… [--no-fetch]` | one row per **merged** candidate: `branch⇥where⇥merged-into⇥pr⇥issue⇥worktree`. `where` is `local`/`remote`/`local+remote`; `pr` is the merged PR number when the evidence came from the backend, else `-`; `issue` is the `N` parsed from `<prefix>/<N>-<slug>`, else `-`; `worktree` is the `.worktrees/` path still holding it, else `-`. Runs `git fetch --prune origin` first unless `--no-fetch` (a fetch failure warns, it does not stop). Unmerged branches are absent, not flagged. |
-| `prune` | `[--merged-into STAGE] [--pattern GLOB]… [--branch NAME]… [--local] [--remote] [--worktrees] [--dry-run] [--no-fetch]` | one row per action: `action⇥branch⇥detail`, where action is `remove-worktree`, `delete-local`, `delete-remote`, the `would-…` preview form, or `skip` (detail = why). Exits non-zero if anything was skipped because an operation *failed*. |
+| `list`  | `[--merged-into STAGE] [--pattern GLOB]… [--no-fetch]` | one row per **merged** candidate: `branch⇥where⇥merged-into⇥pr⇥issue⇥worktree`. `where` is `local`/`remote`/`local+remote`; `pr` is the merged PR number when the evidence came from the backend, else `-`; `issue` is the branch's issue as a qualified id from `scripts/issue-identity.sh` (`FJ-12` for `feature/fj-12-…`; a legacy `feature/12-…` branch through the migration's binding), `unbound` for a legacy branch whose tracker cannot be recovered, `error` when the identity lookup itself failed (the helper's reason goes to stderr — never read it as "no issue"), else `-` (before config schema 3: the `N` parsed from `<prefix>/<N>-<slug>`); `worktree` is the `.worktrees/` path still holding it, else `-`. Runs `git fetch --prune origin` first unless `--no-fetch` (a fetch failure warns, it does not stop). Unmerged branches are absent, not flagged. |
+| `prune` | `[--merged-into STAGE] [--pattern GLOB]… [--branch NAME]… [--local] [--remote] [--worktrees] [--dry-run] [--no-fetch]` | one row per action: `action⇥branch⇥detail`, where action is `remove-worktree`, `delete-local`, `delete-remote`, `drop-binding` (schema 3: the branch is now gone locally and on origin, so its retained identity binding was removed), the `would-…` preview form, or `skip` (detail = why). Exits non-zero if anything was skipped because an operation *failed*. |
 | `sync-down` | `--from STAGE` | After a promotion into `STAGE` (`stages[i]`, `i ≥ 1`): for `j = i-1 … 0`, merge `stages[j+1]` back into `stages[j]` per that stage's `syncDown` (`direct` \| `pr` \| `none`, default = its `merge`). One row per stage, in cascade order: `stage⇥outcome⇥detail`, outcome ∈ `fast-forwarded` \| `merged` \| `already-level` \| `pr-merged` (detail starts `#N`) \| `skipped` (`none`) \| `stopped` \| `nothing-below` (`STAGE` is `stages[0]`). Runs the freshness check on each lower stage first (behind → fast-forward; ahead/diverged → `stopped`). `direct` merges with `--ff` (a merge commit only when needed) in the checkout holding the stage, or in a throwaway worktree when that checkout is dirty or absent, then pushes; `pr` recurses through the dispatcher — `pr open` (head = upper, base = lower, no issue keywords), `ci watch --pr`, then `pr merge --strategy merge` **only** on `status=success` — and leaves the PR open on anything else (red CI, or an all-skipped run that verified nothing). A conflict is aborted and reported. Stops the cascade and exits non-zero on the first `stopped` row; never resolves, rebases or resets a stage ([ADR 0002](../../docs/adr/0002-sync-down-after-promotion.md)). |
 
 **Merged** means either the branch tip is an ancestor of a configured stage, or the backend
@@ -233,6 +281,58 @@ Safety is in the verb, not in the caller:
 - Remote deletion happens **only** under `--remote`.
 - Stage branches, `archived/*`, and any branch checked out in the main checkout or a worktree
   outside `.worktrees/` are protected regardless of the patterns.
+
+### `issues copy` / `issues resync` (dispatcher-owned)
+
+Copy one issue to another configured tracker, and later bring that copy up to date with source
+comments. Like `branches`, these live in the dispatcher (`scripts/issue-copy`) rather than in an
+adapter: they read and write each side back through the dispatcher with that tracker's own
+credential and label map, so every backend pair works.
+
+| Verb | Args | stdout |
+|---|---|---|
+| `copy` | `--from ID --to TRACKER` `[--no-body] [--no-comments] [--no-labels] [--no-status] [--footer] [--back-link] [--force] [--dry-run]` | the copy's display id; skipped labels/status on stderr. `--dry-run`: the plan, nothing written |
+| `resync` | `--from ID --to TRACKER [--dry-run]` | the number of comments posted (`0` = up to date) |
+
+- Title always; body, comments, labels and status by default. Labels match **by exact name**
+  and are never created on the target. Status maps by **role** (the source's label → its role →
+  the target's label for it). Comments are posted oldest-first under an attribution line
+  (`**author** commented on YYYY-MM-DD:`). Assignees, open/closed state and attachments are
+  never copied, and the source is never closed.
+- The source ↔ copy link is recorded in `.flightdirector/copies.jsonl` (see
+  [flight-setup.md](flight-setup.md)). `copy` refuses a source already recorded for that
+  tracker (`already-copied`; `--force` overrides). `resync` posts the source comments the
+  record doesn't list and touches nothing else. A record is written after each step, so a copy
+  that fails partway is finished by `resync`.
+- `--tracker` is refused: the two trackers are `--from` (any id `issues resolve` accepts) and
+  `--to` (a ref or alias). `--to` the source's own tracker is a usage error. Requires config schema 3.
+
+### `issues block` / `unblock` / `blockers` / `blocking` (dispatcher-owned)
+
+"This issue is blocked by that one" (FJ-271), handled by `scripts/issue-deps` through the
+dispatcher, like `copy`.
+
+| Verb | Args | stdout |
+|---|---|---|
+| `block` | `--number ID --by ID [--no-status] [--model ID]` | `FJ-12 blocked by GH-3 (native\|text)` |
+| `unblock` | `--number ID --by ID [--no-status] [--model ID]` | `FJ-12 no longer blocked by GH-3` (or, on stderr, that it wasn't) |
+| `blockers` | `--number ID` | `id⇥title⇥state⇥native\|text` per blocker |
+| `blocking` | `--number ID` | the same, per issue it blocks |
+
+- Two issues on the same tracker use its `dep-*` verbs. On `unsupported`, and always across
+  trackers, the link is a pair of signed comments: `**Blocked by GH-3**: <title>` on the blocked
+  issue and `**Blocks FJ-12**: <title>` on the blocker; unblocking posts `**No longer …**`. Only
+  flight-signed comments count (they are always signed; see `--signature`), and per pair the latest
+  wins. The first-line match ignores case, so a hand-edited `blocked by fj-12` still counts.
+- Status, unless `--no-status`: `block` sets the tracker's `blocked` role and records
+  `(was <role>)`; the last `unblock` restores that role, or `new`, or clears the status. A status
+  someone changed by hand is left alone.
+- A text-linked issue that no longer exists is still listed by `blockers` / `blocking`, with an
+  empty title and state `unknown` (TSV), or `title` and `state` null (`--json`).
+- `--model ID` stamps the signature on the comments `block` / `unblock` post. A no-op `unblock`
+  (nothing was linked) exits 0; under `--json` it still prints `{number, by, removed: [], status}`.
+- A partial write names the missing piece and says to rerun: rerunning `block` / `unblock` is safe.
+- `--tracker` is refused (each id names its tracker). Requires config schema 3.
 
 ## Notes
 
@@ -293,24 +393,28 @@ Safety is in the verb, not in the caller:
   merge otherwise follows the project's configured *merge method* (GitLab's merge endpoint has no
   per-request `merge_method`). `ci` is **pipelines**: `ci watch` aggregates all pipelines for the
   SHA (`?sha=`), `--pr` resolves the MR head SHA (`.sha`); pending = created/waiting/preparing/
-  pending/running/scheduled, not-a-failure = success/skipped/manual, anything else (failed/canceled)
-  counts as failure; `skipped` is additionally counted on its own axis, so an all-skipped SHA verdicts
-  as `skipped`. `ci log` pulls the failed pipeline's failed-job traces (`/jobs/:id/trace`).
+  pending/running/scheduled/canceling, not-a-failure = success/skipped/manual, `canceled` is counted
+  on its own axis (`cancelled=<c>`, verdict `cancelled`), anything else (failed) counts as failure;
+  `skipped` is additionally counted on its own axis, so an all-skipped SHA verdicts as `skipped`.
+  `ci log` pulls the failed pipeline's failed-job traces (`/jobs/:id/trace`).
   `pr list` is the one backend with a first-class `merged` state and server-side
   `source_branch`/`target_branch` filters; `--state open` is spelled `opened`. It is also the only
   backend with a `locked` state (transient, while a merge is in flight), which `pr get`/`pr list`
   pass through rather than mapping.
   MR **mergeability is computed asynchronously**, so an immediate `pr merge` right after `pr open`
   can transiently 405 until GitLab finishes its merge check — retry briefly (the rig smoke does).
-- **Jira backend specifics:** Jira is an **issues-axis-only** backend (an issue tracker, not a git
-  host) — it implements **only `issues` + `labels`**; `pr`/`ci` keep resolving to the `code`
+- **Jira backend specifics:** Jira is an **issue-tracker-only** backend (not a git host) — it
+  implements **only `issues` + `labels`**; `pr`/`ci` keep resolving to the `code`
   backend. Pair it with a git `code` backend. There is no `jira/pr` adapter file at all, so every
-  `pr` verb — `list` included — is unreachable through a Jira axis (the dispatcher's "no `pr`
+  `pr` verb — `list` included — is unreachable through a Jira tracker (the dispatcher's "no `pr`
   adapter for backend 'jira'"). `branches` treats a `pr list` it cannot get an answer from as
   "no PR evidence" and falls back to the ancestry test alone rather than failing. It targets Jira **Cloud REST v3** with HTTP **Basic**
   `email:api_token` auth (a classic Atlassian API token, not OAuth). The dispatcher threads two
-  generic passthroughs for it — `LS_PROJECT` (the project key, config `issues.project`) and
-  `LS_EMAIL` (config `issues.email`, or `LS_EMAIL` in the env). Decisions:
+  generic passthroughs for it — `LS_PROJECT` (the selected tracker's `project` key) and
+  `LS_EMAIL` (own credential: the tracker's `email`, else `secrets.issueTrackers.<REF>.email`;
+  a tracker on `credentialRef: "code"`: `LS_EMAIL` in the env, the tracker's `email`, then
+  `secrets.code.email`; a schema-1/2 config: `issues.project` / `issues.email` or `LS_EMAIL`).
+  Decisions:
   - **Identifier = key.** The `--number` value is a Jira **key** (`KAN-123`), treated as an opaque
     id; skills print `#<key>` unchanged. `issues create` returns the key.
   - **`set-status` → Jira labels.** Maps a role → a `status/*` **label** (atomic add-target /
@@ -328,8 +432,9 @@ Safety is in the verb, not in the caller:
     is the one place transitions are unavoidable.
   - **Bodies/comments are ADF.** Jira stores rich text as Atlassian Document Format (ADF) JSON. A
     **minimal** shim converts markdown→ADF for writes (`create`/`update`/`comment`) and ADF→plain
-    text for reads (`get`/`comments`): paragraphs, fenced code blocks, and bullet/ordered lists.
-    Inline marks (bold, links) are carried as plain text, not styled.
+    text for reads (`get`/`comments`): paragraphs, headings (a leading `#`…`######` + space, both
+    ways), fenced code blocks, bullet/ordered lists, and `---` rules. Inline marks
+    (bold, links) are carried as plain text, not styled.
   - **Labels are thin.** Jira labels are bare strings with no colour/description and no id distinct
     from the name. `labels list` emits `name⇥⇥` (empty colour + description); `labels resolve`
     returns the **name as its own id** (`name⇥name`); `labels create` is a **no-op** that succeeds

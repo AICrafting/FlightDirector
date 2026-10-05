@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # GitLab issues adapter — verbs: list get comments create update comment attach
-# set-status clear-status label-add label-remove assign unassign close reopen.
+# set-status clear-status label-add label-remove assign unassign close reopen
+# dep-add dep-remove dep-list dep-blocking.
 # See ../../../references/adapter-contract.md.
 # GitLab addresses issues by their per-project `iid` (what the contract calls --number),
 # labels by name, and stores the body in `description`.
@@ -12,6 +13,24 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 
 verb="${1:-}"; shift || true
 
+# Base objects for --json (#253; ../_json.sh). One mapping per resource, so list,
+# get and comments cannot drift apart. GitLab says `opened`, numbers issues by
+# `iid`, and its notes carry no link: base_comment takes the issue's web URL.
+# shellcheck disable=SC2016  # jq programs
+ISSUE_JQ="$JSON_JQ"'
+def base_issue: {
+  number: (.iid | tostring), title: (.title // ""),
+  state: (if .state == "closed" then "closed" else "open" end),
+  labels: (.labels // []), author: (.author.username // null),
+  created: (.created_at | utc), updated: (.updated_at | utc),
+  comments: (.user_notes_count // null), url: (.web_url // null), body: (.description // "")
+};
+def base_comment($web): {
+  id: (.id | tostring), author: (.author.username // null),
+  created: (.created_at | utc), updated: (.updated_at | utc),
+  url: (if $web == "" then null else "\($web)#note_\(.id)" end), body: (.body // "")
+};'
+
 # Comma-join the configured status/* label names into $status_csv (helper for
 # set-status/clear-status). Reads LS_LABELS_JSON.
 _status_names_csv() {
@@ -21,11 +40,13 @@ _status_names_csv() {
 
 case "$verb" in
   list)
-    state="open"; limit="50"; labels=()
+    state="open"; limit="50"; labels=(); per_page=""; cursor=""
     while [ $# -gt 0 ]; do case "$1" in
       --state) state="$2"; shift 2 ;;
       --limit) limit="$2"; shift 2 ;;
       --label) labels+=("$2"); shift 2 ;;
+      --per-page) per_page="$2"; shift 2 ;;
+      --cursor) cursor="$2"; shift 2 ;;
       *) die "issues list: unknown arg '$1'" ;;
     esac; done
     # GitLab issue state is opened|closed; `all` means omit the filter.
@@ -42,10 +63,27 @@ case "$verb" in
       for l in "${labels[@]}"; do enc+=("$(urlenc "$l")"); done
       old="$IFS"; IFS=,; q="${q:+$q&}labels=${enc[*]}"; IFS="$old"
     fi
+    # Cursor paging (#262): one page per call, newest created first; see cursor_page.
+    if [ -n "$per_page$cursor" ]; then
+      json_mode || die "issues list: --per-page and --cursor need --json"
+      per_page="$(per_page_arg "${per_page:-50}")" || exit 1
+      _cursor_fetch() { _api GET "/issues?${q:+$q&}order_by=created_at&sort=desc&per_page=$2&page=$1";  }
+      meta="$(page_meta_init)"
+      FLIGHT_PAGE_META="$meta" cursor_page _cursor_fetch '.[]' '[(.created_at | utc), .iid]' "$per_page" "$cursor" \
+          "gitlab $LS_API $LS_OWNER/$LS_REPO $q" x-total \
+        | jq -c "$ISSUE_JQ"'base_issue | .body = null' | emit_list "$meta"
+      exit 0
+    fi
     # _paged_get honours --limit as a ceiling and pages underneath it, so a limit
     # above the server's cap returns what it says rather than one clamped page.
-    _paged_get "/issues" "$q" "$limit" \
-      | jq -r '[(.iid|tostring), .title, ((.labels // []) | join(","))] | @tsv'
+    if json_mode; then
+      meta="$(page_meta_init)"
+      FLIGHT_PAGE_META="$meta" _paged_get "/issues" "$q" "$limit" \
+        | jq -c "$ISSUE_JQ"'base_issue | .body = null' | emit_list "$meta"
+    else
+      _paged_get "/issues" "$q" "$limit" \
+        | jq -r '[(.iid|tostring), .title, ((.labels // []) | join(","))] | @tsv'
+    fi
     ;;
 
   get)
@@ -55,10 +93,14 @@ case "$verb" in
       *) die "issues get: unknown arg '$1'" ;;
     esac; done
     [ -n "$number" ] || die "issues get: --number required"
-    _api GET "/issues/${number}" \
-      | jq -r '([(.iid|tostring), .title,
-                  (.state | if . == "opened" then "open" else . end)] | @tsv),
-               "", (.description // "")'
+    if json_mode; then
+      _api GET "/issues/${number}" | jq -c "$ISSUE_JQ"'base_issue'
+    else
+      _api GET "/issues/${number}" \
+        | jq -r '([(.iid|tostring), .title,
+                    (.state | if . == "opened" then "open" else . end)] | @tsv),
+                 "", (.description // "")'
+    fi
     ;;
 
   comments)
@@ -75,9 +117,16 @@ case "$verb" in
     # oldest-first, so an unpaged fetch drops the NEWEST notes — precisely the ones
     # "the later comment wins" depends on. System notes are dropped inside the
     # pager so they never displace a real comment.
-    _paged_get "/issues/${number}/notes" "sort=asc&order_by=created_at" "" \
-      '.[] | select(.system | not)' \
-      | jq -r '([(.author.username // "?"), .created_at] | @tsv), (.body // ""), ""'
+    if json_mode; then
+      web="$(_api GET "/issues/${number}" | jq -r '.web_url // ""')"
+      _paged_get "/issues/${number}/notes" "sort=asc&order_by=created_at" "" \
+        '.[] | select(.system | not)' \
+        | jq -cs --arg web "$web" "$ISSUE_JQ"'map(base_comment($web))'
+    else
+      _paged_get "/issues/${number}/notes" "sort=asc&order_by=created_at" "" \
+        '.[] | select(.system | not)' \
+        | jq -r '([(.author.username // "?"), .created_at] | @tsv), (.body // ""), ""'
+    fi
     ;;
 
   create)
@@ -148,10 +197,10 @@ case "$verb" in
     code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST \
       "${GL_HEADERS[@]}" \
       -F "file=@${file};filename=${name}" \
-      "${PROJECT_API}/uploads")" || { rm -f "$tmp"; die "attach: curl failed"; }
+      "${PROJECT_API}/uploads")" || { rm -f "$tmp"; fail network "attach: curl failed"; }
     if [ "$code" -ge 400 ]; then
       msg="$(jq -r '(.message // .error // empty) | if type=="string" then . else tojson end' "$tmp" 2>/dev/null || true)"
-      rm -f "$tmp"; die "attach → HTTP $code${msg:+: $msg}"
+      rm -f "$tmp"; http_fail "$code" "attach → HTTP $code${msg:+: $msg}"
     fi
     jq -r '.full_path // .url' "$tmp"; rm -f "$tmp"
     ;;
@@ -171,7 +220,15 @@ case "$verb" in
     else
       payload="$(jq -n --arg b "$body" '{body:$b}')"
     fi
-    _api POST "/issues/${number}/notes" "$payload" >/dev/null
+    if json_mode; then
+      # The issue's URL first: once the note is posted, a failed read must not turn
+      # into an error (a caller would post the comment again).
+      web="$(_api GET "/issues/${number}" | jq -r '.web_url // ""')"
+      note="$(_api POST "/issues/${number}/notes" "$payload")"
+      jq -c --arg web "$web" "$ISSUE_JQ"'base_comment($web)' <<<"$note"
+    else
+      _api POST "/issues/${number}/notes" "$payload" >/dev/null
+    fi
     ;;
 
   set-status)
@@ -298,5 +355,59 @@ case "$verb" in
     _api PUT "/issues/${number}" "$(jq -n '{state_event:"reopen"}')" >/dev/null
     ;;
 
-  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add label-remove assign unassign close reopen)" ;;
+  dep-add|dep-remove|dep-list|dep-blocking)
+    # Issue dependencies (FJ-271) as issue links. `blocks` / `is_blocked_by` links need GitLab
+    # Premium or Ultimate: the Free tier (self-hosted CE included) refuses them, which is
+    # reported as `unsupported` so the caller can fall back to comments. On that tier the
+    # listing holds only relates_to links, which are filtered out here.
+    number=""; by=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --number) number="$2"; shift 2 ;;
+      --by) by="$2"; shift 2 ;;
+      *) die "issues $verb: unknown arg '$1'" ;;
+    esac; done
+    [ -n "$number" ] || die "issues $verb: --number required"
+    case "$verb" in
+      dep-add|dep-remove)
+        case "$by" in ''|*[!0-9]*) die "issues $verb: --by needs an issue number" ;; esac ;;
+    esac
+    project_id="$(_api GET "" | jq -r '.id')"
+    links="$(_api GET "/issues/${number}/links")"
+    # rows LINK_TYPE — this project's links of that type, with the link id kept for removal.
+    rows() {
+      jq -c --argjson p "$project_id" --arg t "$1" '[.[] | select(.project_id == $p and .link_type == $t)
+        | {number: (.iid | tostring), title: (.title // ""),
+           state: (if .state == "closed" then "closed" else "open" end), link: .issue_link_id}]' <<<"$links"
+    }
+    case "$verb" in
+      dep-list)     rows is_blocked_by | jq -c 'map(del(.link))' | dep_emit ;;
+      dep-blocking) rows blocks | jq -c 'map(del(.link))' | dep_emit ;;
+      dep-add)
+        [ "$(rows is_blocked_by | jq --arg b "$by" 'map(select(.number == $b)) | length')" = 0 ] || exit 0
+        # GitLab allows one link per issue pair (FJ-275): a pair already joined by relates_to (or
+        # linked the other way) cannot take is_blocked_by too, so say which link is in the way.
+        other="$(jq -r --argjson p "$project_id" --arg b "$by" '[.[] | select(.project_id == $p
+          and (.iid | tostring) == $b) | .link_type] | first // empty' <<<"$links")"
+        [ -z "$other" ] || fail unsupported "issues $number and $by already share a GitLab '$other' link, and GitLab allows one link per issue pair; cannot add is_blocked_by"
+        tmp="$(mktemp)"
+        code="$(_api_try POST "/issues/${number}/links" \
+          "$(jq -cn --argjson p "$project_id" --arg b "$by" '{target_project_id: $p, target_issue_iid: $b, link_type: "is_blocked_by"}')" "$tmp")"
+        msg="$(jq -r '(.message // .error // empty) | tostring' "$tmp" 2>/dev/null || true)"
+        rm -f "$tmp"
+        case "$code" in
+          2??) ;;
+          409) fail unsupported "GitLab refused an is_blocked_by link (HTTP 409${msg:+: $msg}); the pair likely already has a link of another type" ;;
+          400|403|422) fail unsupported "GitLab refused an is_blocked_by link (HTTP $code${msg:+: $msg}); blocking links need GitLab Premium or Ultimate" ;;
+          *) http_fail "$code" "POST /issues/${number}/links → HTTP $code${msg:+: $msg}" ;;
+        esac
+        ;;
+      dep-remove)
+        link="$(rows is_blocked_by | jq -r --arg b "$by" 'map(select(.number == $b)) | first | .link // empty')"
+        [ -n "$link" ] || exit 0
+        _api DELETE "/issues/${number}/links/${link}" >/dev/null
+        ;;
+    esac
+    ;;
+
+  *) die "unknown verb '${verb}' (issues: list get comments create update comment attach set-status clear-status label-add label-remove assign unassign close reopen dep-add dep-remove dep-list dep-blocking)" ;;
 esac

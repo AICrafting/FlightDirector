@@ -43,6 +43,18 @@ Look back through the session and gather what makes the issue specific:
 
 This is the step that turns a terse input into something useful. Don't invent — surface.
 
+**Pick the tracker.** A repo may have several named issue trackers (`issueTrackers`). File on the
+one the user names (by ref or alias — "file it on GH"), else on the default, and bind its
+canonical ref once:
+
+```
+TRACKER="$(flight issues tracker --tracker "<what the user named>" | jq -r '.ref')"   # named
+TRACKER="$(flight issues tracker | jq -r '.ref')"                                      # default
+```
+
+An unknown name is an error listing the configured trackers — ask; never guess. Every later
+label and issue call in this skill passes `--tracker "$TRACKER"`.
+
 **Note any images** shared with the invocation. In Claude Code, attached screenshots appear
 with a local file path (e.g. `[Image: source: /var/.../Screenshot.png]`). Record those paths —
 you'll upload them after the issue is created (Step 7).
@@ -50,10 +62,14 @@ you'll upload them after the issue is created (Step 7).
 ## Step 2: Dedupe-check against open issues
 
 ```
-flight issues list --state open --limit 50
+flight issues list --all-trackers --state open --limit 50
 ```
 
-Output is `number⇥title⇥labels` per line — already projected, so it's light in context. The
+The scan covers every tracker, because a duplicate filed on another one is still a duplicate.
+Output is `id⇥native id⇥title⇥labels` per line (`FJ-12⇥12⇥…`, `JIR-7⇥PROJ-7⇥…`; `#12⇥12⇥…`
+when the repo has a single tracker) —
+already projected, so it's light in context. A tracker named `unavailable` on stderr was not
+scanned: say so rather than reporting "no overlap". The
 adapter pages underneath `--limit`, so 50 rows means 50 rows; what tells you the scan was partial
 is a **stderr** line like `warning: showing 50 of 109 rows for /issues`. If you see it, raise
 `--limit` past the total it names and run the scan again before filing. Do not treat a full page
@@ -62,18 +78,27 @@ dedupe scan, and filing a near-duplicate while reporting "no meaningful overlap"
 failure this skill exists to prevent. Distill the proposed title + description into a few
 specific keywords/phrases a near-duplicate would also use (`advantage|modifier key|shift.click`
 beats `roll` — too broad) and scan titles for overlap. Pull a candidate's full text with
-`issues get --number N` if a title looks close.
+`issues get --number <qualified>` (e.g. `--number GH-12`; a qualified id routes to its own
+tracker) if a title looks close.
 
 ### Classify
 
 | Classification | Meaning | Next action |
 |---|---|---|
 | **new** | No meaningful overlap | Proceed to Step 3 |
-| **duplicate** | Same problem and same ask as an existing issue | Tell the user: *"#N already covers this: [title]. Add a comment there, or create a separate issue anyway?"* |
-| **related** | Overlaps but different enough to stand alone | Show the overlap: *"This overlaps with #N — [title]. Comment there, or open a separate issue?"* |
+| **duplicate** | Same problem and same ask as an existing issue | Tell the user: *"GH-12 already covers this: [title]. Add a comment there, or create a separate issue anyway?"* |
+| **related** | Overlaps but different enough to stand alone | Show the overlap: *"This overlaps with GH-12 — [title]. Comment there, or open a separate issue?"* |
 | **update** | An existing issue is now stale (e.g. says "red" but the new direction is "blue") | Plan an update (Step 8) and **confirm before executing** |
 
 Filing two related issues in one turn? Scan and classify each independently.
+
+Asked to copy or move an existing issue to another tracker ("copy FJ-12 to GH")? That is not a
+new issue. Use the `copying-an-issue` skill, which keeps the link and checks for an earlier copy.
+
+A new issue that depends on another one? File it, then record the link with
+`flight issues block --number <new id> --by <the other id>` instead of writing "blocked by" in
+the body. That uses the tracker's native relationship where there is one, and moves the status to
+blocked.
 
 ## Step 3: Clarifying questions (only when needed)
 
@@ -101,7 +126,7 @@ Step 6 — that keeps multi-line markdown and code fences intact without shell-q
 See the real taxonomy, then pick 1–3 of the **most specific** applicable labels:
 
 ```
-flight labels list
+flight labels list --tracker "$TRACKER"
 ```
 
 Output is `name⇥color⇥description`. Good distinctions: `bug` / `feature` / `ux` / `polish` /
@@ -110,7 +135,7 @@ Output is `name⇥color⇥description`. Good distinctions: `bug` / `feature` / `
 **only if the user agrees**:
 
 ```
-flight labels create --name "new-label" --color "#0088ff"
+flight labels create --tracker "$TRACKER" --name "new-label" --color "#0088ff"
 ```
 
 **Colour by prefix.** If the new label carries a **known namespaced prefix** (`area/*`,
@@ -124,32 +149,43 @@ default taxonomy in one pass rather than creating labels one at a time here.
 
 ## Step 6: Create the issue
 
-No confirmation needed to create. Labels are applied in the same call (they must already exist):
+No confirmation needed to create. Labels are applied in the same call (they must already exist
+on `$TRACKER` — each tracker has its own labels):
 
 ```
 flight issues create \
+  --tracker "$TRACKER" \
   --title "…" --body-file "$SCRATCH/issue-body.md" --label bug --label ux \
   --model <your-model-id>
 ```
 
-If the repo configured the **`new` status role** (`labels.status.new` — opt-in, offered by
-`setting-up-a-repo`), the dispatcher adds that label here automatically, so a freshly filed issue
+If that tracker configured the **`new` status role** (`issueTrackers[].labels.status.new` — opt-in
+per tracker, offered at setup), the dispatcher adds that tracker's label here automatically, so a freshly filed issue
 is not indistinguishable from one whose status was forgotten. Pass a `status/*` label of your own
 and it is left alone; `--no-status` skips it for one issue. Nothing to do in this skill.
 
 `--model` (your own model id, e.g. `claude-fable-5-1`) lets the dispatcher sign the body
 `🤖 via FlightDirector:flight@<version> with <Model/ver>`; pass it on `update` and `comment` too.
-It prints the new issue `number`. Report: *"Created #N: [title]"*.
+It prints the new issue's native id (`12`, or `PROJ-12` on Jira). Turn it into the retained
+identity with the same tracker, and use it for Step 7 and the report:
+
+```
+ISSUE="$(flight issues resolve --tracker "$TRACKER" --number "<printed id>")"
+NUMBER="$(jq -r '.number' <<<"$ISSUE")"; DISPLAY="$(jq -r '.display' <<<"$ISSUE")"
+```
+
+Report with its display id: *"Created #12: [title]"* — `#12` while the repo has one tracker,
+`FJ-12` once it has several (the dispatcher decides; never build it yourself).
 
 ## Step 7: Attach images (if any were shared)
 
 Upload each recorded image, then embed the returned URL in the body:
 
 ```
-URL="$(flight issues attach --number N \
+URL="$(flight issues attach --tracker "$TRACKER" --number "$NUMBER" \
         --file /path/to/screenshot.png --name screenshot.png)"
 # append "## Screenshot\n\n![screenshot]($URL)" to the body file, then:
-flight issues update --number N --body-file "$SCRATCH/issue-body.md"
+flight issues update --tracker "$TRACKER" --number "$NUMBER" --body-file "$SCRATCH/issue-body.md"
 ```
 
 **File notes:** screencapture temp files are deleted within seconds — copy to a stable location
@@ -158,14 +194,19 @@ flight issues update --number N --body-file "$SCRATCH/issue-body.md"
 
 ## Step 8: Updating an existing issue — confirm first
 
-Only after the user agrees to the planned change:
+Only after the user agrees to the planned change. Resolve the issue once from its qualified id
+(from the dedupe scan, or what the user named — a bare number means the default tracker) and use
+the retained tracker and native id for every write:
 
 ```
+ISSUE="$(flight issues resolve --number "<GH-12, or what the user said>")"
+TRACKER="$(jq -r '.tracker' <<<"$ISSUE")"; NUMBER="$(jq -r '.number' <<<"$ISSUE")"
+
 # Update title and/or body (only the fields you pass are changed)
-flight issues update --number N --title "…" --body-file "$SCRATCH/issue-body.md" --model <id>
+flight issues update --tracker "$TRACKER" --number "$NUMBER" --title "…" --body-file "$SCRATCH/issue-body.md" --model <id>
 
 # Or add a comment
-flight issues comment --number N --body "…" --model <id>
+flight issues comment --tracker "$TRACKER" --number "$NUMBER" --body "…" --model <id>
 ```
 
 An updated body that already ends with a flight signature gets it replaced, not doubled.
