@@ -170,11 +170,12 @@ copy_issue() {
 	issue="$(fl issues get --number "$SRC_Q")"
 	COMMENTS="$(fl issues comments --number "$SRC_Q")"
 
-	# Body, then the optional footer (ref + id only — never a URL).
+	# Body, then the optional footer (ref + id only — never a URL). Ids generated into text a
+	# forge renders go in backticks (#247): GitHub autolinks `GH-12` to the rendering repo's #12.
 	if [ "$WANT_BODY" = 1 ]; then jq -j '.body // ""' <<<"$issue" >"$TMP/body.md"; else : >"$TMP/body.md"; fi
 	if [ "$WANT_FOOTER" = 1 ]; then
 		if [ -s "$TMP/body.md" ]; then printf '\n\n' >>"$TMP/body.md"; fi
-		printf 'Copied from %s\n' "$SRC_D" >>"$TMP/body.md"
+		printf 'Copied from `%s`\n' "$SRC_D" >>"$TMP/body.md"
 	fi
 
 	if [ "$WANT_LABELS" = 1 ] || [ "$WANT_STATUS" = 1 ]; then
@@ -249,7 +250,7 @@ copy_issue() {
 	if [ "$WANT_COMMENTS" = 1 ]; then post_comments "$DST_Q" "$HANDLED"; fi
 
 	if [ "$WANT_BACKLINK" = 1 ]; then
-		printf 'Copied to %s\n' "$DST_D" >"$TMP/back-link.md"
+		printf 'Copied to `%s`\n' "$DST_D" >"$TMP/back-link.md"
 		local back
 		back="$("$FLIGHT_SELF" issues comment --number "$SRC_Q" --body-file "$TMP/back-link.md" \
 			${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} --json)" \

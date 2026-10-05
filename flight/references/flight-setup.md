@@ -318,7 +318,8 @@ remote-tracking, e.g. `feature/12-x`) and batch manifest in
 `.flightdirector/batches/work-items/identities.json`, bound to `legacyIssueTracker`. It lives
 under `.flightdirector/batches/`, which setup already gitignores; it is local, merged (never
 re-pointed) on repeat runs, and a file bound to a different tracker stops the migration with a
-repairable error.
+repairable error. `flight branches prune` drops a branch's entry once that branch is gone both locally
+and on origin (never while either ref remains).
 
 ### Repo preflight gate (optional)
 

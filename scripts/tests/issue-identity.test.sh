@@ -13,6 +13,9 @@ IDENTITY="$REPO_ROOT/flight/scripts/issue-identity.sh"
 pass=0; fail=0
 check() { if [ "$2" = 1 ]; then printf '\033[0;32m  ✓ %s\033[0m\n' "$1"; pass=$((pass+1));
 			else printf '\033[0;31m  ✗ %s\033[0m\n  %s\n' "$1" "${3:-}"; fail=$((fail+1)); fi; }
+# tracks <ID> — pr-reference's cross-tracker line: the id is a code span (#247).
+BT='`'
+tracks() { printf 'Tracks %s%s%s' "$BT" "$1" "$BT"; }
 
 SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
 R="$SANDBOX/repo"; mkdir -p "$R/.flightdirector"; git -C "$R" init -q
@@ -160,13 +163,19 @@ jir='{"tracker":"JIR","number":"PROJ-3","qualified":"JIR-3","display":"JIR-3","b
 check "the code repository's own issue gets Closes #N on a closing stage" "$([ "$(run pr-reference --identity "$fj" --closes true)" = 'Closes #3' ] && echo 1 || echo 0)"
 check "…and the non-closing Ready #N otherwise" "$([ "$(run pr-reference --identity "$fj" --closes false)" = 'Ready #3' ] && echo 1 || echo 0)"
 out="$(run pr-reference --identity "$gh" --closes true)"
-check "a cross-tracker issue can never close the same-number code issue" "$([ "$out" = 'Tracks GH-3' ] && echo 1 || echo 0)" "$out"
-check "a Jira issue gets its qualified id, not a #N" "$([ "$(run pr-reference --identity "$jir" --closes true)" = 'Tracks JIR-3' ] && echo 1 || echo 0)"
+check "a cross-tracker issue can never close the same-number code issue" "$([ "$out" = "$(tracks GH-3)" ] && echo 1 || echo 0)" "$out"
+# No case-in-$(…) here: bash 3.2 cannot parse a case pattern's ")" inside a substitution.
+span="$(tracks GH-3 | cut -d' ' -f2)"
+check "the qualified id is a code span, so GitHub cannot autolink it to the code repo (#247)" \
+	"$(grep -qF -- "$span" <<<"$out" && echo 1 || echo 0)" "$out"
+check "…while Closes #N stays a live keyword (no backticks)" \
+	"$([ "$(run pr-reference --identity "$fj" --closes true | tr -d "$BT")" = "$(run pr-reference --identity "$fj" --closes true)" ] && echo 1 || echo 0)"
+check "a Jira issue gets its qualified id, not a #N" "$([ "$(run pr-reference --identity "$jir" --closes true)" = "$(tracks JIR-3)" ] && echo 1 || echo 0)"
 printf '{"code":{"repo":"other"}}\n' >"$R/.flightdirector/config.local.json"
-check "eligibility uses the effective (local-override) code repository" "$([ "$(run pr-reference --identity "$fj" --closes true)" = 'Tracks FJ-3' ] && echo 1 || echo 0)"
+check "eligibility uses the effective (local-override) code repository" "$([ "$(run pr-reference --identity "$fj" --closes true)" = "$(tracks FJ-3)" ] && echo 1 || echo 0)"
 rm -f "$R/.flightdirector/config.local.json"
 jq '(.issueTrackers[] | select(.ref == "FJ")) |= (.api = "https://other.example.com/api/v1" | del(.credentialRef))' "$SANDBOX/config.good" >"$CFG"
-check "same owner/repo on another host is not the same repository" "$([ "$(run pr-reference --identity "$fj" --closes true)" = 'Tracks FJ-3' ] && echo 1 || echo 0)"
+check "same owner/repo on another host is not the same repository" "$([ "$(run pr-reference --identity "$fj" --closes true)" = "$(tracks FJ-3)" ] && echo 1 || echo 0)"
 cp "$SANDBOX/config.good" "$CFG"
 
 printf '\033[1m── Windows: native jq.exe writes CRLF ──\033[0m\n'
@@ -209,7 +218,7 @@ check "msys: the bindings file stays CR-free" "$(has_cr <"$BIND" && echo 0 || ec
 out="$(msys pr-reference --identity "$fj" --closes true 2>&1 || true)"
 check "msys: the code repository's own issue still gets Closes #N" "$([ "$out" = 'Closes #3' ] && echo 1 || echo 0)" "$out"
 out="$(msys pr-reference --identity "$gh" --closes true 2>&1 || true)"
-check "msys: another tracker's issue still gets Tracks" "$([ "$out" = 'Tracks GH-3' ] && echo 1 || echo 0)" "$out"
+check "msys: another tracker's issue still gets Tracks" "$([ "$out" = "$(tracks GH-3)" ] && echo 1 || echo 0)" "$out"
 cp "$SANDBOX/bind.good" "$BIND"
 
 printf '\033[1m── schema guard ──\033[0m\n'

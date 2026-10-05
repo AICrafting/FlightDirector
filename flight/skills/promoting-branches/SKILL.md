@@ -237,7 +237,7 @@ elif [ -z "$GATE" ] || [ "$(cat "$SCRATCH/preflight-verdict-<zone>" 2>/dev/null)
     # entries or tracker URLs into it. Name each issue ONLY with its pr-reference line:
     "$ISSUE_IDENTITY" pr-reference --identity "$ISSUE" --closes "$CL" >> "$SCRATCH/pr-<zone>.md"
     #   → `Closes #12` / `Ready #12` only when the issue lives in the code repository itself (same
-    #     backend, api host, owner/repo); `Tracks GH-12` for any other tracker, so the PR can never
+    #     backend, api host, owner/repo); ``Tracks `GH-12` `` (backticked: no autolink) for any other tracker, so the PR can never
     #     close the code repository's unrelated issue 12. Step 5 drives every issue explicitly.
     # Same two guards as promoting-a-branch Step 3, per issue in the group:
     #   - the `- no user surface` hatch is for an INHERENTLY absent surface (infra/migration/refactor),
@@ -250,7 +250,8 @@ elif [ -z "$GATE" ] || [ "$(cat "$SCRATCH/preflight-verdict-<zone>" 2>/dev/null)
     #     then [ "$STATE" = open ] — state is field 3, normalized across backends, #205), filed right
     #     then if absent. An issue this PR resolves does NOT count as the tracker, even on a Ready #N
     #     hop where it stays open for now. Halt the group otherwise.
-    PR="$("$DISP" pr open --head "$INT" --base "$BASE" --title "Batch: <zone> (FJ-18, GH-12, …)" --body-file "$SCRATCH/pr-<zone>.md" --model <your-model-id>)"
+    # Qualified ids in the title go in backticks: GitHub autolinks `GH-12` to the code repo's own #12.
+    PR="$("$DISP" pr open --head "$INT" --base "$BASE" --title "Batch: <zone> (\`FJ-18\`, \`GH-12\`, …)" --body-file "$SCRATCH/pr-<zone>.md" --model <your-model-id>)"
     # watch CI ("$DISP" ci watch --pr "<pr#>" …). Read the `status=` on the last line, NOT the exit code —
     # it exits 0 on any terminal verdict. status=failure → record the group FAILED ("$DISP" ci log --pr "<pr#>"
     # shows why) and move on;
@@ -325,7 +326,7 @@ failure without re-running the gate.
 - Treating a `pr` hop like a direct one (or vice-versa) — read `stages[0].merge`.
 - Skipping manifest `heal` after promotion — promoted issues would linger. Heal after every group.
 - Using `Closes #N` when `stages[0]` does not close issues — use `Ready #N`. And never write either
-  by hand for another tracker's issue: `pr-reference` decides, and says `Tracks GH-12` instead.
+  by hand for another tracker's issue: `pr-reference` decides, and says ``Tracks `GH-12` `` instead.
 - Matching branches, manifest zones or to-test rows by bare number. Two trackers can both have
   an issue 12; compare qualified ids, and read each tracker's own to-test label.
 - Aborting the whole run on one conflict. Skip + report; never block the clean branches.
