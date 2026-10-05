@@ -34,7 +34,9 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   now uses jq's own `-b` flag, which writes LF directly, and keeps the pipe only for a jq older
   than 1.6. Start-up also does less work on every platform: helpers are located without
   `dirname`, and the config and the selected tracker's fields are each read with a single `jq`.
-  A status change starts fewer than half as many processes as before.
+  Each command validates its config and selects its tracker in one launch of the tracker helper
+  instead of up to three. Result pages are processed with one `jq` each. A status change starts
+  well under half as many processes as before.
 
 ## [0.17.2] - 2026-10-04
 
