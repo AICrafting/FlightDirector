@@ -106,6 +106,11 @@ so `GH12`, `GH-12` and `GH#12` split without guessing); `code` is reserved. Prop
 
 - **Jira** — the project key (`KAN`, `PROJ`); a Jira key then names its tracker directly. If the
   key isn't a valid ref (it has an `_`), propose the key without it and confirm.
+- **GitHub, while the code repository is also on GitHub** (`flight config '.code.backend'` prints
+  `github`) — never propose `GH`. Propose a ref derived from the tracker repo's name instead
+  (`acme/public-issues` → `PUB`), and tell the user why in one sentence: GitHub autolinks
+  `GH-12`-shaped text to the code repository's own issue 12, so commit subjects naming `GH-12`
+  would link to the wrong issue. If they still want `GH`, it is their call.
 - **Otherwise** — the backend shorthand: `FJ` (Forgejo/Gitea), `GH` (GitHub), `GL` (GitLab).
 
 Check the proposal — and every alias — against the refs and aliases already configured:

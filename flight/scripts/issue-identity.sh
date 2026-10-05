@@ -314,7 +314,9 @@ from_history() { # from_history <ref> [explicit tracker]
 # the PR's OWN repository, so it is emitted only when the issue lives in exactly that
 # repository (SAME_TARGET: same backend, same api with trailing / ignored, same
 # owner/repo; never Jira). Otherwise the line names the qualified id, which no forge acts on, and the
-# promotion drives that tracker explicitly. No URL, body or ledger is ever printed.
+# promotion drives that tracker explicitly. The id is in backticks (#247): GitHub autolinks
+# `GH-12`-shaped text to the PR's own repository's issue 12, and a code span suppresses that.
+# No URL, body or ledger is ever printed.
 pr_reference() { # pr_reference <identity> <closes>
 	local id="$1" closes="$2" code tracker same
 	valid_identity "$id" || die "--identity must be the JSON flight issues resolve prints"
@@ -326,7 +328,8 @@ pr_reference() { # pr_reference <identity> <closes>
 		if [ "$closes" = true ]; then printf 'Closes #%s\n' "$(jq -r '.number' <<<"$id")"
 		else printf 'Ready #%s\n' "$(jq -r '.number' <<<"$id")"; fi
 	else
-		printf 'Tracks %s\n' "$(jq -r '.qualified' <<<"$id")"
+		# shellcheck disable=SC2016  # literal backticks: a code span, not a command substitution
+		printf 'Tracks `%s`\n' "$(jq -r '.qualified' <<<"$id")"
 	fi
 }
 
