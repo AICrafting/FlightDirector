@@ -31,8 +31,9 @@ while [ $# -gt 0 ]; do
 done
 case "$url" in
 	# The adapter pages until a page comes back empty, so serve the rows once and then
-	# nothing — a fake that repeats itself forever paginates forever.
-	*/labels*page=1*|*/labels*[!0-9]page=1) body='[{"id":11,"name":"status/new"},{"id":12,"name":"status/blocked"},{"id":13,"name":"bug"}]' ;;
+	# nothing — a fake that repeats itself forever paginates forever. Anchored on
+	# `[?&]page=1` at the end, since `per_page=100` alone contains `page=1` (FJ-295).
+	*/labels*[?\&]page=1) body='[{"id":11,"name":"status/new"},{"id":12,"name":"status/blocked"},{"id":13,"name":"bug"}]' ;;
 	*/labels*)  body='[]' ;;
 	# `labels` present and empty: set-status reads the issue's current labels back.
 	*)          body='{"number":42,"iid":42,"id":7,"title":"t","state":"open","labels":[]}' ;;

@@ -13,7 +13,14 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+- **The repo's own Windows CI leg no longer spends ~10 minutes on one test** (FJ-295). The fake
+  `curl` in `tracker-lifecycle.test.sh` matched GitHub's label list with `*page=1*`, which
+  `per_page=100` also matches, so every page came back full and the adapter paged to its
+  1000-page cap. The error was swallowed by `|| true`, so the test passed. The pattern is now
+  anchored on `[?&]page=1` at the end of the URL in that test and three others that had copied
+  it, and a new check fails if the label list is paged more than a few times. Test-only:
+  plugin behavior is unchanged.
 
 ## [0.17.2] - 2026-10-04
 

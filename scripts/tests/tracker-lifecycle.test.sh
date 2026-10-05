@@ -70,7 +70,11 @@ done
 printf '%s\t%s\t%s\n' "$method" "$url" "$data" >>"${CURL_LOG:?}"
 body='{}'
 case "$url" in
-	*/labels*page=1*) body='[{"id":31,"name":"fj/new","color":"fff","description":""},{"id":32,"name":"fj/progress","color":"fff","description":""},{"id":33,"name":"fj/test","color":"fff","description":""},{"id":34,"name":"model/opus","color":"d97757","description":""}]' ;;
+	# The adapter pages until a page comes back empty, so serve the rows on page 1 only.
+	# Anchored on `[?&]page=1` at the END: GitHub and GitLab send `per_page=100&page=N`,
+	# and an unanchored `*page=1*` matched every page — 1000 pages to the adapter's cap,
+	# ~10 minutes of the Windows leg (FJ-295).
+	*/labels*[?\&]page=1) body='[{"id":31,"name":"fj/new","color":"fff","description":""},{"id":32,"name":"fj/progress","color":"fff","description":""},{"id":33,"name":"fj/test","color":"fff","description":""},{"id":34,"name":"model/opus","color":"d97757","description":""}]' ;;
 	*/labels*) body='[]' ;;
 	*/transitions*) body='{"transitions":[{"id":"41","to":{"statusCategory":{"key":"done"}}}]}' ;;
 	*/rest/api/3/issue/*) body='{"key":"PROJ-7","fields":{"labels":[]}}' ;;
@@ -135,6 +139,9 @@ GH_ISSUE="$(ident from-branch --branch feature/gh-1-widget)"
 flight issues set-status --tracker "$(jq -r .tracker <<<"$GH_ISSUE")" --number "$(jq -r .number <<<"$GH_ISSUE")" --status to-test >/dev/null 2>&1 || true
 flight issues close --tracker "$(jq -r .tracker <<<"$GH_ISSUE")" --number "$(jq -r .number <<<"$GH_ISSUE")" >/dev/null 2>&1 || true
 check "promotion drives GH-1 on GitHub explicitly, never the code forge" "$(only_host api.github.com)" "$(log)"
+pages="$(grep -c '^GET	https://api.github.com/repos/acme/widget/labels?' "$CURL_LOG" || true)"
+check "GitHub's label list is read in a page or two, not paged to the cap (FJ-295)" \
+	"$([ "$pages" -le 4 ] && echo 1 || echo 0)" "$pages label pages requested"
 out="$(cd "$R" && "$BM" groups)"
 check "the batch manifest still holds both issues after the default change" \
 	"$([ "$out" = "$(printf 'core\tFJ-1,GH-1')" ] && echo 1 || echo 0)" "$out"
