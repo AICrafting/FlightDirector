@@ -288,7 +288,7 @@ check "a tracker added after the switch does not take the default" \
 section "skill contract (prose)"
 says() { grep -Fq -- "$2" "$1"; }
 check "add-an-issue-tracker is a packaged skill with its own name" \
-	"$(tr -d '\r' <"$TRACKER_SKILL" | grep -q '^name: add-an-issue-tracker$' && echo 1 || echo 0)"   # CRLF-safe
+	"$(grep -q '^name: add-an-issue-tracker$' <<<"$(tr -d '\r' <"$TRACKER_SKILL")" && echo 1 || echo 0)"   # CRLF-safe
 check "add-an-issue-tracker starts with the runtime preflight" \
 	"$(ok says "$TRACKER_SKILL" 'follow [runtime preflight](../../references/runtime.md)')"
 check "its triggers cover adding / connecting a tracker" \

@@ -188,7 +188,7 @@ sed 's/$/\r/' "$CRLF/flight/CHANGELOG.md" >"$CRLF/cl.tmp" && mv "$CRLF/cl.tmp" "
 crlf_out="$(BUMP_VERSION_ROOT="$CRLF" "$BUMP" flight 1.3.0 2>&1)" && crlf_rc=0 || crlf_rc=$?
 check "CRLF changelog: the bump succeeds" "$([ "$crlf_rc" = 0 ] && echo 1 || echo 0)"
 check "CRLF changelog: [Unreleased] is rolled into the new version" \
-	"$(tr -d '\r' <"$CRLF/flight/CHANGELOG.md" | grep -q '^## \[1.3.0\] - ' && echo 1 || echo 0)"
+	"$(grep -q '^## \[1.3.0\] - ' <<<"$(tr -d '\r' <"$CRLF/flight/CHANGELOG.md")" && echo 1 || echo 0)"
 check "CRLF changelog: every line still ends in CRLF" \
 	"$([ "$(grep -c $'\r$' "$CRLF/flight/CHANGELOG.md")" = "$(wc -l <"$CRLF/flight/CHANGELOG.md" | tr -d ' ')" ] && echo 1 || echo 0)"
 check "CRLF changelog: no spurious empty-Unreleased warning" \
