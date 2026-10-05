@@ -22,12 +22,28 @@ set -euo pipefail
 
 # Windows shims (jq CRLF, path form); a no-op elsewhere.
 # shellcheck source-path=SCRIPTDIR source=_portable.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+source "${BASH_SOURCE[0]%/*}/_portable.sh"
 
-die() { echo "flight: $*" >&2; exit 1; }
+# DIE_STATUS is 1 except while route validates, when it is 3 (see route).
+die() { echo "flight: $*" >&2; exit "${DIE_STATUS:-1}"; }
 note() { echo "flight: $*" >&2; }
-lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
-upper() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
+# ASCII case mapping in pure bash: bash 3.2 (macOS) has no ${x,,}, and a `tr` per call
+# was a fork plus an exec, six of them on every resolve (FJ-301). Refs, aliases, project
+# keys and ids are ASCII, which is all GNU tr's byte-wise mapping changed anyway.
+# case_to <VAR> <from-set> <to-set> <string> — assign the mapped string to VAR.
+case_to() {
+	local _s="$4" _o="" _c _p
+	while [ -n "$_s" ]; do
+		_c="${_s:0:1}"; _s="${_s:1}"
+		case "$2" in *"$_c"*) _p="${2%%"$_c"*}"; _c="${3:${#_p}:1}" ;; esac
+		_o="$_o$_c"
+	done
+	printf -v "$1" '%s' "$_o"
+}
+UC=ABCDEFGHIJKLMNOPQRSTUVWXYZ LC=abcdefghijklmnopqrstuvwxyz
+lower_to() { case_to "$1" "$UC" "$LC" "$2"; }
+lower() { local r; lower_to r "$1"; printf '%s' "$r"; }
+upper() { local r; case_to r "$LC" "$UC" "$1"; printf '%s' "$r"; }
 
 # The backend value an older Flight runtime finds in `issues.backend` after migration.
 # Pre-schema-3 dispatchers route issue/label verbs through `issues.backend`, so this
@@ -48,8 +64,10 @@ JQ_DEFS='
 
 cmd="${1:-}"; [ $# -gt 0 ] && shift
 config=""; selector=""; number=""; in_file=""; out_file=""; ref=""; credential=""
-tracked=""; local_file=""; secrets=""; metadata=""; repo_root=""; batches=""
+tracked=""; local_file=""; secrets=""; metadata=""; repo_root=""; batches=""; do_select=0
 while [ $# -gt 0 ]; do
+	# --select is route's one flag that takes no value.
+	if [ "$1" = --select ]; then do_select=1; shift; continue; fi
 	[ $# -ge 2 ] || die "tracker-config: $1 needs a value"
 	case "$1" in
 		--config)     config="$2" ;;
@@ -123,7 +141,7 @@ validation_errors() {
 validate() {
 	local errs
 	jq -e . "$1" >/dev/null 2>&1 || die "config is not valid JSON"
-	errs="$(validation_errors "$1")"
+	errs="$(validation_errors "$1")" || die "config could not be validated"
 	[ -z "$errs" ] || die "invalid issueTrackers configuration:
 $(printf '%s\n' "$errs" | sed 's/^/  - /')"
 }
@@ -141,7 +159,7 @@ describe_trackers() {
 
 # Edit distance ≤ 1, or one a prefix of the other: close enough to suggest, never to pick.
 suggest() {
-	local want; want="$(lower "$1")"
+	local want; lower_to want "$1"
 	jq -r '.issueTrackers[] | (.ref, ((.aliases // [])[]), (if (.backend | ascii_downcase) == "jira" then (.project // empty) else empty end))' "$config" \
 		| awk -v w="$want" '
 			function lev(a, b,    i, j, la, lb, d, c, x, y, z) {
@@ -204,7 +222,7 @@ resolve() {
 	local selected="" native="" tracker="" bare prefix
 	local cand_refs=() cand_digits=() cand_json=()
 	[ -n "$number" ] || die "issues resolve: --number required"
-	raw_l="$(lower "$number")"
+	lower_to raw_l "$number"
 
 	# Every configured ref, alias and Jira project key is a candidate prefix. A tracker
 	# is a candidate at most once, even when its ref and an alias both match.
@@ -215,7 +233,7 @@ resolve() {
 		if [ "$tbackend" = jira ] && [[ "$tproject" =~ ^[A-Za-z][A-Za-z0-9_]*$ ]]; then tokens="$tokens,$tproject"; fi
 		local old_ifs="$IFS"; IFS=,
 		for token in $tokens; do
-			token_l="$(lower "$token")"
+			lower_to token_l "$token"
 			if [[ "$raw_l" =~ ^${token_l}[-#]?([0-9]+)$ ]]; then
 				digits="${BASH_REMATCH[1]}"
 				seen=0
@@ -275,13 +293,30 @@ resolve() {
 		# One tracker (#258): the prefix carries no information, so people and the forge
 		# see the issue's own name — #12 (which the forge autolinks), or PROJ-7 on Jira.
 		case "$native" in *[!0-9]*) display="$native" ;; *) display="#$native" ;; esac
-		branch_prefix="$(lower "$native")"
+		lower_to branch_prefix "$native"
 	else
-		display="$qualified"; branch_prefix="$(lower "$qualified")"
+		display="$qualified"; lower_to branch_prefix "$qualified"
 	fi
+	ROUTED_REF="$selected"   # for route, which selects the tracker this id named
 	jq -nc --arg tracker "$selected" --arg number "$native" --arg qualified "$qualified" \
 		--arg display "$display" --arg branchPrefix "$branch_prefix" \
 		'{tracker:$tracker, number:$number, qualified:$qualified, display:$display, branchPrefix:$branchPrefix}'
+}
+
+# route — validate, then (with --number) resolve the issue id, then (with --select)
+# select the tracker it names: everything one dispatcher call needs, in ONE launch of
+# this helper instead of up to three (FJ-301) — a fresh bash is the dearest process
+# on Windows. Prints two lines: the identity JSON (empty without --number) and the
+# tracker JSON (empty without --select). A config that fails validation exits 3, so
+# the dispatcher can report it as not-configured; an id or tracker that does not
+# resolve exits 1, as resolve and select do on their own.
+route() {
+	DIE_STATUS=3; validate "$config"; DIE_STATUS=1
+	# resolve and select run at top level, not inside `$(…)` or an `||`: either one
+	# switches set -e off for the whole function, and a failure mid-resolve would
+	# print a half-built identity instead of stopping.
+	if [ -n "$number" ]; then resolve; selector="$ROUTED_REF"; else echo; fi
+	if [ "$do_select" = 1 ]; then select_json; else echo; fi
 }
 
 # unprefixed — "true" when issue names drop the tracker prefix (#258): the repo has
@@ -485,6 +520,7 @@ bind_legacy() {
 case "$cmd" in
 	validate)        need_file --config "$config"; [ -z "$tracked" ] || need_file --tracked "$tracked"; validate "$config" ;;
 	select)          need_file --config "$config"; select_json ;;
+	route)           need_file --config "$config"; [ -z "$tracked" ] || need_file --tracked "$tracked"; route ;;
 	resolve)         need_file --config "$config"; resolve ;;
 	unprefixed)      need_file --config "$config"; unprefixed ;;
 	legacy-ref)      need_file --config "$config"; legacy_ref ;;
@@ -501,5 +537,5 @@ case "$cmd" in
 		need_file --config "$config"; need_file --secrets "$secrets"; [ -n "$out_file" ] || die "migrate-secrets: --out required"
 		migrate_secrets ;;
 	bind-legacy)     need_file --config "$config"; ref="$selector"; bind_legacy ;;
-	*) die "tracker-config: unknown command '${cmd}' (validate select resolve unprefixed legacy-ref migrate-config overlay-local migrate-secrets bind-legacy)" ;;
+	*) die "tracker-config: unknown command '${cmd}' (validate select resolve route unprefixed legacy-ref migrate-config overlay-local migrate-secrets bind-legacy)" ;;
 esac

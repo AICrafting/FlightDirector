@@ -17,7 +17,7 @@ set -euo pipefail
 
 # Windows shims (jq CRLF, path form); a no-op elsewhere.
 # shellcheck source-path=SCRIPTDIR source=_portable.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+source "${BASH_SOURCE[0]%/*}/_portable.sh"
 
 ROOT="${BATCH_MANIFEST_ROOT:-$(cd "$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")" && pwd)}"
 # Same config-home resolution as the dispatcher: `.flightdirector/`, falling back
@@ -25,7 +25,7 @@ ROOT="${BATCH_MANIFEST_ROOT:-$(cd "$(dirname "$(cd "$(git rev-parse --git-common
 CFG_DIR="$ROOT/.flightdirector"
 [ -f "$CFG_DIR/config.json" ] || { [ -f "$ROOT/.lightspeed/config.json" ] && CFG_DIR="$ROOT/.lightspeed"; } || true
 DIR="$CFG_DIR/batches"
-SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
 FLIGHT="${FLIGHT_SELF:-$SCRIPTS/flight}"
 
 die() { printf 'batch-manifest: %s\n' "$1" >&2; exit 1; }

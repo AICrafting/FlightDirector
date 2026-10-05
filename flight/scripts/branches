@@ -17,7 +17,7 @@ set -euo pipefail
 
 # Windows shims (jq CRLF, path form); a no-op elsewhere.
 # shellcheck source-path=SCRIPTDIR source=_portable.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+source "${BASH_SOURCE[0]%/*}/_portable.sh"
 
 die() { echo "flight branches: $*" >&2; exit 1; }
 warn() { echo "flight branches: $*" >&2; }
@@ -264,6 +264,9 @@ merged_pr() {
 # issue ("cross-check by hand").
 SCHEMA="$(jq -r '.schemaVersion // 1' "$CFG" 2>/dev/null || echo 1)"
 case "$SCHEMA" in ''|*[!0-9]*) SCHEMA=1 ;; esac
+# Resolved once: issue_id runs per branch, and a `cd`+`dirname` per call is two
+# spawns per branch on a leg where each one is dear (FJ-301).
+IDENTITY_HELPER="$(cd "${BASH_SOURCE[0]%/*}" && pwd)/issue-identity.sh"
 issue_id() {
 	local slug="${1#*/}" id err rc=0
 	if [ "$SCHEMA" -lt 3 ]; then
@@ -274,7 +277,7 @@ issue_id() {
 	fi
 	err="$(mktemp "${TMPDIR:-/tmp}/flight-branches.XXXXXX")"
 	id="$(FLIGHT_REPO_ROOT="$ROOT" FLIGHT_SELF="$FLIGHT_SELF" \
-		"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/issue-identity.sh" from-branch --branch "$1" 2>"$err")" || rc=$?
+		"$IDENTITY_HELPER" from-branch --branch "$1" 2>"$err")" || rc=$?
 	case "$rc" in
 		0) jq -r '.qualified' <<<"$id" ;;
 		3) ;;
@@ -341,7 +344,6 @@ act() { # act <verb> <branch> <detail>
 # re-checks that no local or origin ref remains and refuses otherwise — a binding is
 # the only record of an unqualified legacy branch's tracker. A branch with no binding
 # prints nothing. Returns 1 only when a binding could not be dropped.
-IDENTITY_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/issue-identity.sh"
 drop_binding() {
 	local b="$1" out r=0
 	[ "$SCHEMA" -ge 3 ] || return 0

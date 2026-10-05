@@ -39,19 +39,19 @@ set -euo pipefail
 # values keep a trailing \r: the schema check, the tracker lookups and the pr-reference
 # comparison all fail against an invisible byte.
 # shellcheck source-path=SCRIPTDIR source=_portable.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+source "${BASH_SOURCE[0]%/*}/_portable.sh"
 
 die() { printf 'issue-identity: %s\n' "$1" >&2; exit "${2:-1}"; }
 command -v jq >/dev/null 2>&1 || die "jq is required"
 
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF_DIR="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
 FLIGHT="${FLIGHT_SELF:-$SELF_DIR/flight}"
 
 if [ -n "${FLIGHT_REPO_ROOT:-}" ]; then
 	ROOT="$FLIGHT_REPO_ROOT"
 else
 	COMMON="$(git rev-parse --git-common-dir 2>/dev/null)" || die "not inside a git repository"
-	ROOT="$(dirname "$(cd "$COMMON" && pwd)")"
+	ROOT="$(cd "$COMMON" && pwd)"; ROOT="${ROOT%/*}"; [ -n "$ROOT" ] || ROOT=/
 fi
 # Same config-home resolution as the dispatcher (`.lightspeed/` is the deprecated one).
 CFG_DIR="$ROOT/.flightdirector"
@@ -89,6 +89,15 @@ canonical() {
 	jq -c --argjson u "$UNPREFIXED" '{tracker, number, qualified,
 		display: (if $u then (if (.number | test("^[0-9]+$")) then "#" + .number else .number end) else .qualified end),
 		branchPrefix}' <<<"$1"
+}
+
+# learn_unprefixed <identity> — when canonical has not yet asked, take the answer from
+# an identity `resolve` printed just now: its display already follows the CURRENT
+# tracker count, so a second dispatcher round-trip to ask again is pure cost (FJ-301).
+# Stored identities still go through canonical's own resolve: they may predate a change.
+# Runs at top level, never in `$(…)`, so the answer persists for canonical.
+learn_unprefixed() {
+	[ -n "$UNPREFIXED" ] || UNPREFIXED="$(jq -r 'if .display then .display != .qualified else false end' <<<"$1")"
 }
 
 resolve() { # resolve <input> [tracker]
@@ -222,6 +231,7 @@ from_branch() { # from_branch <branch> [explicit tracker]
 			die "branch '$branch' carries no issue identity (no configured tracker '$ref')" 3
 		fi
 		rm -f "$err"
+		learn_unprefixed "$id"
 		canonical "$id"
 		return 0
 	fi
@@ -235,7 +245,9 @@ from_branch() { # from_branch <branch> [explicit tracker]
 		[ -n "$tracker" ] || tracker="$(bindings | jq -r '.legacyDefaultTracker // empty' 2>/dev/null || true)"
 		[ -n "$tracker" ] || tracker="$(sole_tracker)"
 		[ -n "$tracker" ] || die "legacy branch '$branch' has no recoverable tracker binding; rerun with --tracker REF (flight never guesses)" 4
-		id="$(canonical "$(resolve "$n" "$tracker")")"
+		id="$(resolve "$n" "$tracker")"
+		learn_unprefixed "$id"
+		id="$(canonical "$id")"
 		# An explicit choice is retained, so every later step agrees without asking again.
 		[ -z "$explicit" ] || with_lock write_binding "$branch" "$id"
 		printf '%s\n' "$id"

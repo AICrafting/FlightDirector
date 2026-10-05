@@ -10,7 +10,7 @@
 set -euo pipefail
 ADAPTER_NAME="github/auth"
 # shellcheck source-path=SCRIPTDIR source=_authlib.sh
-source "$(cd "$(dirname "$0")" && pwd)/../_authlib.sh"
+source "${0%/*}/../_authlib.sh"
 
 verb="${1:-}"; shift || true
 [ "$verb" = "check" ] || die "unknown verb '${verb}' (auth: check)"

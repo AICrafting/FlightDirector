@@ -186,40 +186,60 @@ printf '\033[1m── Windows: native jq.exe writes CRLF ──\033[0m\n'
 # compared byte-exact: `$(…)` strips the newline but keeps a \r.
 CRLF_BIN="$SANDBOX/crlf-bin"; mkdir -p "$CRLF_BIN"
 REAL_JQ="$(command -v jq)"
+# jq.exe 1.6+ has `-b` (--binary) for LF output, and the shim uses it when the probe
+# says it is there (FJ-301); an older jq.exe rejects the flag, and the shim falls back
+# to stripping CR with `tr`. Both are emulated, and every msys check runs under each.
 cat >"$CRLF_BIN/jq" <<SH
 #!/usr/bin/env bash
+for a in "\$@"; do case "\$a" in -b|--binary) echo used >>"$SANDBOX/jq-b.log"; exec "$REAL_JQ" "\$@" ;; esac; done
 "$REAL_JQ" "\$@" | awk '{ printf "%s\r\n", \$0 }'; exit \${PIPESTATUS[0]}
 SH
-chmod +x "$CRLF_BIN/jq"
-msys() { (cd "$R" && PATH="$CRLF_BIN:$PATH" OSTYPE=msys "$IDENTITY" "$@"); }
+OLD_CRLF_BIN="$SANDBOX/crlf-old-bin"; mkdir -p "$OLD_CRLF_BIN"
+cat >"$OLD_CRLF_BIN/jq" <<SH
+#!/usr/bin/env bash
+for a in "\$@"; do case "\$a" in -b|--binary) echo "jq: Unknown arguments: \$a" >&2; exit 2 ;; esac; done
+"$REAL_JQ" "\$@" | awk '{ printf "%s\r\n", \$0 }'; exit \${PIPESTATUS[0]}
+SH
+chmod +x "$CRLF_BIN/jq" "$OLD_CRLF_BIN/jq"
+# FLIGHT_JQ_BINARY empty, so each run probes its own emulated jq.exe afresh.
+msys() { (cd "$R" && PATH="$MSYS_BIN:$PATH" OSTYPE=msys FLIGHT_JQ_BINARY='' "$IDENTITY" "$@"); }
 msys_status() { local rc=0; msys "$@" >/dev/null 2>&1 || rc=$?; echo "$rc"; }
 has_cr() { grep -q '\\r' <<<"$(od -c)"; }
 check "the emulated jq really emits CR" "$(printf '1\n' | "$CRLF_BIN/jq" . | has_cr && echo 1 || echo 0)"
-cp "$SANDBOX/bind.good" "$BIND"
-out="$(msys from-branch --branch feature/gh-1-second 2>&1 || true)"
-check "msys: a qualified branch resolves, CR-free" \
-	"$([ "$out" = '{"tracker":"GH","number":"1","qualified":"GH-1","display":"GH-1","branchPrefix":"gh-1"}' ] && echo 1 || echo 0)" "$out"
-out="$(msys from-branch --branch feature/12-old-work 2>&1 || true)"
-check "msys: a bound legacy branch resolves" \
-	"$([ "$out" = '{"tracker":"FJ","number":"12","qualified":"FJ-12","display":"FJ-12","branchPrefix":"fj-12"}' ] && echo 1 || echo 0)" "$out"
-out="$(msys from-branch --branch bugfix/17-unbound 2>&1 || true)"
-check "msys: an unbound legacy branch uses the legacy default" \
-	"$([ "$out" = '{"tracker":"FJ","number":"17","qualified":"FJ-17","display":"FJ-17","branchPrefix":"fj-17"}' ] && echo 1 || echo 0)" "$out"
-out="$(msys from-branch --branch feature/12-old-work --tracker fj 2>&1 || true)"
-check "msys: an alias/case lookup compares clean refs" \
-	"$([ "$out" = '{"tracker":"FJ","number":"12","qualified":"FJ-12","display":"FJ-12","branchPrefix":"fj-12"}' ] && echo 1 || echo 0)" "$out"
-out="$(msys from-manifest --run-id run1 --entry 5 2>&1 || true)"
-check "msys: a legacy manifest entry resolves" "$([ "$out" = '{"tracker":"FJ","number":"5","qualified":"FJ-5","display":"FJ-5","branchPrefix":"fj-5"}' ] && echo 1 || echo 0)" "$out"
-out="$(msys from-history --ref '#40' 2>&1 || true)"
-check "msys: a bare history reference resolves" "$([ "$out" = '{"tracker":"FJ","number":"40","qualified":"FJ-40","display":"FJ-40","branchPrefix":"fj-40"}' ] && echo 1 || echo 0)" "$out"
-check "msys: a non-issue branch is still 'no identity' (3)" "$([ "$(msys_status from-branch --branch release/0.1.0)" = 3 ] && echo 1 || echo 0)"
-check "msys: remember stores a verified identity" "$(ok msys remember --branch feature/gh-2-msys --identity '{"tracker":"GH","number":"2","qualified":"GH-2","display":"GH-2","branchPrefix":"gh-2"}')"
-check "msys: the bindings file stays CR-free" "$(has_cr <"$BIND" && echo 0 || echo 1)"
-out="$(msys pr-reference --identity "$fj" --closes true 2>&1 || true)"
-check "msys: the code repository's own issue still gets Closes #N" "$([ "$out" = 'Closes #3' ] && echo 1 || echo 0)" "$out"
-out="$(msys pr-reference --identity "$gh" --closes true 2>&1 || true)"
-check "msys: another tracker's issue still gets Tracks" "$([ "$out" = "$(tracks GH-3)" ] && echo 1 || echo 0)" "$out"
-cp "$SANDBOX/bind.good" "$BIND"
+msys_checks() { # msys_checks <variant> [quick] — quick: the first four checks only
+	local variant="$1" out
+	cp "$SANDBOX/bind.good" "$BIND"
+	out="$(msys from-branch --branch feature/gh-1-second 2>&1 || true)"
+	check "msys ($variant): a qualified branch resolves, CR-free" \
+		"$([ "$out" = '{"tracker":"GH","number":"1","qualified":"GH-1","display":"GH-1","branchPrefix":"gh-1"}' ] && echo 1 || echo 0)" "$out"
+	out="$(msys from-branch --branch feature/12-old-work 2>&1 || true)"
+	check "msys ($variant): a bound legacy branch resolves" \
+		"$([ "$out" = '{"tracker":"FJ","number":"12","qualified":"FJ-12","display":"FJ-12","branchPrefix":"fj-12"}' ] && echo 1 || echo 0)" "$out"
+	out="$(msys from-branch --branch bugfix/17-unbound 2>&1 || true)"
+	check "msys ($variant): an unbound legacy branch uses the legacy default" \
+		"$([ "$out" = '{"tracker":"FJ","number":"17","qualified":"FJ-17","display":"FJ-17","branchPrefix":"fj-17"}' ] && echo 1 || echo 0)" "$out"
+	out="$(msys from-branch --branch feature/12-old-work --tracker fj 2>&1 || true)"
+	check "msys ($variant): an alias/case lookup compares clean refs" \
+		"$([ "$out" = '{"tracker":"FJ","number":"12","qualified":"FJ-12","display":"FJ-12","branchPrefix":"fj-12"}' ] && echo 1 || echo 0)" "$out"
+	# The fallback pass stops here: every call through the emulated jq.exe is a bash
+	# launch, the dearest process on the Windows leg (FJ-301).
+	if [ "${2:-}" = quick ]; then cp "$SANDBOX/bind.good" "$BIND"; return 0; fi
+	out="$(msys from-manifest --run-id run1 --entry 5 2>&1 || true)"
+	check "msys ($variant): a legacy manifest entry resolves" "$([ "$out" = '{"tracker":"FJ","number":"5","qualified":"FJ-5","display":"FJ-5","branchPrefix":"fj-5"}' ] && echo 1 || echo 0)" "$out"
+	out="$(msys from-history --ref '#40' 2>&1 || true)"
+	check "msys ($variant): a bare history reference resolves" "$([ "$out" = '{"tracker":"FJ","number":"40","qualified":"FJ-40","display":"FJ-40","branchPrefix":"fj-40"}' ] && echo 1 || echo 0)" "$out"
+	check "msys ($variant): a non-issue branch is still 'no identity' (3)" "$([ "$(msys_status from-branch --branch release/0.1.0)" = 3 ] && echo 1 || echo 0)"
+	check "msys ($variant): remember stores a verified identity" "$(ok msys remember --branch feature/gh-2-msys --identity '{"tracker":"GH","number":"2","qualified":"GH-2","display":"GH-2","branchPrefix":"gh-2"}')"
+	check "msys ($variant): the bindings file stays CR-free" "$(has_cr <"$BIND" && echo 0 || echo 1)"
+	out="$(msys pr-reference --identity "$fj" --closes true 2>&1 || true)"
+	check "msys ($variant): the code repository's own issue still gets Closes #N" "$([ "$out" = 'Closes #3' ] && echo 1 || echo 0)" "$out"
+	out="$(msys pr-reference --identity "$gh" --closes true 2>&1 || true)"
+	check "msys ($variant): another tracker's issue still gets Tracks" "$([ "$out" = "$(tracks GH-3)" ] && echo 1 || echo 0)" "$out"
+	cp "$SANDBOX/bind.good" "$BIND"
+}
+MSYS_BIN="$CRLF_BIN" msys_checks "jq.exe -b"
+check "msys: a jq.exe with -b is driven with -b, not through tr" "$([ -s "$SANDBOX/jq-b.log" ] && echo 1 || echo 0)"
+MSYS_BIN="$OLD_CRLF_BIN" msys_checks "old jq.exe, tr" quick
 
 printf '\033[1m── schema guard ──\033[0m\n'
 jq '.schemaVersion = 2 | del(.issueTrackers, .legacyIssueTracker) | .issues = {"backend":"forgejo"}' "$SANDBOX/config.good" >"$CFG"

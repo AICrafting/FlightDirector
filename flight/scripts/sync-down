@@ -26,7 +26,7 @@ set -euo pipefail
 
 # Windows shims (jq CRLF, path form); a no-op elsewhere.
 # shellcheck source-path=SCRIPTDIR source=_portable.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+source "${BASH_SOURCE[0]%/*}/_portable.sh"
 
 die()  { echo "flight branches sync-down: $*" >&2; exit 1; }
 warn() { echo "flight branches sync-down: $*" >&2; }

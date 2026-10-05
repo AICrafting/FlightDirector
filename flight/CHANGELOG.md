@@ -14,6 +14,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 ## [Unreleased]
 
 ### Fixed
+- **Label lookups fetch the repo's label list once per command** (FJ-301). The list was meant to
+  be cached, but the cache was filled in a subshell and lost every time. Every lookup re-fetched
+  the whole paged list: once per configured status role on `issues set-status` and
+  `clear-status`, and once per `--label` on `create`, `label-add` and `label-remove`. On Forgejo,
+  GitHub and GitLab those commands now make one label-list request. A Forgejo status change
+  against a repo with several pages of labels drops from a dozen or more requests to a handful.
 - **The repo's own Windows CI leg no longer spends ~10 minutes on one test** (FJ-295). The fake
   `curl` in `tracker-lifecycle.test.sh` matched GitHub's label list with `*page=1*`, which
   `per_page=100` also matches, so every page came back full and the adapter paged to its
@@ -21,6 +27,16 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   anchored on `[?&]page=1` at the end of the URL in that test and three others that had copied
   it, and a new check fails if the label list is paged more than a few times. Test-only:
   plugin behavior is unchanged.
+
+### Changed
+- **Faster dispatcher on Windows** (FJ-301). Git Bash ran every `jq` call through a `tr` pipe
+  to strip the CRs that a native `jq.exe` writes, which cost three processes per call. Flight
+  now uses jq's own `-b` flag, which writes LF directly, and keeps the pipe only for a jq older
+  than 1.6. Start-up also does less work on every platform: helpers are located without
+  `dirname`, and the config and the selected tracker's fields are each read with a single `jq`.
+  Each command validates its config and selects its tracker in one launch of the tracker helper
+  instead of up to three. Result pages are processed with one `jq` each. A status change starts
+  well under half as many processes as before.
 
 ## [0.17.2] - 2026-10-04
 

@@ -6,11 +6,11 @@
 
 # Windows shims (jq CRLF, path form); a no-op elsewhere.
 # shellcheck source-path=SCRIPTDIR source=../../_portable.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../_portable.sh"
+source "${BASH_SOURCE[0]%/*}/../../_portable.sh"
 # shellcheck source-path=SCRIPTDIR source=../_errors.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_errors.sh"
+source "${BASH_SOURCE[0]%/*}/../_errors.sh"
 # shellcheck source-path=SCRIPTDIR source=../_json.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../_json.sh"
+source "${BASH_SOURCE[0]%/*}/../_json.sh"
 
 command -v curl >/dev/null 2>&1 || { echo "forgejo adapter: curl is required" >&2; exit 1; }
 command -v jq   >/dev/null 2>&1 || { echo "forgejo adapter: jq is required" >&2; exit 1; }
@@ -102,7 +102,7 @@ _hdr_has_next() {
 # or two.
 _paged_get() {
   local path="$1" query="$2" limit="${3:-}" filter="${4:-.[]}"
-  local page=1 size=100 rows=0 batch count total hdr out
+  local page=1 size=100 rows=0 page_out emitted batch count total hdr out
   if [ -n "$limit" ]; then
     case "$limit" in ''|*[!0-9]*) die "--limit must be a positive integer (got '$limit')" ;; esac
     [ "$limit" -gt 0 ] || die "--limit must be a positive integer (got '$limit')"
@@ -120,9 +120,13 @@ _paged_get() {
     # `|| exit 1`, not errexit: inside a command substitution (as when a caller caches
     # the rows) set -e is not inherited, and a failed page would read as an empty one.
     batch="$(_api GET "${path}?${query:+$query&}limit=${size}&page=${page}")" || exit 1
-    count="$(printf '%s' "$batch" | jq 'length')"
-    printf '%s' "$batch" | jq -c "$filter" >>"$out"
-    rows="$(wc -l <"$out" | tr -d ' ')"
+    # ONE jq per page (FJ-301): its first line is "<page length> <rows emitted>" and
+    # the rows follow, so the page needs no second jq for its length and no wc for the
+    # tally. `tojson` prints exactly what `jq -c` would.
+    page_out="$(jq -r '. as $p | [$p | '"$filter"'] as $r | "\($p | length) \($r | length)", ($r[] | tojson)' <<<"$batch")" || exit 1
+    read -r count emitted <<<"${page_out%%$'\n'*}"
+    if [ "$emitted" -gt 0 ]; then printf '%s\n' "${page_out#*$'\n'}" >>"$out"; fi
+    rows=$((rows + emitted))
     [ "$count" -gt 0 ] || break
     [ -z "$limit" ] || [ "$rows" -lt "$limit" ] || break
     page=$((page + 1))
@@ -156,6 +160,23 @@ _all_labels() {
     _LABELS_CACHE="$(_paged_get "/labels" "" "" | jq -s '.')" || exit 1
   fi
   printf '%s' "$_LABELS_CACHE"
+}
+
+# labels_load — fill _LABELS_CACHE in the CALLING process. Every lookup is written
+# `$(label_id …)`, a subshell, so a cache filled there dies with it and each lookup
+# re-fetched the whole paged label list — once per status role on every set-status
+# (FJ-301). Call this at top level before the first lookup; the subshells inherit it.
+labels_load() { _all_labels >/dev/null; }
+
+# _status_ids_on_issue <labels-json> <current-ids-json> <keep-name> — the ids of the
+# configured status labels the issue carries, except <keep-name>, one per line, in config
+# order. One jq for the whole set rather than a label_id plus an `index` test per status
+# role (FJ-301). A name resolves to its first id, as label_id does; call labels_load first.
+_status_ids_on_issue() {
+  printf '%s' "$_LABELS_CACHE" | jq -r --argjson cfg "$1" --argjson cur "$2" --arg keep "$3" '
+    (reduce .[] as $l ({}; .[$l.name] //= $l.id)) as $ids
+    | $cfg.status // {} | .[] | select(type == "string" and . != $keep)
+    | $ids[.] // empty | select(. as $i | $cur | index($i) != null)'
 }
 
 # label_id <name> — numeric id on stdout, empty if the label doesn't exist.
