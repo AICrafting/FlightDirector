@@ -229,6 +229,11 @@ query rather than a guess. It is an ordinary status: the first status change —
 work starts — replaces it. Issues filed outside flight don't get it, and `--no-status` skips it
 for one issue.
 
+**Screenshots** go onto the issue when the tracker can take them: Forgejo and GitLab can.
+GitHub and Jira have no upload API for issue attachments, so flight checks first
+(`flight issues attach --check`) and never posts a body with a broken image link. Instead, it
+keeps the files and asks you to drag them into the issue yourself.
+
 ### 2. Decide what to do next
 
 > **You:** "what should I work on?"
@@ -294,6 +299,11 @@ on the linked issues and closes them only when they reach a stage that closes �
 visible (e.g. `status/to test`, then `status/qa`) as it climbs the pipeline, and closes when it
 lands in the final stage.
 
+CI can also come back **cancelled**. When a newer run replaced it (a second push, or the PR's
+own run on the same commit as the push run), the cancelled run doesn't count: the run that
+replaced it decides. A run that was cancelled outright verified nothing, so flight says exactly
+that. It isn't a failure, but it isn't a pass either, and flight won't merge on it.
+
 Closing there isn't compulsory. If your real release happens somewhere flight can't see — a
 deployment approval, an environment promotion, a change window after the last branch merges —
 set `"closesIssues": false` on that final stage and give it an `issueStatus`. The issue then
@@ -341,6 +351,10 @@ changes next time. Each stage decides how it receives that back-merge with `sync
 "Sync qa back into develop" PR that auto-merges on green CI, and a direct stage just gets a push.
 Put `"syncDown": "none"` on a stage to opt it out (the cascade stops there). A conflict or red CI
 on the sync stops and reports; nothing is ever squashed, rebased, or reset on a stage branch.
+When a push is refused, the report names the cause: origin moved, the server refused it, or
+your repo's pre-push hook failed. It quotes the output and gives the path of the full log. Once
+the problem is fixed, run `flight branches sync-down --from <stage>` again to pick the cascade
+back up. A sync PR the first run left open is reused rather than opened a second time.
 
 That's the full loop: **file → triage → work (in a worktree, behind a merge gate) → promote up
 the pipeline** — all without leaving the session.
