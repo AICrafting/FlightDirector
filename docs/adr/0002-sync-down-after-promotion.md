@@ -64,9 +64,12 @@ Each stage may declare how it **receives** a back-merge:
 - **Freshness check first** on the receiving stage, with the existing table from
   `promoting-a-branch` Step 4a: behind → fast-forward; ahead or diverged → STOP.
 - **`direct`:** `git merge --ff <upper>` in the checkout holding the lower stage, then push. If
-  that checkout is dirty and the merge refuses, fork a throwaway worktree from
-  `origin/<lower>`, merge there, push `HEAD:<lower>`, and report that the local checkout is
-  now behind (it fast-forwards at the next freshness check).
+  that checkout is dirty and the merge would touch a dirty path (or is not a fast-forward),
+  fork a throwaway worktree from `origin/<lower>`, merge there, push `HEAD:<lower>`, and report
+  that the local checkout is now behind (it fast-forwards at the next freshness check). A
+  fast-forward that leaves the dirty paths alone stays in the checkout (FJ-312), because the
+  repo's push hooks need what is installed there. Push hooks run in both places; a refused
+  push is reported with its cause and output, never `--no-verify`'d past.
 - **`pr`:** open a PR `<upper> → <lower>`, watch CI, and **auto-merge on green** with the
   `merge` method — never the stage's promotion `strategy`, because squashing a back-merge
   re-diverges the branches. The content is already on a higher stage, so there is nothing new

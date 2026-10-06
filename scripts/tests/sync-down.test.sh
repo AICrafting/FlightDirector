@@ -258,14 +258,33 @@ check "row says a CI run was cancelled, PR left open" "$(grep -q $'^develop\tsto
 check "pr merge was NOT called on a cancelled verdict" "$(grep -q '^pr merge' "$STUB_LOG" && echo 0 || echo 1)"
 check "origin/develop untouched by a cancelled verdict" "$([ "$(osha develop)" = "$dev_before" ] && echo 1 || echo 0)"
 
-# ── 8. dirty checkout: merge in a throwaway worktree, push, report behind ────
-echo "── direct: dirty checkout"
+# ── 8. dirty checkout ────────────────────────────────────────────────────────
+# 8a. The fast-forward doesn't touch the dirty path: it happens in place (FJ-312),
+#     where the repo's hooks have the user's installed dependencies.
+echo "── direct: dirty checkout, merge leaves the dirty path alone"
 fresh
 commit_on "$P" develop f1 one
 git -C "$R" pull -q --ff-only origin develop
 promote develop qa
-qa_tip="$(osha qa)"; dev_local="$(sha develop)"
+qa_tip="$(osha qa)"
 printf 'uncommitted\n' >"$R/base"          # tracked file modified in the main checkout
+run --from qa; rc=$?
+check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(err)"
+check "row says fast-forwarded, in place" "$(grep -q $'^develop\tfast-forwarded\t.*fast-forwarded in .*uncommitted changes untouched' < <(line develop) && echo 1 || echo 0)" "$(out)"
+check "origin/develop == qa tip" "$([ "$(osha develop)" = "$qa_tip" ] && echo 1 || echo 0)"
+check "local develop moved with it" "$([ "$(sha develop)" = "$qa_tip" ] && echo 1 || echo 0)"
+check "the uncommitted edit is intact" "$([ "$(cat "$R/base")" = "uncommitted" ] && echo 1 || echo 0)"
+check "no throwaway worktree left behind" "$([ "$(git -C "$R" worktree list | wc -l)" -eq 1 ] && echo 1 || echo 0)"
+
+# 8b. The merge touches the dirty path: merge in a throwaway worktree, push, report behind.
+echo "── direct: dirty checkout, merge touches the dirty path"
+fresh
+commit_on "$P" develop f1 one
+git -C "$R" pull -q --ff-only origin develop
+promote develop qa
+commit_on "$P" qa base hotfix              # qa changes the file R has dirty
+qa_tip="$(osha qa)"; dev_local="$(sha develop)"
+printf 'uncommitted\n' >"$R/base"
 run --from qa; rc=$?
 check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(err)"
 check "origin/develop == qa tip" "$([ "$(osha develop)" = "$qa_tip" ] && echo 1 || echo 0)"
@@ -273,7 +292,76 @@ check "row reports the local checkout is behind" "$(grep -q 'local checkout .* i
 check "local develop ref was not moved under the dirty checkout" "$([ "$(sha develop)" = "$dev_local" ] && echo 1 || echo 0)"
 check "the uncommitted edit is intact" "$([ "$(cat "$R/base")" = "uncommitted" ] && echo 1 || echo 0)"
 check "throwaway worktree removed" "$([ "$(git -C "$R" worktree list | wc -l)" -eq 1 ] && echo 1 || echo 0)"
+
+# 8c. A pre-push hook that needs something only the real checkout has (orbitopolis:
+#     eslint without node_modules) refuses the throwaway's push. The row says so and
+#     carries the hook's own words — not "origin moved?" (FJ-312).
+echo "── direct: pre-push hook refuses the throwaway's push"
+# install_hook — R's pre-push hook passes only where an untracked deps/ exists.
+install_hook() {
+	mkdir -p "$R/deps"
+	cat >"$R/.git/hooks/pre-push" <<'HOOK'
+#!/usr/bin/env bash
+[ -d deps ] || { echo "lint: cannot find deps/ — run the installer" >&2; exit 1; }
+HOOK
+	chmod +x "$R/.git/hooks/pre-push"
+}
+fresh
+commit_on "$P" develop f1 one
+git -C "$R" pull -q --ff-only origin develop
+promote develop qa
+commit_on "$P" qa base hotfix
+install_hook
+dev_origin="$(osha develop)"
+printf 'uncommitted\n' >"$R/base"
+run --from qa; rc=$?
+row_text="$(line develop)"
+check "exit non-zero" "$([ "$rc" != 0 ] && echo 1 || echo 0)"
+check "row says the pre-push hook refused the push" "$(grep -q $'^develop\tstopped\t.*pre-push hook refused' <<<"$row_text" && echo 1 || echo 0)" "$row_text"
+check "row carries the hook's own output" "$(grep -q 'cannot find deps/' <<<"$row_text" && echo 1 || echo 0)" "$row_text"
+check "row no longer guesses 'origin moved'" "$(grep -q 'moved' <<<"$row_text" && echo 0 || echo 1)" "$row_text"
+check "row says the push ran from a throwaway worktree, and why" "$(grep -q 'throwaway worktree because .*uncommitted changes' <<<"$row_text" && echo 1 || echo 0)" "$row_text"
+log_path="$(sed -n 's/.*full output: \([^)]*\)).*/\1/p' <<<"$row_text")"
+check "the full push output is kept in a log" "$([ -n "$log_path" ] && grep -q 'cannot find deps/' "$log_path" && echo 1 || echo 0)" "$log_path"
+check "origin/develop untouched" "$([ "$(osha develop)" = "$dev_origin" ] && echo 1 || echo 0)"
+check "throwaway worktree removed" "$([ "$(git -C "$R" worktree list | wc -l)" -eq 1 ] && echo 1 || echo 0)"
 git -C "$R" checkout -q -- base
+
+# 8d. The same hook, with a dirty path the merge doesn't touch: the push happens from
+#     the real checkout, where deps/ exists, and goes through (the orbitopolis case).
+echo "── direct: pre-push hook passes in place"
+fresh
+commit_on "$P" develop f1 one
+git -C "$R" pull -q --ff-only origin develop
+promote develop qa
+install_hook
+qa_tip="$(osha qa)"
+printf 'uncommitted\n' >"$R/base"
+run --from qa; rc=$?
+check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(out) $(err)"
+check "origin/develop == qa tip" "$([ "$(osha develop)" = "$qa_tip" ] && echo 1 || echo 0)"
+git -C "$R" checkout -q -- base
+
+# 8e. origin really did move between the measurement and the push: that, and only
+#     that, is reported as a move. The hook pushes a commit from P to simulate it.
+echo "── direct: origin moves during the sync"
+fresh
+commit_on "$P" develop f1 one
+git -C "$R" pull -q --ff-only origin develop
+promote develop qa
+git -C "$P" switch -q develop; git -C "$P" pull -q --ff-only origin develop
+cat >"$R/.git/hooks/pre-push" <<HOOK
+#!/usr/bin/env bash
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+printf 'race\n' >"$P/race"
+git -C "$P" add race && git -C "$P" commit -qm race && git -C "$P" push -q origin develop
+HOOK
+chmod +x "$R/.git/hooks/pre-push"
+run --from qa; rc=$?
+row_text="$(line develop)"
+check "exit non-zero" "$([ "$rc" != 0 ] && echo 1 || echo 0)"
+check "row says origin/develop moved during the sync" "$(grep -q $'^develop\tstopped\t.*origin/develop moved during the sync' <<<"$row_text" && echo 1 || echo 0)" "$row_text"
+check "row doesn't blame a hook" "$(grep -q 'hook refused' <<<"$row_text" && echo 0 || echo 1)" "$row_text"
 
 # ── 9. ahead / diverged lower stage → STOP, nothing pushed ───────────────────
 echo "── freshness: ahead / diverged"
