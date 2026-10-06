@@ -158,7 +158,9 @@ case "$verb" in
     ;;
 
   attach)
-    die "issues attach: not supported on GitHub (no REST API for issue attachments)"
+    # Also the answer to --check (FJ-311): `unsupported`, so a skill can branch before
+    # it composes a body around a URL that will never come back.
+    fail unsupported "issues attach: not supported on GitHub (no REST API for issue attachments)"
     ;;
 
   comment)

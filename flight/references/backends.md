@@ -87,7 +87,8 @@ informational (`-`), not a failure, and the repository probe is what proves the 
 
 Full parity. Note the `api` base is `https://api.github.com` — **no** `/api/v1` (that's a Forgejo
 convention). Labels are managed by name under the Issues permission; `issues attach` is not
-supported on GitHub (no REST API for issue attachments).
+supported on GitHub (no REST API for issue attachments). It fails `unsupported`, and a skill
+tests for that up front with `flight issues attach --check`.
 
 ```jsonc
 "code": {
