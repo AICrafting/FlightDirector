@@ -14,6 +14,13 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 ## [Unreleased]
 
 ### Added
+- **`flight issues attach --check`** (FJ-311). Asks whether the tracker's backend can upload a
+  file to an issue, without sending anything. It exits 0 on Forgejo and GitLab. On GitHub (whose
+  REST API has no issue-attachment endpoint) and Jira it fails with the `unsupported` error code,
+  which those backends' `issues attach` now uses too, where it used to report `usage`. Advertised
+  as the `issues-attach-check` capability. `filing-issues` Step 7 now checks first and never
+  embeds an image link when the upload didn't happen. On GitHub, an agent following it used to
+  post `![…]()` comments that claimed screenshots that weren't there.
 - **`flight preflight run` and `flight preflight check`** (FJ-307). The skills used to run the
   repo's `code.preflight` gate themselves as `sh -c "$GATE"`. Claude Code's Bash safety check
   cannot read inside a `sh -c` string, so it sometimes stopped to ask, and an unattended session

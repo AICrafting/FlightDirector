@@ -161,13 +161,16 @@ case "$verb" in
     ;;
 
   attach)
-    number=""; file=""; name=""
+    number=""; file=""; name=""; check=0
     while [ $# -gt 0 ]; do case "$1" in
       --number) number="$2"; shift 2 ;;
       --file)   file="$2"; shift 2 ;;
       --name)   name="$2"; shift 2 ;;
+      --check)  check=1; shift ;;
       *) die "issues attach: unknown arg '$1'" ;;
     esac; done
+    # --check (FJ-311): this backend can upload; nothing is sent.
+    [ "$check" = 0 ] || exit 0
     [ -n "$number" ] || die "issues attach: --number required"
     [ -f "$file" ]   || die "issues attach: --file '$file' not found"
     [ -n "$name" ]   || name="$(basename "$file")"

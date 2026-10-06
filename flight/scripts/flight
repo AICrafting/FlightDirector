@@ -44,7 +44,7 @@ plugin_manifest() {
 # Feature tokens a consumer can detect with `flight capabilities --json` (#254)
 # instead of comparing versions. A token is added here in the same change that
 # ships the feature, and never renamed or removed once released.
-CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json issues-paging issues-copy issues-deps preflight)
+CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json issues-paging issues-copy issues-deps preflight issues-attach-check)
 
 # `flight --version [--json]` and `flight capabilities [--json]` (#254) — answered
 # before anything else: no repo, config, token or network needed, so a consumer

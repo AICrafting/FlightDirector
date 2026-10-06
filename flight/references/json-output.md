@@ -42,6 +42,7 @@ $ flight capabilities --json
 | `issues-copy` | `issues copy` and `issues resync` exist |
 | `issues-deps` | `issues block`, `unblock`, `blockers`, `blocking`, and `blocked_by` on `issues get --json` |
 | `preflight` | `preflight run` and `preflight check` run and check the repo's `code.preflight` gate (FJ-307) |
+| `issues-attach-check` | `issues attach --check` asks whether the tracker's backend can upload attachments (FJ-311) |
 
 ## Which verbs take `--json`
 
@@ -201,7 +202,7 @@ stderr still carries the human sentence, as without `--json`. `message` is for d
 | `network` | the server couldn't be reached (curl itself failed) |
 | `backend` | the server answered with any other error (5xx, an unexpected 4xx), or the call failed in a way nothing classified |
 | `usage` | bad flags or arguments, or `--json` on a verb without a JSON form |
-| `unsupported` | an adapter's `dep-*` verb: the backend can't record a dependency here. `issues block` handles it by falling back to comments |
+| `unsupported` | an adapter's `dep-*` verb: the backend can't record a dependency here, and `issues block` handles it by falling back to comments. Also `issues attach` (and `attach --check`) on a backend that can't upload: GitHub and Jira |
 | `already-copied` | `issues copy`: the ledger already records a copy of this issue on that tracker; use `issues resync`, or `--force` for a second copy |
 
 The code is decided where the cause is known, and never by matching message text. The dispatcher

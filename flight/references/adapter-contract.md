@@ -178,7 +178,7 @@ GitLab comment endpoints do cap, and are paged.
 | `create`    | `--title T` `--body B` (or `--body-file PATH`) `--label NAME` (repeatable) | the new issue `number`; labels resolved name→id, applied at creation |
 | `update`    | `--number N` `--title T` and/or `--body B` (or `--body-file PATH`) | (nothing) — patches only the fields passed |
 | `comment`   | `--number N` `--body B` (or `--body-file PATH`) | (nothing; exit 0) |
-| `attach`    | `--number N` `--file PATH` `[--name NAME]` | the uploaded asset's `url` (multipart upload; embed it in the body) |
+| `attach`    | `--number N` `--file PATH` `[--name NAME]`, or `--check` alone | the uploaded asset's `url` (multipart upload; embed it in the body). Forgejo and GitLab only: GitHub and Jira fail `unsupported`. `--check` sends nothing and asks only whether this backend can upload: exit 0 if so, `unsupported` if not (FJ-311) |
 | `set-status`| `--number N` `--status ROLE`           | (nothing) — resolves ROLE→label name→id internally, removes other status/* first |
 | `clear-status`| `--number N`                         | (nothing) — removes every managed `status/*` label from the issue |
 | `label-add` | `--number N` `--label NAME` (repeatable) | (nothing) — adds existing labels by name (errors if a name doesn't exist) |
@@ -382,8 +382,8 @@ dispatcher, like `copy`.
 - `⇥` above denotes a literal TAB.
 - **GitHub backend specifics:** GitHub label endpoints use label **names**, not numeric ids — the
   github adapter resolves and applies labels by name internally (skills are unchanged). `issues
-  attach` is **not supported** on GitHub (no REST API for issue attachments) and exits non-zero
-  with that reason. `issues list` filters out pull requests (GitHub returns PRs from the issues
+  attach` is **not supported** on GitHub (no REST API for issue attachments) and fails
+  `unsupported` with that reason, as does `issues attach --check`. `issues list` filters out pull requests (GitHub returns PRs from the issues
   endpoint). `pr merge` maps `--strategy` to GitHub's `merge_method`. `pr` has no `merged` state
   either — merged is closed-with-`merged_at`, which both `pr list` and `pr get` read to report
   `merged` — but GitHub *does* filter by branch server-side, so the adapter sends
@@ -455,7 +455,7 @@ dispatcher, like `copy`.
     returns the **name as its own id** (`name⇥name`); `labels create` is a **no-op** that succeeds
     idempotently (labels spring into existence on first use). Jira has no global rename operation,
     so `labels edit` exits non-zero; move issue associations from the old free-text value to the
-    new one instead. `issues attach` is **not supported**.
+    new one instead. `issues attach` is **not supported** (fails `unsupported`, `--check` too).
   - **`list` via JQL.** Uses the enhanced-JQL search endpoint `POST /rest/api/3/search/jql` (the
     legacy `POST /rest/api/3/search` was decommissioned by Atlassian). `--state` maps to
     `statusCategory` (open = `!= Done`, closed = `= Done`, all = unfiltered); `--label` adds a
