@@ -306,11 +306,38 @@ sync_direct() {
 }
 
 # ── pr mode ─────────────────────────────────────────────────────────────────────
-# sync_pr <lower> <upper> — open a PR upper → lower, watch CI, merge on green with
-# the `merge` method (never the stage's promotion strategy: squashing a back-merge
-# re-diverges the branches). Red CI, a timeout or a refused merge leaves the PR open.
+# open_sync_pr <upper> <lower> — print the number of the open PR upper → lower, or
+# nothing. A previous run that stopped (red CI, a watch timeout) deliberately left its
+# PR open; finding it is what lets a re-run resume the cascade (FJ-299). Rows are
+# matched on head and base here too, since Forgejo filters them client-side.
+open_sync_pr() {
+	"$FLIGHT_SELF" pr list --state open --head "$1" --base "$2" --limit 100 2>/dev/null \
+		| awk -F'\t' -v h="$1" -v b="$2" '$3 == h && $4 == b { print $1; exit }' || true
+}
+
+# new_sync_pr <upper> <lower> — open the PR upper → lower; prints `pr open`'s row.
+new_sync_pr() {
+	local body rc=0
+	body="$(mktemp "${TMPDIR:-/tmp}/flight-sync-body-XXXXXX")"
+	cat >"$body" <<EOF
+## Summary
+
+Sync-down after a promotion into \`$1\`: merge \`$1\` back into \`$2\` so the lower stage stays level (ADR 0002).
+
+No issue lifecycle changes — the promotion that produced \`$1\`'s tip already handled them.
+EOF
+	"$FLIGHT_SELF" pr open --head "$1" --base "$2" --title "Sync $1 back into $2" --body-file "$body" || rc=$?
+	rm -f "$body"
+	return "$rc"
+}
+
+# sync_pr <lower> <upper> — open a PR upper → lower (or reuse the one a stopped run
+# left open), watch CI, merge on green with the `merge` method (never the stage's
+# promotion strategy: squashing a back-merge re-diverges the branches). Red CI, a
+# timeout or a refused merge leaves the PR open; re-running the verb resumes it.
 sync_pr() {
-	local lower="$1" upper="$2" note pr num body watch status wt
+	local lower="$1" upper="$2" note pr num watch status wt reused="" resume
+	resume="re-run \`flight branches sync-down --from $from\` to resume it"
 	[ "$HAS_ORIGIN" = 1 ] || { row "$lower" stopped "syncDown: pr needs an 'origin' remote"; return 1; }
 	if ! note="$(fresh "$lower")"; then row "$lower" stopped "$note"; return 1; fi
 	note="$FRESH_NOTE"
@@ -318,25 +345,25 @@ sync_pr() {
 		row "$lower" already-level "$lower already contains $upper${note:+; $note}"
 		return 0
 	fi
-	body="$(mktemp "${TMPDIR:-/tmp}/flight-sync-body-XXXXXX")"
-	cat >"$body" <<EOF
-## Summary
-
-Sync-down after a promotion into \`$upper\`: merge \`$upper\` back into \`$lower\` so the lower stage stays level (ADR 0002).
-
-No issue lifecycle changes — the promotion that produced \`$upper\`'s tip already handled them.
-EOF
-	if ! pr="$("$FLIGHT_SELF" pr open --head "$upper" --base "$lower" --title "Sync $upper back into $lower" --body-file "$body")"; then
-		rm -f "$body"
-		row "$lower" stopped "could not open the $upper → $lower PR (see errors above)"
-		return 1
+	num="$(open_sync_pr "$upper" "$lower")"
+	if [ -n "$num" ]; then
+		reused=" (reused)"
+	elif pr="$(new_sync_pr "$upper" "$lower")"; then
+		num="$(printf '%s' "$pr" | cut -f1)"
+		[ -n "$num" ] || { row "$lower" stopped "pr open returned no PR number"; return 1; }
+	else
+		# The backend refuses a second PR for the same head and base (Forgejo: HTTP
+		# 409). One the lookup above missed is still ours to resume.
+		num="$(open_sync_pr "$upper" "$lower")"
+		if [ -z "$num" ]; then
+			row "$lower" stopped "could not open the $upper → $lower PR (see errors above)"
+			return 1
+		fi
+		reused=" (reused)"
 	fi
-	rm -f "$body"
-	num="$(printf '%s' "$pr" | cut -f1)"
-	[ -n "$num" ] || { row "$lower" stopped "pr open returned no PR number"; return 1; }
 
 	if ! watch="$("$FLIGHT_SELF" ci watch --pr "$num")"; then
-		row "$lower" stopped "PR #$num left open — ci watch failed or timed out"
+		row "$lower" stopped "PR #$num left open — ci watch failed or timed out; $resume"
 		return 1
 	fi
 	status="$(printf '%s\n' "$watch" | sed -n 's/.*status=\([a-z]*\).*/\1/p' | tail -n1)"
@@ -370,7 +397,7 @@ EOF
 	else
 		note="${note:+$note; }local checkout at $wt is behind origin/$lower (dirty; left alone)"
 	fi
-	row "$lower" pr-merged "#$num $upper → $lower${note:+; $note}"
+	row "$lower" pr-merged "#$num$reused $upper → $lower${note:+; $note}"
 	return 0
 }
 

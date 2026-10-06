@@ -494,7 +494,8 @@ merges the stage above back into it, so `develop ≤ qa ≤ main` holds again by
 - **`pr`** — open a PR `<upper> → <lower>` (no `Closes`/`Ready` lines: the promotion already
   drove the issue lifecycle), watch CI, and **auto-merge on green with `--strategy merge`** —
   never the stage's promotion `strategy`. Red CI, a timeout or a refused merge leaves the PR
-  open and stops.
+  open and stops. Re-running `flight branches sync-down --from <stage>` resumes it: an open
+  `<upper> → <lower>` PR is reused rather than opened again, and the row says `#N (reused)`.
 - **`none`** — that stage is skipped and the cascade stops there.
 
 The verb prints one row per stage, `stage⇥outcome⇥detail`, where outcome is `fast-forwarded`,
