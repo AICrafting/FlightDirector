@@ -372,21 +372,18 @@ source guard below says "push first" rather than pushing for you — so on a red
 stays on origin exactly as it was, and what the gate prevents is the **PR**, not the push.
 
 Before opening the PR, verify local `$BRANCH` isn't ahead of the remote — otherwise the PR (and
-the CI you'd watch) silently omits your latest commit:
+the CI you'd watch) silently omits your latest commit. That check and the gate's verdict both
+stand in front of `pr open`, in the same block: a check that only prints, in a block of its own,
+stops nothing in the next one ([skill-shell-blocks.md](../../references/skill-shell-blocks.md),
+rule 2).
 
 ```
 git -C "$WT" fetch -q origin "$BRANCH"
 if [ "$(git -C "$WT" rev-parse HEAD)" != "$(git -C "$WT" rev-parse "origin/$BRANCH")" ]; then
-   # STOP — local is ahead of / diverged from origin/$BRANCH. Push (or reconcile)
-   # before promoting, then re-run. Do not open the PR against a stale remote tip.
-   echo "local $BRANCH differs from origin/$BRANCH — push first" >&2
-fi
-```
-
-```
-# The same guard as the direct-hop sites. The `pr open` sits INSIDE it: a bare
-# `if … fi` with a "# STOP" comment in it is the defect this skill already fixed twice.
-if flight preflight check --worktree "$WT" --verdict "$SCRATCH/preflight-verdict-$SAFE_BRANCH"; then
+    # Local is ahead of / diverged from origin/$BRANCH: the PR would be opened against a stale
+    # remote tip. Push (or reconcile) first, then re-run this block.
+    echo "local $BRANCH differs from origin/$BRANCH — push first; not opening the PR" >&2
+elif flight preflight check --worktree "$WT" --verdict "$SCRATCH/preflight-verdict-$SAFE_BRANCH"; then
     PR="$(flight pr open --head "$BRANCH" --base <target> \
             --title "…" --body-file "$SCRATCH/pr-body.md" \
             --model <your-model-id>)"                      # → number⇥url; body gets signed
@@ -481,13 +478,21 @@ merges the stage above back into it, so `develop ≤ qa ≤ main` holds again by
 
 - **`direct`** — fetch, run the Step 4a freshness check on the lower stage, merge the upper
   stage into it (`--ff` when it is a strict ancestor, which is the usual case and adds no
-  commit; one merge commit otherwise), push. If the checkout holding the lower stage is dirty,
-  the merge happens in a throwaway worktree and is pushed from there; the row then says the
-  local checkout is behind (it fast-forwards at the next freshness check).
+  commit; one merge commit otherwise), push. The merge happens in the checkout holding the
+  lower stage, so the repo's push hooks run where its dependencies are installed. A dirty
+  checkout is still used for a fast-forward that doesn't touch its dirty paths. Otherwise
+  (the merge would touch a dirty path, or the stage isn't checked out) the merge happens in a
+  throwaway worktree and is pushed from there; the row then says the local checkout is behind
+  (it fast-forwards at the next freshness check). A refused push says why: origin really moved,
+  the server refused it, or the repo's pre-push hook did. The row then quotes the push's last
+  lines and gives the path of the full output. A hook that fails only in the throwaway (no
+  installed dependencies there) usually just needs the dirty checkout committed or stashed
+  before re-running.
 - **`pr`** — open a PR `<upper> → <lower>` (no `Closes`/`Ready` lines: the promotion already
   drove the issue lifecycle), watch CI, and **auto-merge on green with `--strategy merge`** —
   never the stage's promotion `strategy`. Red CI, a timeout or a refused merge leaves the PR
-  open and stops.
+  open and stops. Re-running `flight branches sync-down --from <stage>` resumes it: an open
+  `<upper> → <lower>` PR is reused rather than opened again, and the row says `#N (reused)`.
 - **`none`** — that stage is skipped and the cascade stops there.
 
 The verb prints one row per stage, `stage⇥outcome⇥detail`, where outcome is `fast-forwarded`,

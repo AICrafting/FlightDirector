@@ -203,7 +203,8 @@ case "$verb" in
     ;;
 
   attach)
-    die "issues attach: not supported by the jira adapter (out of scope for the issues-axis backend)"
+    # Also the answer to --check (FJ-311).
+    fail unsupported "issues attach: not supported by the jira adapter (out of scope for the issues-axis backend)"
     ;;
 
   comment)

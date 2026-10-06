@@ -335,3 +335,11 @@ conventions (a skill is a directory with a `SKILL.md` plus any `references/` or
 `templates/`). Invoke that skill when creating or editing a skill, and mirror the voice
 and structure of the existing skills (red-flags section, numbered lifecycle,
 common-mistakes table).
+
+The shell inside a skill's fenced blocks is what an agent actually runs, so it follows the
+rules in [`flight/references/skill-shell-blocks.md`](flight/references/skill-shell-blocks.md).
+Examples: flatten a branch name before using it in a filename, end every STOP branch with
+something that actually stops (`exit`, `return`, an `else`), and put each push or `pr open`
+behind the preflight check. `scripts/tests/skill-shell-blocks.test.sh` checks each rule over
+every skill, so `run-tests.sh` catches a block that breaks one. To add a rule, follow that
+reference's "Adding a rule" section: state the rule there and add its check to the test.
