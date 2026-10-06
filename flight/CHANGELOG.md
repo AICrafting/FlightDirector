@@ -81,6 +81,15 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   `push` and `merge_request_event` pipelines. A cancellation with no such twin still reports
   `cancelled`.
 
+- **`branches sync-down` resumes a cascade whose sync PR is still open** (FJ-299). On a `pr`
+  sync hop the verb always opened a new PR. When an earlier run had stopped and deliberately
+  left that PR open (a CI watch timeout, red CI), the re-run got `HTTP 409: pull request already
+  exists` and stopped again. The hop then had to be driven by hand. The verb now looks for an
+  open PR with the same head and base first, and watches and merges that one. A `pr open`
+  refused because one already exists falls back to the same lookup. The row reads
+  `#298 (reused)` so a resume is visible, and a watch timeout names the re-run as the way to
+  resume.
+
 ### Changed
 - **The repo's own Windows CI leg runs only on pull requests into `qa` and `main`** (FJ-305), plus
   manual dispatches; the `main` → `qa` sync-down skips it. Feature PRs into `develop` and pushes to `develop` no longer wait ~11

@@ -73,7 +73,8 @@ Each stage may declare how it **receives** a back-merge:
 - **`pr`:** open a PR `<upper> → <lower>`, watch CI, and **auto-merge on green** with the
   `merge` method — never the stage's promotion `strategy`, because squashing a back-merge
   re-diverges the branches. The content is already on a higher stage, so there is nothing new
-  to gate on; red CI or a conflict leaves the PR open and stops. The PR body carries no
+  to gate on; red CI or a conflict leaves the PR open and stops. A re-run resumes it: the
+  open `<upper> → <lower>` PR is reused (watched and merged), never opened a second time. The PR body carries no
   `Closes`/`Ready` lines; issue lifecycle is driven by the promotion, not the sync.
 - The sync runs as a final step of `promoting-a-branch`, after the issue-lifecycle step.
 
