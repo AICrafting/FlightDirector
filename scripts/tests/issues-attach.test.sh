@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016  # the Step 7 patterns are the skill's literal shell text
 # `flight issues attach --check` (FJ-311): a skill asks whether the tracker can take an
 # upload before it writes a body around the URL. Forgejo and GitLab can (exit 0, nothing
 # sent); GitHub and Jira can't, and fail with the `unsupported` code. Offline: --check
