@@ -42,6 +42,16 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   anchored on `[?&]page=1` at the end of the URL in that test and three others that had copied
   it, and a new check fails if the label list is paged more than a few times. Test-only:
   plugin behavior is unchanged.
+- **`ci watch` no longer reports `cancelled` for a PR whose checks all passed** (FJ-313). Opening
+  a PR on a commit you just pushed starts each workflow twice, once for the `push` and once for
+  the `pull_request`. A workflow with a concurrency group then cancels the `push` run. Every
+  backend scored those cancelled runs next to their green twins, so the verdict came out
+  `cancelled`, and `promoting-a-branch` and `branches sync-down` refused to merge a PR that had
+  been fully verified. A cancelled run no longer counts when the same workflow has a run on that
+  commit under another trigger that wasn't cancelled. The twin decides, whether it passed or
+  failed. On GitLab, which has no per-workflow runs, the same rule applies between a commit's
+  `push` and `merge_request_event` pipelines. A cancellation with no such twin still reports
+  `cancelled`.
 
 ### Changed
 - **The repo's own Windows CI leg runs only on pull requests into `qa` and `main`** (FJ-305), plus
