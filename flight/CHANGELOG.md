@@ -49,6 +49,26 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   anchored on `[?&]page=1` at the end of the URL in that test and three others that had copied
   it, and a new check fails if the label list is paged more than a few times. Test-only:
   plugin behavior is unchanged.
+- **`branches sync-down` says why a push was refused, and runs it where hooks can pass**
+  (FJ-312). A push refused by the repo's own pre-push hook used to be reported as `push of
+  develop was rejected (origin moved?)`, and the hook's output was thrown away. A refusal now
+  names its cause: origin really moved during the sync (confirmed by a re-fetch), the server
+  refused it, or the pre-push hook did. The row quotes the last lines of the push's output and
+  gives the path of the full log. Separately, any uncommitted change in the checkout holding the
+  lower stage used to send the merge to a throwaway worktree, where hooks that need installed
+  dependencies (eslint without `node_modules`) fail. A fast-forward that doesn't touch the dirty
+  paths now happens in the checkout itself, which is the usual sync-down case. When the
+  throwaway is still needed, a hook failure there says so.
+- **`ci watch` no longer reports `cancelled` for a PR whose checks all passed** (FJ-313). Opening
+  a PR on a commit you just pushed starts each workflow twice, once for the `push` and once for
+  the `pull_request`. A workflow with a concurrency group then cancels the `push` run. Every
+  backend scored those cancelled runs next to their green twins, so the verdict came out
+  `cancelled`, and `promoting-a-branch` and `branches sync-down` refused to merge a PR that had
+  been fully verified. A cancelled run no longer counts when the same workflow has a run on that
+  commit under another trigger that wasn't cancelled. The twin decides, whether it passed or
+  failed. On GitLab, which has no per-workflow runs, the same rule applies between a commit's
+  `push` and `merge_request_event` pipelines. A cancellation with no such twin still reports
+  `cancelled`.
 
 ### Changed
 - **The repo's own Windows CI leg runs only on pull requests into `qa` and `main`** (FJ-305), plus
