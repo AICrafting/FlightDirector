@@ -162,10 +162,12 @@ for each candidate (branch "$B", identity fields from Step 2) in the group:
 #     states as above; behind → the push is a non-fast-forward, so fast-forward is not
 #     possible with merges already stacked on top — STOP and report rather than pulling.
 git -C "$MAIN" fetch -q origin "$BASE"
-[ "$(git -C "$MAIN" rev-parse "origin/$BASE")" = \
-  "$(git -C "$MAIN" merge-base "$BASE" "origin/$BASE")" ] || {
-    echo "origin/$BASE moved during the batch — STOP and report; do not pull" >&2; }
-git -C "$MAIN" push   # once, after the group's merges
+if [ "$(git -C "$MAIN" rev-parse "origin/$BASE")" = \
+     "$(git -C "$MAIN" merge-base "$BASE" "origin/$BASE")" ]; then
+    git -C "$MAIN" push   # once, after the group's merges
+else
+    echo "origin/$BASE moved during the batch — not pushing; report it, do not pull" >&2
+fi
 ```
 
 **If `MERGE` = pr** — one PR per group via an integration branch. Three blocks, in order, once
