@@ -21,11 +21,11 @@ Neither probe needs a repository, a config, a token or the network.
 
 ```
 $ flight --version
-flight 0.17.2
+flight 0.18.0
 $ flight --version --json
-{"plugin":"flight","version":"0.17.2"}
+{"plugin":"flight","version":"0.18.0"}
 $ flight capabilities --json
-{"plugin":"flight","version":"0.17.2","capabilities":["version","capabilities", …]}
+{"plugin":"flight","version":"0.18.0","capabilities":["version","capabilities", …]}
 ```
 
 `flight capabilities` without `--json` prints one token per line.
@@ -92,7 +92,7 @@ their own meaning: `prompt-log summary --json` predates this and is unchanged.
   "comments": 3,             // comment count, or null where the backend doesn't give one cheaply
   "url": "https://…/issues/81",        // web link
   "body": "markdown…",       // without the flight signature; null in list rows
-  "signature": {"plugin": "flight", "version": "0.17.2", "model": "Opus/5.5"},  // or null
+  "signature": {"plugin": "flight", "version": "0.18.0", "model": "Opus/5.5"},  // or null
   "blocked_by": [{"id": "GH-3", "title": "…", "state": "open", "via": "text"}]  // issues get only; null in list rows and when the lookup failed
 }
 ```

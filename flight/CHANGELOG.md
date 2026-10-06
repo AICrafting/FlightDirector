@@ -13,6 +13,10 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.18.0] - 2026-10-06
+
 ### Added
 - **Rules for the shell in skill blocks** (FJ-226). `references/skill-shell-blocks.md` lists the six
   shapes that skill shell has gone wrong in: a branch name used as a file name, a STOP that stops
