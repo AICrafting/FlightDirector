@@ -86,6 +86,9 @@ case "$*" in
 	# tip where it was. A stamp or guard that reads $MAIN would accept an old pass for code the
 	# gate never saw, so only the worktree being judged may answer with the branch's sha.
 	*"/wt rev-parse HEAD"*) cat "$SANDBOX/sha" ;;
+	# The `pr` block's source guard: origin holds what was pushed, which is the branch's tip
+	# unless a case says otherwise.
+	*"rev-parse origin/feature/"*) cat "$SANDBOX/origin" 2>/dev/null || cat "$SANDBOX/sha" ;;
 	*"rev-parse HEAD"*) echo "main-tip-never-moves" ;;
 	*"merge --no-ff"*) echo "DID-MERGE" >>"$SANDBOX/actions" ;;
 esac
@@ -104,7 +107,7 @@ $(cat "$SANDBOX/step1.sh")
 $(cat "$SANDBOX/$1.sh")" >>"$SANDBOX/out" 2>&1 || true
 }
 fresh() {   # $1 = the configured gate command ('' = key absent)
-	rm -rf "$SANDBOX/scratch" "$SANDBOX/actions" "$SANDBOX/out" "$SANDBOX/config-unreadable"
+	rm -rf "$SANDBOX/scratch" "$SANDBOX/actions" "$SANDBOX/out" "$SANDBOX/config-unreadable" "$SANDBOX/origin"
 	mkdir -p "$SANDBOX/scratch"
 	printf '%s' "$1" >"$SANDBOX/gate"
 	echo aaa111 >"$SANDBOX/sha"
@@ -144,6 +147,11 @@ for SITE in case1 case2 pr; do
 	fresh 'false'; call step4b; printf 'true' >"$SANDBOX/gate"
 	               call step4b; call "$SITE";                  acted   "$SITE red, fixed, re-run"
 done
+
+# FJ-226: a local commit origin does not have stops the PR, in the block that opens it. The source
+# guard once sat in a block of its own and only printed, so the next block opened the PR anyway.
+fresh 'true'; call step4b; echo ccc333 >"$SANDBOX/origin"
+              call pr;                                     refused "pr local ahead of origin" 'push first'
 
 # #223: the log and the verdict are FILES named from a branch with a slash in it.
 fresh 'false'; call step4b

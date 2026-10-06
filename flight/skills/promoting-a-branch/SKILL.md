@@ -372,21 +372,18 @@ source guard below says "push first" rather than pushing for you — so on a red
 stays on origin exactly as it was, and what the gate prevents is the **PR**, not the push.
 
 Before opening the PR, verify local `$BRANCH` isn't ahead of the remote — otherwise the PR (and
-the CI you'd watch) silently omits your latest commit:
+the CI you'd watch) silently omits your latest commit. That check and the gate's verdict both
+stand in front of `pr open`, in the same block: a check that only prints, in a block of its own,
+stops nothing in the next one ([skill-shell-blocks.md](../../references/skill-shell-blocks.md),
+rule 2).
 
 ```
 git -C "$WT" fetch -q origin "$BRANCH"
 if [ "$(git -C "$WT" rev-parse HEAD)" != "$(git -C "$WT" rev-parse "origin/$BRANCH")" ]; then
-   # STOP — local is ahead of / diverged from origin/$BRANCH. Push (or reconcile)
-   # before promoting, then re-run. Do not open the PR against a stale remote tip.
-   echo "local $BRANCH differs from origin/$BRANCH — push first" >&2
-fi
-```
-
-```
-# The same guard as the direct-hop sites. The `pr open` sits INSIDE it: a bare
-# `if … fi` with a "# STOP" comment in it is the defect this skill already fixed twice.
-if flight preflight check --worktree "$WT" --verdict "$SCRATCH/preflight-verdict-$SAFE_BRANCH"; then
+    # Local is ahead of / diverged from origin/$BRANCH: the PR would be opened against a stale
+    # remote tip. Push (or reconcile) first, then re-run this block.
+    echo "local $BRANCH differs from origin/$BRANCH — push first; not opening the PR" >&2
+elif flight preflight check --worktree "$WT" --verdict "$SCRATCH/preflight-verdict-$SAFE_BRANCH"; then
     PR="$(flight pr open --head "$BRANCH" --base <target> \
             --title "…" --body-file "$SCRATCH/pr-body.md" \
             --model <your-model-id>)"                      # → number⇥url; body gets signed

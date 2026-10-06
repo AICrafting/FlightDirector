@@ -14,6 +14,11 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 ## [Unreleased]
 
 ### Added
+- **Rules for the shell in skill blocks** (FJ-226). `references/skill-shell-blocks.md` lists the six
+  shapes that skill shell has gone wrong in: a branch name used as a file name, a STOP that stops
+  nothing, a guard missed at one site, a `continue` with no loop, a command run from a string,
+  and bash 4 features. A new contract test checks every fenced shell block in the plugin against
+  each rule. Each check is first shown to fire on the defect it exists for.
 - **`flight issues attach --check`** (FJ-311). Asks whether the tracker's backend can upload a
   file to an issue, without sending anything. It exits 0 on Forgejo and GitLab. On GitHub (whose
   REST API has no issue-attachment endpoint) and Jira it fails with the `unsupported` error code,
@@ -36,6 +41,12 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
   no `rm` on globs or possibly-empty paths, and one readable statement per line.
 
 ### Fixed
+- **Two promotion guards that only printed now stop** (FJ-226). On a `pr` hop,
+  `promoting-a-branch` checked whether the local branch was ahead of origin, in a block of its
+  own. If it was, the block printed "push first" and the next block opened the PR anyway. The
+  check now sits in front of `pr open`, in the same block. In `promoting-branches`, the re-check
+  before a `direct` hop's push printed STOP when origin had moved, and the push still ran. The
+  push is now inside the check.
 - **Label lookups fetch the repo's label list once per command** (FJ-301). The list was meant to
   be cached, but the cache was filled in a subshell and lost every time. Every lookup re-fetched
   the whole paged list: once per configured status role on `issues set-status` and
