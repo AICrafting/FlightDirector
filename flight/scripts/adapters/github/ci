@@ -77,12 +77,20 @@ case "$verb" in
       # run via run_attempt; this handles repeated dispatches), and a newest
       # manual workflow_dispatch supersedes that workflow's earlier runs
       # outright — a human explicitly re-ran it.
+      # A cancelled run is superseded too (FJ-313) when the same workflow has a
+      # run on this SHA that wasn't cancelled: opening a PR on a just-pushed
+      # commit starts a `push` run and a `pull_request` run, and a concurrency
+      # group cancels the first. The twin carries the verdict; the cancelled
+      # run only decides when it is all the workflow has.
       metrics="$(printf '%s' "$body" | jq -r '
+        def cancelled: .status == "completed" and .conclusion == "cancelled";
         [.workflow_runs[]?]
         | group_by(.workflow_id // .id)
         | map( max_by(.id) as $l
              | if ($l.event // "") == "workflow_dispatch" then [$l]
-               else group_by(.event // "") | map(max_by(.id)) end )
+               else group_by(.event // "") | map(max_by(.id)) end
+             | [.[] | select(cancelled | not)] as $live
+             | if ($live|length) > 0 then $live else . end )
         | (add // []) as $r
         | ($r|length) as $total
         | ([$r[] | select(.status != "completed")] | length) as $pending

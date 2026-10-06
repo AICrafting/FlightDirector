@@ -370,6 +370,48 @@ for backend in $CI_WATCH_BACKENDS; do
 	check "$backend: skipped + cancelled → status=cancelled" \
 		"$([ "$rc" = 0 ] && grep -q "skipped=1 cancelled=1 status=cancelled" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
 
+	# A cancelled run superseded by its own workflow's run under another trigger
+	# (FJ-313): a PR opened on a just-pushed commit starts a `push` and a
+	# `pull_request` run, and the concurrency group cancels the push run. The
+	# twin's verdict stands. (GitLab: a push pipeline auto-canceled by the
+	# merge_request_event pipeline for the same sha.)
+	if [ "$backend" = gitlab ]; then
+		cancel_push="$(run_obj gitlab cancel 42 "$REMOTE_SHA" push)"
+		ok_pr="$(run_obj gitlab ok 43 "$REMOTE_SHA" merge_request_event)"
+		fail_pr="$(run_obj gitlab fail 43 "$REMOTE_SHA" merge_request_event)"
+		run_pr="$(run_obj gitlab run 43 "$REMOTE_SHA" merge_request_event)"
+	else
+		cancel_push="$(run_obj "$backend" cancel 42 "$REMOTE_SHA" tests.yml push)"
+		ok_pr="$(run_obj "$backend" ok 43 "$REMOTE_SHA" tests.yml pull_request)"
+		fail_pr="$(run_obj "$backend" fail 43 "$REMOTE_SHA" tests.yml pull_request)"
+		run_pr="$(run_obj "$backend" run 43 "$REMOTE_SHA" tests.yml pull_request)"
+	fi
+	set_runs "$backend" "$cancel_push" "$ok_pr"
+	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
+	check "$backend: cancelled push run + green pull_request twin → status=success" \
+		"$([ "$rc" = 0 ] && grep -q "runs=1 pending=0 failed=0 skipped=0 cancelled=0 status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+	set_runs "$backend" "$ok_pr" "$cancel_push"
+	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
+	check "$backend: superseded-cancel is list-order independent" \
+		"$([ "$rc" = 0 ] && grep -q "runs=1 pending=0 failed=0 skipped=0 cancelled=0 status=success" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+	set_runs "$backend" "$cancel_push" "$fail_pr"
+	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
+	check "$backend: cancelled push run + red pull_request twin → status=failure" \
+		"$([ "$rc" = 0 ] && grep -q "runs=1 pending=0 failed=1 skipped=0 cancelled=0 status=failure" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+	set_runs "$backend" "$cancel_push" "$run_pr"
+	out="$(run_watch "$backend" 2 --sha "$REMOTE_SHA")"; rc=$?
+	check "$backend: cancelled push run + running twin → still pending" \
+		"$([ "$rc" != 0 ] && grep -q "runs=1 pending=1 failed=0 skipped=0 cancelled=0 status=pending" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+	# The twin must be the SAME workflow: a green pull_request run of lint.yml
+	# doesn't stand in for a cancelled tests.yml. (forgejo/github only — GitLab
+	# has no workflow dimension.)
+	if [ "$backend" != gitlab ]; then
+		set_runs "$backend" "$cancel_push" "$(run_obj "$backend" ok 43 "$REMOTE_SHA" lint.yml pull_request)"
+		out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA")"; rc=$?
+		check "$backend: another workflow's green run doesn't supersede a cancellation" \
+			"$([ "$rc" = 0 ] && grep -q "runs=2 pending=0 failed=0 skipped=0 cancelled=1 status=cancelled" <<<"$out" && echo 1 || echo 0)" "rc=$rc out=$out"
+	fi
+
 	set_runs "$backend" "$(run_obj "$backend" cancel 42 "$REMOTE_SHA" tests.yml)"
 	sf="$SANDBOX/status-cancel-$backend.json"; rm -f "$sf"
 	out="$(run_watch "$backend" 10 --sha "$REMOTE_SHA" --status-file "$sf")"; rc=$?
