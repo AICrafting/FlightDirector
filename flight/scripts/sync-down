@@ -163,7 +163,9 @@ push_stage() {
 	g fetch -q origin "$lower" 2>/dev/null || true
 	now="$(g rev-parse -q --verify "refs/remotes/origin/$lower" || true)"
 	hook="$(git -C "$dir" rev-parse --git-path hooks/pre-push)"
-	case "$hook" in /*) ;; *) hook="$dir/$hook" ;; esac
+	# Relative paths are relative to <dir>. On Windows git prints an absolute path as
+	# C:/…, which does not start with a slash.
+	case "$hook" in /* | [A-Za-z]:[\\/]*) ;; *) hook="$dir/$hook" ;; esac
 	if [ -n "$now" ] && [ "$now" != "$before" ]; then
 		why="origin/$lower moved during the sync (now ${now:0:7}) — re-run sync-down"
 	elif grep -q 'remote rejected' "$log"; then
