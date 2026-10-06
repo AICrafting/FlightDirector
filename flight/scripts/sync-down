@@ -137,6 +137,48 @@ done < <(g worktree list --porcelain)
 # clean <path> — no staged or unstaged changes to tracked files (untracked files are fine).
 clean() { git -C "$1" diff --quiet && git -C "$1" diff --cached --quiet; }
 
+# touches_dirty <path> <from> <to> — the merge from..to changes a path that is dirty
+# (staged or unstaged) in the checkout at <path>. Renames count on both sides.
+touches_dirty() {
+	local dirty
+	dirty="$(git -C "$1" diff --name-only --no-renames HEAD)"
+	[ -n "$dirty" ] || return 1
+	g diff --name-only --no-renames "$2" "$3" | grep -Fxq -f <(printf '%s\n' "$dirty")
+}
+
+# ── push ────────────────────────────────────────────────────────────────────────
+# push_stage <dir> <lower> <before> — push <dir>'s HEAD to origin/<lower>. <before> is
+# the origin/<lower> tip the merge was measured against. On refusal prints, on one
+# line, why the push was refused and returns 1. The push's own output is kept in a
+# log rather than thrown away (FJ-312): a hook's or the server's words are the reason.
+push_stage() {
+	local dir="$1" lower="$2" before="$3" log now hook why tail
+	log="$(mktemp "${TMPDIR:-/tmp}/flight-sync-push-XXXXXX")"
+	if git -C "$dir" push -q origin "HEAD:refs/heads/$lower" >"$log" 2>&1; then
+		rm -f "$log"
+		return 0
+	fi
+	# Re-fetch to tell a moved origin from a refusal: only a real non-fast-forward
+	# means somebody else pushed in the meantime.
+	g fetch -q origin "$lower" 2>/dev/null || true
+	now="$(g rev-parse -q --verify "refs/remotes/origin/$lower" || true)"
+	hook="$(git -C "$dir" rev-parse --git-path hooks/pre-push)"
+	case "$hook" in /*) ;; *) hook="$dir/$hook" ;; esac
+	if [ -n "$now" ] && [ "$now" != "$before" ]; then
+		why="origin/$lower moved during the sync (now ${now:0:7}) — re-run sync-down"
+	elif grep -q 'remote rejected' "$log"; then
+		why="origin refused the push of $lower (server hook or branch protection)"
+	elif [ -x "$hook" ]; then
+		why="the repo's pre-push hook refused the push of $lower"
+	else
+		why="push of $lower failed"
+	fi
+	# The last few lines of the push's output, flattened onto the row.
+	tail="$(grep -v '^[[:space:]]*$' "$log" | tail -n 3 | tr '\t\n' '  ' | sed 's/  *$//')"
+	printf '%s%s (full output: %s)\n' "$why" "${tail:+: $tail}" "$log"
+	return 1
+}
+
 # ── freshness (promoting-a-branch Step 4a) ──────────────────────────────────────
 # fresh <stage> — bring the local ref level with origin when it is merely behind.
 # Prints nothing on success; on ahead/diverged prints the reason and returns 1.
@@ -178,7 +220,7 @@ fresh() {
 # ── direct mode ─────────────────────────────────────────────────────────────────
 # sync_direct <lower> <upper> — merge upper into lower (ff when possible), push.
 sync_direct() {
-	local lower="$1" upper="$2" lref uref wt note outcome tmp msg
+	local lower="$1" upper="$2" lref uref wt note outcome tmp msg before inplace why where
 	if ! note="$(fresh "$lower")"; then row "$lower" stopped "$note"; return 1; fi
 	note="$FRESH_NOTE"
 	lref="$(stage_ref "$lower")"; uref="$(stage_ref "$upper")"
@@ -190,21 +232,47 @@ sync_direct() {
 	if g merge-base --is-ancestor "$lref" "$uref"; then outcome=fast-forwarded; else outcome=merged; fi
 	msg="Sync $upper back into $lower"
 	wt="$(map_get "$WT_PATH" "$lower")"
+	before="$(g rev-parse "$lref")"
 
-	if [ -n "$wt" ] && clean "$wt" && { [ "$HAS_ORIGIN" = 0 ] || [ "$(g rev-parse "$lower")" = "$(g rev-parse "$lref")" ]; }; then
-		# The checkout holding <lower> is clean and level: merge right there.
+	# Where to merge. The checkout holding <lower> is the right place whenever it is
+	# level with the tip we measured: there the repo's hooks run with everything the
+	# user installed (a throwaway worktree has no node_modules, no venv). A dirty
+	# checkout still qualifies for a fast-forward that leaves its dirty paths alone
+	# (FJ-312) — git itself refuses if the move would overwrite a local change.
+	inplace=""
+	if [ -n "$wt" ] && { [ "$HAS_ORIGIN" = 0 ] || [ "$(g rev-parse "$lower")" = "$before" ]; }; then
+		if clean "$wt"; then
+			inplace=merge
+		elif [ "$outcome" = fast-forwarded ] && ! touches_dirty "$wt" "$lref" "$uref"; then
+			inplace=ff
+		fi
+	fi
+
+	if [ "$inplace" = merge ]; then
+		# Clean and level: merge right there.
 		if ! git -C "$wt" merge -q --ff -m "$msg" "$uref" >/dev/null 2>&1; then
 			git -C "$wt" merge --abort 2>/dev/null || true
 			row "$lower" stopped "conflict merging $upper into $lower (aborted; nothing changed)"
 			return 1
 		fi
-		if [ "$HAS_ORIGIN" = 1 ] && ! git -C "$wt" push -q origin "$lower" 2>/dev/null; then
-			row "$lower" stopped "merged locally but push of $lower was rejected — reconcile by hand"
+	elif [ "$inplace" = ff ]; then
+		# Dirty, but the fast-forward doesn't touch the dirty paths.
+		if ! git -C "$wt" merge -q --ff-only "$uref" >/dev/null 2>&1; then
+			row "$lower" stopped "could not fast-forward $lower in $wt without touching its uncommitted changes (nothing changed) — commit or stash them and re-run"
+			return 1
+		fi
+		note="${note:+$note; }fast-forwarded in $wt (its uncommitted changes untouched)"
+	fi
+	if [ -n "$inplace" ]; then
+		if [ "$HAS_ORIGIN" = 1 ] && ! why="$(push_stage "$wt" "$lower" "$before")"; then
+			row "$lower" stopped "merged locally but not pushed: $why — local $lower is now ahead of origin; push it once that is fixed"
 			return 1
 		fi
 	else
-		# <lower> is not checked out, or its checkout is dirty: merge in a throwaway
-		# worktree forked from the tip we just measured, push the result explicitly.
+		# <lower> is not checked out, or its checkout is dirty in a way that matters:
+		# merge in a throwaway worktree forked from the tip we just measured, push the
+		# result explicitly. The repo's hooks run there too, without anything the
+		# user installed in the real checkout, so a failure says where it ran.
 		[ "$HAS_ORIGIN" = 1 ] || [ -z "$wt" ] || { row "$lower" stopped "checkout at $wt is dirty and there is no origin to push through"; return 1; }
 		tmp="$(mktemp -d "${TMPDIR:-/tmp}/flight-sync-$lower-XXXXXX")"
 		rmdir "$tmp"
@@ -216,9 +284,11 @@ sync_direct() {
 			return 1
 		fi
 		if [ "$HAS_ORIGIN" = 1 ]; then
-			if ! git -C "$tmp" push -q origin "HEAD:$lower" 2>/dev/null; then
+			if ! why="$(push_stage "$tmp" "$lower" "$before")"; then
 				g worktree remove --force "$tmp" 2>/dev/null || true
-				row "$lower" stopped "push of $lower was rejected (origin moved?) — nothing changed locally"
+				where="$lower is not checked out anywhere"
+				[ -z "$wt" ] || where="$wt has uncommitted changes the merge would touch"
+				row "$lower" stopped "$why — nothing changed locally (the push ran from a throwaway worktree because $where; it has none of that checkout's untracked files, such as installed dependencies)"
 				return 1
 			fi
 			if [ -z "$wt" ]; then

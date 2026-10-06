@@ -481,9 +481,16 @@ merges the stage above back into it, so `develop ≤ qa ≤ main` holds again by
 
 - **`direct`** — fetch, run the Step 4a freshness check on the lower stage, merge the upper
   stage into it (`--ff` when it is a strict ancestor, which is the usual case and adds no
-  commit; one merge commit otherwise), push. If the checkout holding the lower stage is dirty,
-  the merge happens in a throwaway worktree and is pushed from there; the row then says the
-  local checkout is behind (it fast-forwards at the next freshness check).
+  commit; one merge commit otherwise), push. The merge happens in the checkout holding the
+  lower stage, so the repo's push hooks run where its dependencies are installed. A dirty
+  checkout is still used for a fast-forward that doesn't touch its dirty paths. Otherwise
+  (the merge would touch a dirty path, or the stage isn't checked out) the merge happens in a
+  throwaway worktree and is pushed from there; the row then says the local checkout is behind
+  (it fast-forwards at the next freshness check). A refused push says why: origin really moved,
+  the server refused it, or the repo's pre-push hook did. The row then quotes the push's last
+  lines and gives the path of the full output. A hook that fails only in the throwaway (no
+  installed dependencies there) usually just needs the dirty checkout committed or stashed
+  before re-running.
 - **`pr`** — open a PR `<upper> → <lower>` (no `Closes`/`Ready` lines: the promotion already
   drove the issue lifecycle), watch CI, and **auto-merge on green with `--strategy merge`** —
   never the stage's promotion `strategy`. Red CI, a timeout or a refused merge leaves the PR
