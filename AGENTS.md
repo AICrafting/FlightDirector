@@ -16,6 +16,8 @@ Flight Director — AI Crafting's Claude Code + Codex plugins (marketplace `flig
 - **Final newlines:** Trimmed (but leave one final newline)
 - **File and script names:** kebab-case (`run-checks.sh`, `verify-git-logs.sh`), never camelCase.
   Scripts end in `.sh`, unit tests in `.test.sh`; tracked scripts carry the exec bit (`100755`).
+- **Shell in skill fenced blocks:** follows `flight/references/skill-shell-blocks.md`; each of its
+  rules is checked by `scripts/tests/skill-shell-blocks.test.sh`.
 
 ## Issue tracking — flight
 

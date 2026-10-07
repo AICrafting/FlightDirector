@@ -57,7 +57,7 @@ label and issue call in this skill passes `--tracker "$TRACKER"`.
 
 **Note any images** shared with the invocation. In Claude Code, attached screenshots appear
 with a local file path (e.g. `[Image: source: /var/.../Screenshot.png]`). Record those paths —
-you'll upload them after the issue is created (Step 7).
+you'll upload them after the issue is created, where the tracker supports it (Step 7).
 
 ## Step 2: Dedupe-check against open issues
 
@@ -179,14 +179,31 @@ Report with its display id: *"Created #12: [title]"* — `#12` while the repo ha
 
 ## Step 7: Attach images (if any were shared)
 
-Upload each recorded image, then embed the returned URL in the body:
+Not every backend can upload a file to an issue. Forgejo and GitLab can; **GitHub cannot** (its
+REST API has no endpoint for issue attachments, only the web UI's drag-and-drop does), and the
+Jira adapter doesn't. Ask the tracker first, before you write anything that expects a URL:
 
 ```
-URL="$(flight issues attach --tracker "$TRACKER" --number "$NUMBER" \
-        --file /path/to/screenshot.png --name screenshot.png)"
-# append "## Screenshot\n\n![screenshot]($URL)" to the body file, then:
-flight issues update --tracker "$TRACKER" --number "$NUMBER" --body-file "$SCRATCH/issue-body.md"
+if ! flight issues attach --tracker "$TRACKER" --check; then
+    echo "this tracker can't take attachments: keep the files and ask the user to add them"
+elif URL="$(flight issues attach --tracker "$TRACKER" --number "$NUMBER" \
+        --file /path/to/screenshot.png \
+        --name screenshot.png)"; then
+    printf '\n## Screenshot\n\n![screenshot](%s)\n' "$URL" >>"$SCRATCH/issue-body.md"
+    flight issues update --tracker "$TRACKER" --number "$NUMBER" \
+        --body-file "$SCRATCH/issue-body.md"
+else
+    echo "the upload failed: not adding its image link" >&2
+fi
 ```
+
+`--check` sends nothing. It exits 0 where uploads work and fails as `unsupported` where they
+don't. When uploads are unsupported, **never embed an image link**: an `![…]()` with no URL tells
+the reader a screenshot is there when it isn't. Keep each image at a stable path, then tell the
+user which files belong on the issue so they can drag them into it in the web UI.
+
+With several images, upload and append each one in turn. A failed upload on a backend that
+supports them is handled the same way: report it and leave the link out.
 
 **File notes:** screencapture temp files are deleted within seconds — copy to a stable location
 (scratchpad / Downloads) first. If a direct path fails, glob for the newest:

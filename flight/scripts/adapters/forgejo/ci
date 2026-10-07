@@ -5,7 +5,7 @@
 set -euo pipefail
 ADAPTER_NAME="forgejo/ci"
 # shellcheck source-path=SCRIPTDIR source=_common.sh
-source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+source "${0%/*}/_common.sh"
 
 verb="${1:-}"; shift || true
 
@@ -86,12 +86,20 @@ case "$verb" in
       # workflow_dispatch, it supersedes the workflow's earlier runs outright
       # (a human explicitly re-ran it). A missing workflow_id falls back to
       # the run's own id, i.e. no collapse.
+      # A cancelled run is superseded too (FJ-313) when the same workflow has a
+      # run on this SHA that wasn't cancelled: opening a PR on a just-pushed
+      # commit starts a `push` run and a `pull_request` run, and a concurrency
+      # group cancels the first. The twin carries the verdict; the cancelled
+      # run only decides when it is all the workflow has.
       metrics="$(printf '%s' "$body" | jq -r --arg sha "$sha" '
+        def cancelled: (.status // "") as $x | ["cancelled","canceled"] | index($x);
         [.workflow_runs[]? | select((.commit_sha // .head_sha // "")|startswith($sha))]
         | group_by(.workflow_id // .id)
         | map( max_by(.id) as $l
              | if ($l.trigger_event // $l.event // "") == "workflow_dispatch" then [$l]
-               else group_by(.trigger_event // .event // "") | map(max_by(.id)) end )
+               else group_by(.trigger_event // .event // "") | map(max_by(.id)) end
+             | [.[] | select(cancelled | not)] as $live
+             | if ($live|length) > 0 then $live else . end )
         | (add // [])
         | map(.status) as $s
         | ($s|length) as $total

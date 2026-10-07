@@ -9,7 +9,9 @@
 #   * P       — a second clone used to perform promotions, so R's refs lag origin
 #               exactly the way a real main checkout does after a promote elsewhere.
 # The `pr` mode is driven through a stub FLIGHT_SELF (the dispatcher seam): it logs
-# `pr open` / `ci watch` / `pr merge`, and its `pr merge` really merges on origin.
+# `pr list` / `pr open` / `ci watch` / `pr merge`, and its `pr merge` really merges on
+# origin. It remembers the PR it opened until it is merged, so a second `pr open` for
+# the same head and base is refused the way Forgejo does (HTTP 409).
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -27,17 +29,34 @@ STUB="$SANDBOX/flight-stub"; STUB_LOG="$SANDBOX/stub.log"
 # ── stub dispatcher: pr open / ci watch / pr merge ───────────────────────────
 cat >"$STUB" <<'EOF'
 #!/usr/bin/env bash
-# Logs every call as "<group> <verb> <args…>" and answers the three verbs sync-down
+# Logs every call as "<group> <verb> <args…>" and answers the four verbs sync-down
 # uses in pr mode. `pr merge` performs a real merge on $ORIGIN so the caller's
-# post-merge fetch sees what a backend would have written.
+# post-merge fetch sees what a backend would have written. While PR #7 is open its
+# head/base sit in <log>.open. STUB_LIST_MISS=N makes the first N `pr list` calls
+# come back empty, as a lookup that missed the PR would.
 set -euo pipefail
 printf '%s\n' "$*" >>"${STUB_LOG:?}"
+OPEN="${STUB_LOG%.log}.open"
 group="$1"; verb="$2"; shift 2
 case "$group $verb" in
+	"pr list")
+		head=""; base=""
+		while [ $# -gt 0 ]; do case "$1" in --head) head="$2"; shift 2 ;; --base) base="$2"; shift 2 ;; *) shift ;; esac; done
+		calls="${STUB_LOG%.log}.lists"
+		n=$(( $(cat "$calls" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$calls"
+		[ "$n" -gt "${STUB_LIST_MISS:-0}" ] || exit 0
+		if [ -f "$OPEN" ] && [ "$(cat "$OPEN")" = "$head	$base" ]; then
+			printf '7\topen\t%s\t%s\tSync %s back into %s\n' "$head" "$base" "$head" "$base"
+		fi ;;
 	"pr open")
 		head=""; base=""
 		while [ $# -gt 0 ]; do case "$1" in --head) head="$2"; shift 2 ;; --base) base="$2"; shift 2 ;; --body-file) [ -f "$2" ] || { echo "no body file" >&2; exit 1; }; shift 2 ;; *) shift ;; esac; done
+		if [ -f "$OPEN" ] && [ "$(cat "$OPEN")" = "$head	$base" ]; then
+			echo "forgejo/pr: POST /pulls → HTTP 409: pull request already exists for these targets" >&2
+			exit 1
+		fi
 		printf '%s\t%s\n' "$head" "$base" >"${STUB_LOG%.log}.pr"
+		printf '%s\t%s\n' "$head" "$base" >"$OPEN"
 		printf '7\thttps://example.invalid/acme/widget/pulls/7\n' ;;
 	"ci watch")
 		printf 'ci runs=1 pending=0 failed=%s skipped=%s cancelled=%s status=%s\n' "${STUB_CI_FAILED:-0}" "${STUB_CI_SKIPPED:-0}" "${STUB_CI_CANCELLED:-0}" "${STUB_CI_STATUS:-success}"
@@ -50,7 +69,7 @@ case "$group $verb" in
 		git -C "$tmp" switch -q "$base"
 		git -C "$tmp" merge -q --no-ff -m "Merge PR #7: $head into $base" "origin/$head"
 		git -C "$tmp" push -q origin "$base"
-		rm -rf "$tmp" ;;
+		rm -rf "$tmp" "$OPEN" ;;
 	*) echo "stub: unexpected $group $verb" >&2; exit 2 ;;
 esac
 EOF
@@ -69,7 +88,7 @@ ALL_DIRECT='[{"name":"develop","merge":"direct"},{"name":"qa","merge":"direct"},
 
 # fresh [stages-json] — rebuild origin + R + P with develop/qa/main all at one root commit.
 fresh() {
-	rm -rf "$ORIGIN" "$R" "$P" "$STUB_LOG" "${STUB_LOG%.log}.pr"
+	rm -rf "$ORIGIN" "$R" "$P" "$STUB_LOG" "${STUB_LOG%.log}.pr" "${STUB_LOG%.log}.open"
 	git init -q --bare -b develop "$ORIGIN"
 	git init -q -b develop "$R"; gitcfg "$R"
 	git -C "$R" remote add origin "$ORIGIN"
@@ -105,7 +124,7 @@ osha() { git -C "$P" fetch -q origin && git -C "$P" rev-parse "origin/$1"; }
 
 # run [args…] — the script under test, anchored to R, backend calls to the stub.
 run() {
-	: >"$STUB_LOG"
+	: >"$STUB_LOG"; rm -f "${STUB_LOG%.log}.lists"
 	FLIGHT_REPO_ROOT="$R" FLIGHT_CONFIG="$R/.flightdirector/config.json" FLIGHT_SELF="$STUB" \
 		"$SYNC" "$@" >"$SANDBOX/out" 2>"$SANDBOX/err"
 }
@@ -214,7 +233,8 @@ check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(err)"
 check "pr open called with --head qa --base develop" "$(grep -q '^pr open .*--head qa .*--base develop' "$STUB_LOG" && echo 1 || echo 0)" "$(cat "$STUB_LOG")"
 check "ci watch called by --pr" "$(grep -q '^ci watch --pr 7' "$STUB_LOG" && echo 1 || echo 0)"
 check "pr merge uses --strategy merge (never the stage's promotion strategy)" "$(grep -q '^pr merge --number 7 --strategy merge$' "$STUB_LOG" && echo 1 || echo 0)" "$(cat "$STUB_LOG")"
-check "calls happen in order open → watch → merge" "$([ "$(cut -d' ' -f1,2 "$STUB_LOG" | paste -sd, -)" = "pr open,ci watch,pr merge" ] && echo 1 || echo 0)"
+check "calls happen in order list → open → watch → merge" "$([ "$(cut -d' ' -f1,2 "$STUB_LOG" | paste -sd, -)" = "pr list,pr open,ci watch,pr merge" ] && echo 1 || echo 0)" "$(cat "$STUB_LOG")"
+check "a fresh PR's row doesn't claim reuse" "$(grep -q 'reused' < <(line develop) && echo 0 || echo 1)" "$(out)"
 check "develop row says pr-merged #7" "$(grep -q $'^develop\tpr-merged\t#7' < <(line develop) && echo 1 || echo 0)" "$(out)"
 check "origin/develop now contains qa" "$(git -C "$P" fetch -q origin && git -C "$P" merge-base --is-ancestor "$qa_tip" origin/develop && echo 1 || echo 0)"
 check "local develop (checked out, clean) fast-forwarded to the merged tip" "$([ "$(sha develop)" = "$(osha develop)" ] && echo 1 || echo 0)"
@@ -258,14 +278,71 @@ check "row says a CI run was cancelled, PR left open" "$(grep -q $'^develop\tsto
 check "pr merge was NOT called on a cancelled verdict" "$(grep -q '^pr merge' "$STUB_LOG" && echo 0 || echo 1)"
 check "origin/develop untouched by a cancelled verdict" "$([ "$(osha develop)" = "$dev_before" ] && echo 1 || echo 0)"
 
-# ── 8. dirty checkout: merge in a throwaway worktree, push, report behind ────
-echo "── direct: dirty checkout"
+# ── 7b. resume: a re-run picks up the PR a stopped run left open (FJ-299) ────
+echo "── pr mode: resume an open sync PR"
+fresh '[{"name":"develop","merge":"direct","syncDown":"pr"},{"name":"qa","merge":"pr"},{"name":"main","merge":"pr"}]'
+commit_on "$P" develop f1 one
+git -C "$R" pull -q --ff-only origin develop
+promote develop qa
+qa_tip="$(osha qa)"
+STUB_CI_RC=1 run --from qa; rc=$?
+check "a watch timeout stops the hop and leaves PR #7 open" "$([ "$rc" != 0 ] && grep -q $'^develop\tstopped\tPR #7 left open' < <(line develop) && echo 1 || echo 0)" "$(out)"
+check "the timeout row names the re-run as the way to resume" "$(grep -q 'sync-down --from qa. to resume' < <(line develop) && echo 1 || echo 0)" "$(out)"
+run --from qa; rc=$?
+check "re-run exits 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(out) $(err)"
+check "re-run opens no second PR" "$(grep -q '^pr open' "$STUB_LOG" && echo 0 || echo 1)" "$(cat "$STUB_LOG")"
+check "re-run watches and merges the open PR" "$(grep -q '^ci watch --pr 7' "$STUB_LOG" && grep -q '^pr merge --number 7 --strategy merge$' "$STUB_LOG" && echo 1 || echo 0)" "$(cat "$STUB_LOG")"
+check "row says pr-merged #7 (reused)" "$(grep -q $'^develop\tpr-merged\t#7 (reused) qa → develop' < <(line develop) && echo 1 || echo 0)" "$(out)"
+check "origin/develop now contains qa" "$(git -C "$P" fetch -q origin && git -C "$P" merge-base --is-ancestor "$qa_tip" origin/develop && echo 1 || echo 0)"
+
+# The lookup misses the open PR (an old PR past the list limit): `pr open` is refused
+# with a 409, and the second lookup finds the PR to resume.
+fresh '[{"name":"develop","merge":"direct","syncDown":"pr"},{"name":"qa","merge":"pr"},{"name":"main","merge":"pr"}]'
+commit_on "$P" develop f1 one
+git -C "$R" pull -q --ff-only origin develop
+promote develop qa
+STUB_CI_RC=1 run --from qa
+STUB_LIST_MISS=1 run --from qa; rc=$?
+check "409 fallback: exit 0, PR merged" "$([ "$rc" = 0 ] && grep -q '^pr merge --number 7' "$STUB_LOG" && echo 1 || echo 0)" "$(out) $(err) $(cat "$STUB_LOG")"
+check "409 fallback: the refused open was followed by a second lookup" "$([ "$(cut -d' ' -f1,2 "$STUB_LOG" | paste -sd, -)" = "pr list,pr open,pr list,ci watch,pr merge" ] && echo 1 || echo 0)" "$(cat "$STUB_LOG")"
+check "409 fallback: row says reused" "$(grep -q $'^develop\tpr-merged\t#7 (reused)' < <(line develop) && echo 1 || echo 0)" "$(out)"
+
+# A PR that really cannot be opened (no open PR to fall back on) still stops.
+fresh '[{"name":"develop","merge":"direct","syncDown":"pr"},{"name":"qa","merge":"pr"},{"name":"main","merge":"pr"}]'
+commit_on "$P" develop f1 one
+git -C "$R" pull -q --ff-only origin develop
+promote develop qa
+printf 'qa\tdevelop\n' >"${STUB_LOG%.log}.open"     # the backend thinks one exists…
+STUB_LIST_MISS=2 run --from qa; rc=$?                 # …but no lookup ever finds it
+check "open refused and nothing to reuse → stopped, non-zero" "$([ "$rc" != 0 ] && grep -q $'^develop\tstopped\tcould not open the qa → develop PR' < <(line develop) && echo 1 || echo 0)" "$(out)"
+
+# ── 8. dirty checkout ────────────────────────────────────────────────────────
+# 8a. The fast-forward doesn't touch the dirty path: it happens in place (FJ-312),
+#     where the repo's hooks have the user's installed dependencies.
+echo "── direct: dirty checkout, merge leaves the dirty path alone"
 fresh
 commit_on "$P" develop f1 one
 git -C "$R" pull -q --ff-only origin develop
 promote develop qa
-qa_tip="$(osha qa)"; dev_local="$(sha develop)"
+qa_tip="$(osha qa)"
 printf 'uncommitted\n' >"$R/base"          # tracked file modified in the main checkout
+run --from qa; rc=$?
+check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(err)"
+check "row says fast-forwarded, in place" "$(grep -q $'^develop\tfast-forwarded\t.*fast-forwarded in .*uncommitted changes untouched' < <(line develop) && echo 1 || echo 0)" "$(out)"
+check "origin/develop == qa tip" "$([ "$(osha develop)" = "$qa_tip" ] && echo 1 || echo 0)"
+check "local develop moved with it" "$([ "$(sha develop)" = "$qa_tip" ] && echo 1 || echo 0)"
+check "the uncommitted edit is intact" "$([ "$(cat "$R/base")" = "uncommitted" ] && echo 1 || echo 0)"
+check "no throwaway worktree left behind" "$([ "$(git -C "$R" worktree list | wc -l)" -eq 1 ] && echo 1 || echo 0)"
+
+# 8b. The merge touches the dirty path: merge in a throwaway worktree, push, report behind.
+echo "── direct: dirty checkout, merge touches the dirty path"
+fresh
+commit_on "$P" develop f1 one
+git -C "$R" pull -q --ff-only origin develop
+promote develop qa
+commit_on "$P" qa base hotfix              # qa changes the file R has dirty
+qa_tip="$(osha qa)"; dev_local="$(sha develop)"
+printf 'uncommitted\n' >"$R/base"
 run --from qa; rc=$?
 check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(err)"
 check "origin/develop == qa tip" "$([ "$(osha develop)" = "$qa_tip" ] && echo 1 || echo 0)"
@@ -273,7 +350,76 @@ check "row reports the local checkout is behind" "$(grep -q 'local checkout .* i
 check "local develop ref was not moved under the dirty checkout" "$([ "$(sha develop)" = "$dev_local" ] && echo 1 || echo 0)"
 check "the uncommitted edit is intact" "$([ "$(cat "$R/base")" = "uncommitted" ] && echo 1 || echo 0)"
 check "throwaway worktree removed" "$([ "$(git -C "$R" worktree list | wc -l)" -eq 1 ] && echo 1 || echo 0)"
+
+# 8c. A pre-push hook that needs something only the real checkout has (orbitopolis:
+#     eslint without node_modules) refuses the throwaway's push. The row says so and
+#     carries the hook's own words — not "origin moved?" (FJ-312).
+echo "── direct: pre-push hook refuses the throwaway's push"
+# install_hook — R's pre-push hook passes only where an untracked deps/ exists.
+install_hook() {
+	mkdir -p "$R/deps"
+	cat >"$R/.git/hooks/pre-push" <<'HOOK'
+#!/usr/bin/env bash
+[ -d deps ] || { echo "lint: cannot find deps/ — run the installer" >&2; exit 1; }
+HOOK
+	chmod +x "$R/.git/hooks/pre-push"
+}
+fresh
+commit_on "$P" develop f1 one
+git -C "$R" pull -q --ff-only origin develop
+promote develop qa
+commit_on "$P" qa base hotfix
+install_hook
+dev_origin="$(osha develop)"
+printf 'uncommitted\n' >"$R/base"
+run --from qa; rc=$?
+row_text="$(line develop)"
+check "exit non-zero" "$([ "$rc" != 0 ] && echo 1 || echo 0)"
+check "row says the pre-push hook refused the push" "$(grep -q $'^develop\tstopped\t.*pre-push hook refused' <<<"$row_text" && echo 1 || echo 0)" "$row_text"
+check "row carries the hook's own output" "$(grep -q 'cannot find deps/' <<<"$row_text" && echo 1 || echo 0)" "$row_text"
+check "row no longer guesses 'origin moved'" "$(grep -q 'moved' <<<"$row_text" && echo 0 || echo 1)" "$row_text"
+check "row says the push ran from a throwaway worktree, and why" "$(grep -q 'throwaway worktree because .*uncommitted changes' <<<"$row_text" && echo 1 || echo 0)" "$row_text"
+log_path="$(sed -n 's/.*full output: \([^)]*\)).*/\1/p' <<<"$row_text")"
+check "the full push output is kept in a log" "$([ -n "$log_path" ] && grep -q 'cannot find deps/' "$log_path" && echo 1 || echo 0)" "$log_path"
+check "origin/develop untouched" "$([ "$(osha develop)" = "$dev_origin" ] && echo 1 || echo 0)"
+check "throwaway worktree removed" "$([ "$(git -C "$R" worktree list | wc -l)" -eq 1 ] && echo 1 || echo 0)"
 git -C "$R" checkout -q -- base
+
+# 8d. The same hook, with a dirty path the merge doesn't touch: the push happens from
+#     the real checkout, where deps/ exists, and goes through (the orbitopolis case).
+echo "── direct: pre-push hook passes in place"
+fresh
+commit_on "$P" develop f1 one
+git -C "$R" pull -q --ff-only origin develop
+promote develop qa
+install_hook
+qa_tip="$(osha qa)"
+printf 'uncommitted\n' >"$R/base"
+run --from qa; rc=$?
+check "exit 0" "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$(out) $(err)"
+check "origin/develop == qa tip" "$([ "$(osha develop)" = "$qa_tip" ] && echo 1 || echo 0)"
+git -C "$R" checkout -q -- base
+
+# 8e. origin really did move between the measurement and the push: that, and only
+#     that, is reported as a move. The hook pushes a commit from P to simulate it.
+echo "── direct: origin moves during the sync"
+fresh
+commit_on "$P" develop f1 one
+git -C "$R" pull -q --ff-only origin develop
+promote develop qa
+git -C "$P" switch -q develop; git -C "$P" pull -q --ff-only origin develop
+cat >"$R/.git/hooks/pre-push" <<HOOK
+#!/usr/bin/env bash
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+printf 'race\n' >"$P/race"
+git -C "$P" add race && git -C "$P" commit -qm race && git -C "$P" push -q origin develop
+HOOK
+chmod +x "$R/.git/hooks/pre-push"
+run --from qa; rc=$?
+row_text="$(line develop)"
+check "exit non-zero" "$([ "$rc" != 0 ] && echo 1 || echo 0)"
+check "row says origin/develop moved during the sync" "$(grep -q $'^develop\tstopped\t.*origin/develop moved during the sync' <<<"$row_text" && echo 1 || echo 0)" "$row_text"
+check "row doesn't blame a hook" "$(grep -q 'hook refused' <<<"$row_text" && echo 0 || echo 1)" "$row_text"
 
 # ── 9. ahead / diverged lower stage → STOP, nothing pushed ───────────────────
 echo "── freshness: ahead / diverged"

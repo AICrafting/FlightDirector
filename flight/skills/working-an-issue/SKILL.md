@@ -219,27 +219,29 @@ another repo mid-task cannot silently redirect a commit. If you ever find yourse
 When the work is done and waiting on the user to verify, hand the board over and tell the user
 it's ready to test, on which branch. If the repo configures `code.preflight`, the branch has to
 pass it first: `to-test` means *ready for a human to verify*, and the config is the repo's own
-statement of what "done" means. Same guard shape as `promoting-a-branch` Step 4b — the config is
-read inline, the gate runs in `$WT` in the foreground, and the label moves only inside the guard
-(`$SCRATCH` is the session scratchpad directory, where the gate's log goes):
+statement of what "done" means. `flight preflight run` runs the gate in `$WT`, in the
+foreground, and the label moves only when it succeeds (`$SCRATCH` is the session scratchpad
+directory, where the gate's log goes):
 
 ```
-if ! GATE="$(flight config '.code.preflight // empty')"; then
-    echo "could not read code.preflight: not moving $DISPLAY to to-test" >&2
-elif [ -n "$GATE" ] && ! ( cd "$WT" && sh -c "$GATE" ) >"$SCRATCH/preflight-$PREFIX.log" 2>&1; then
-    tail -40 "$SCRATCH/preflight-$PREFIX.log"
-    echo "preflight failed — $DISPLAY stays in-progress (full output: $SCRATCH/preflight-$PREFIX.log)" >&2
-else
-    [ -n "$GATE" ] && echo "preflight: passed ($GATE)"
+if flight preflight run --worktree "$WT" --log "$SCRATCH/preflight-$PREFIX.log"; then
     flight issues set-status --tracker "$TRACKER" --number "$NUMBER" --status to-test
+else
+    echo "$DISPLAY stays in-progress: the preflight gate did not pass" >&2
 fi
 ```
 
-(`set-status` is one call — it drops `in-progress` and adds `to-test` atomically.) With the key
-unset this is just the `set-status`, as before. On a red gate the label does **not** move: fix the
+`preflight run` succeeds when the gate passed (`preflight: passed (…)`) or the repo has none
+(`preflight: none configured`). It fails, and says why, when the gate failed (the log's last 40
+lines and its path) or the config could not be read. (`set-status` is one call — it drops
+`in-progress` and adds `to-test` atomically.) On a red gate the label does **not** move: fix the
 branch and run the block again, or, if you can't, tell the user the gate is failing and show the
 log tail — never flip the label to get past it. Run it in the foreground; a backgrounded gate
 has no verdict to act on when the label call runs.
+
+Never run the gate yourself as `sh -c "$GATE"`: Claude Code's safety check cannot read inside a
+`sh -c` string and may stop to ask, which an unattended session cannot answer (FJ-307). The verb
+exists so the command you run is one plain line.
 
 ### 3. The merge gate — wait for confirmation
 

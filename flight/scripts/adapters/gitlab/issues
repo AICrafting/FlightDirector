@@ -9,7 +9,7 @@
 set -euo pipefail
 ADAPTER_NAME="gitlab/issues"
 # shellcheck source-path=SCRIPTDIR source=_common.sh
-source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+source "${0%/*}/_common.sh"
 
 verb="${1:-}"; shift || true
 
@@ -146,6 +146,7 @@ case "$verb" in
       payload="$(jq -n --arg t "$title" --arg b "$body" '{title:$t, description:$b}')"
     fi
     if [ ${#labels[@]} -gt 0 ]; then
+      labels_load
       for n in "${labels[@]}"; do
         [ -n "$(label_id "$n")" ] \
           || die "issues create: label '$n' not found — create it first (labels create / bootstrapping-labels)"
@@ -181,13 +182,16 @@ case "$verb" in
     ;;
 
   attach)
-    number=""; file=""; name=""
+    number=""; file=""; name=""; check=0
     while [ $# -gt 0 ]; do case "$1" in
       --number) number="$2"; shift 2 ;;
       --file)   file="$2"; shift 2 ;;
       --name)   name="$2"; shift 2 ;;
+      --check)  check=1; shift ;;
       *) die "issues attach: unknown arg '$1'" ;;
     esac; done
+    # --check (FJ-311): this backend can upload; nothing is sent.
+    [ "$check" = 0 ] || exit 0
     [ -n "$number" ] || die "issues attach: --number required"
     [ -f "$file" ]   || die "issues attach: --file '$file' not found"
     [ -n "$name" ]   || name="$(basename "$file")"
@@ -277,6 +281,7 @@ case "$verb" in
     esac; done
     [ -n "$number" ] || die "issues label-add: --number required"
     [ ${#labels[@]} -gt 0 ] || die "issues label-add: at least one --label required"
+    labels_load
     for n in "${labels[@]}"; do
       [ -n "$(label_id "$n")" ] || die "issues label-add: label '$n' not found"
     done
@@ -296,6 +301,7 @@ case "$verb" in
     esac; done
     [ -n "$number" ] || die "issues label-remove: --number required"
     [ ${#labels[@]} -gt 0 ] || die "issues label-remove: at least one --label required"
+    labels_load
     for n in "${labels[@]}"; do
       [ -n "$(label_id "$n")" ] || die "issues label-remove: label '$n' not found"
     done

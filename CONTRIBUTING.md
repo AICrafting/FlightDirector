@@ -155,8 +155,11 @@ a Windows checkout every line of a `SKILL.md`, reference or changelog ends in `\
 script that reads markdown must strip it before matching: `tr -d '\r'` on a stream, or
 `sub(/\r$/, "")` first thing in an `awk` program. The usual casualties are exact-line
 comparisons (`$0 == marker`) and end-anchored patterns (`^name: foo$`, `/^```$/`). They
-pass on Linux and macOS and fail only on the Windows leg, looking like plain false asserts. To
-check locally, run the suite on a scratch copy of your committed `HEAD` with every `.md`
+pass on Linux and macOS and fail only on the Windows leg, looking like plain false asserts.
+That leg runs only on pull requests into `qa` and `main` (not the `main` → `qa` sync-down)
+and on a manual dispatch of the `tests` workflow, never on feature PRs into `develop`
+(FJ-305), so a Windows-only failure first shows up when `develop` is promoted. To catch it
+before then, run the suite on a scratch copy of your committed `HEAD` with every `.md`
 converted to CRLF:
 
 ```bash
@@ -332,3 +335,11 @@ conventions (a skill is a directory with a `SKILL.md` plus any `references/` or
 `templates/`). Invoke that skill when creating or editing a skill, and mirror the voice
 and structure of the existing skills (red-flags section, numbered lifecycle,
 common-mistakes table).
+
+The shell inside a skill's fenced blocks is what an agent actually runs, so it follows the
+rules in [`flight/references/skill-shell-blocks.md`](flight/references/skill-shell-blocks.md).
+Examples: flatten a branch name before using it in a filename, end every STOP branch with
+something that actually stops (`exit`, `return`, an `else`), and put each push or `pr open`
+behind the preflight check. `scripts/tests/skill-shell-blocks.test.sh` checks each rule over
+every skill, so `run-tests.sh` catches a block that breaks one. To add a rule, follow that
+reference's "Adding a rule" section: state the rule there and add its check to the test.

@@ -12,9 +12,9 @@ set -euo pipefail
 
 # Windows shims (jq CRLF, path form); a no-op elsewhere.
 # shellcheck source-path=SCRIPTDIR source=_portable.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+source "${BASH_SOURCE[0]%/*}/_portable.sh"
 
-SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+SELF_DIR="$(cd "${0%/*}" && pwd)"
 ADAPTERS_DIR="$SELF_DIR/adapters"
 
 # Failure reporting. Every failure prints one human sentence on stderr. Under
@@ -44,7 +44,7 @@ plugin_manifest() {
 # Feature tokens a consumer can detect with `flight capabilities --json` (#254)
 # instead of comparing versions. A token is added here in the same change that
 # ships the feature, and never renamed or removed once released.
-CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json issues-paging issues-copy issues-deps)
+CAPABILITIES=(version capabilities json-errors issues-json labels-json write-json issues-paging issues-copy issues-deps preflight issues-attach-check)
 
 # `flight --version [--json]` and `flight capabilities [--json]` (#254) — answered
 # before anything else: no repo, config, token or network needed, so a consumer
@@ -133,7 +133,7 @@ else
 	unset FLIGHT_ERROR_FILE LS_JSON
 fi
 
-[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci auth branches config reconcile prompt-log; also: flight --version, flight capabilities)"
+[ $# -ge 2 ] || die "usage: flight <group> <verb> [args…]  (groups: issues labels pr ci auth branches config preflight reconcile prompt-log; also: flight --version, flight capabilities)"
 group="$1"; verb="$2"; shift 2
 
 if [ "$json_mode" = 1 ]; then
@@ -150,8 +150,8 @@ case "$group" in
   pr|ci)         axis="code" ;;
   auth)          axis="code" ;;   # default; `auth check --axis issues` overrides it below
   branches)      axis="code" ;;             # dispatcher-owned (git-local); see below
-  config|reconcile|prompt-log) axis="" ;;   # handled below; no adapter needed
-  *) die "unknown group '$group' (expected: issues labels pr ci auth branches config reconcile prompt-log)" ;;
+  config|preflight|reconcile|prompt-log) axis="" ;;   # handled below; no adapter needed
+  *) die "unknown group '$group' (expected: issues labels pr ci auth branches config preflight reconcile prompt-log)" ;;
 esac
 
 command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
@@ -255,7 +255,7 @@ fi
 # .flightdirector/secrets.json does not exist locally). Falls back to cwd outside a repo.
 if cdir="$(git rev-parse --git-common-dir 2>/dev/null)"; then
   cdir="$(cd "$cdir" && pwd)" || die "cannot resolve git common dir: $cdir"   # absolutize (valid relative to cwd)
-  repo_root="$(dirname "$cdir")"
+  repo_root="${cdir%/*}"; [ -n "$repo_root" ] || repo_root=/
 else
   repo_root="$(pwd)"
 fi
@@ -389,32 +389,17 @@ tracker_tool() {
 	[ -x "$TRACKER_TOOL" ] || die_code not-configured "named tracker helper is not installed ($TRACKER_TOOL)"
 	"$TRACKER_TOOL" "$@"
 }
-# tracker_coded CODE ARGS… — tracker_tool whose failure is recorded under CODE with
-# the helper's own last message (it prints its reason on stderr and exits 1, so
-# the call site is what knows the code: an id or ref that does not resolve is
-# `not-found`).
-tracker_coded() {
-	local code="$1" tc_out tc_err; shift
-	[ -x "$TRACKER_TOOL" ] || die_code not-configured "named tracker helper is not installed ($TRACKER_TOOL)"
-	tc_err="$(mktemp "${TMPDIR:-/tmp}/flight-tracker.XXXXXX")"
-	if tc_out="$(tracker_tool "$@" 2>"$tc_err")"; then
-		cat "$tc_err" >&2; rm -f "$tc_err"
-		printf '%s\n' "$tc_out"
-		return 0
-	fi
-	cat "$tc_err" >&2
-	record_error "$code" "$(awk 'NF { l = $0 } END { print l }' "$tc_err")"
-	rm -f "$tc_err"
-	exit 1
-}
-
 # Every config-reading path rejects a schema this runtime does not understand, so a
 # newer config is never misread or rewritten. Prompt-log hooks run in every project
 # and must stay silent, so they are the one exemption.
 runtime_schema=0
 if [ -f "$cfg" ] && [ "$group" != "prompt-log" ]; then
-	jq -e . "$cfg" >/dev/null 2>&1 || die_code not-configured "$cfg_rel is not valid JSON"
-	runtime_schema="$(jq -r '.schemaVersion // 0' "$cfg")"
+	# One jq both validates and reads the schema (FJ-301). A file that is not one JSON
+	# object — malformed, empty, `null`, an array — prints nothing or fails, and either
+	# is "not valid JSON", as the separate `jq -e .` used to report.
+	runtime_schema="$(jq -r 'if type == "object" then .schemaVersion // 0 else error("not an object") end' "$cfg" 2>/dev/null)" \
+		|| die_code not-configured "$cfg_rel is not valid JSON"
+	[ -n "$runtime_schema" ] || die_code not-configured "$cfg_rel is not valid JSON"
 	case "$runtime_schema" in ''|*[!0-9]*) die "config schemaVersion must be a non-negative integer" ;; esac
 	[ "$runtime_schema" -le "$TRACKER_SCHEMA" ] || die_code not-configured "config uses schema $runtime_schema, newer than this Flight understands (schema $TRACKER_SCHEMA); update the Flight plugin"
 	if [ "$runtime_schema" -lt "$TRACKER_SCHEMA" ] && {
@@ -822,6 +807,27 @@ if [ "$group" = "config" ]; then
   exit 0
 fi
 
+# `flight preflight run|check` (FJ-307) — the repo's code.preflight gate, run by the
+# preflight helper so that the agent's own command never carries a `sh -c` string, which
+# Claude Code's safety check cannot read and may stop to ask about. `run` gets the gate
+# from here; `check` reads only the verdict file it wrote.
+if [ "$group" = "preflight" ]; then
+  case "$verb" in
+    run)
+      [ -f "$cfg" ] || die_code not-configured "no .flightdirector/config.json at repo root ($repo_root)"
+      gate="$(jq -r '.code.preflight // empty' "$cfg")" \
+        || die_code not-configured "could not read code.preflight from $cfg_rel"
+      handoff "$SELF_DIR/preflight" run --gate "$gate" "$@"
+      ;;
+    check)
+      handoff "$SELF_DIR/preflight" check "$@"
+      ;;
+    *)
+      die "unknown verb '$verb' (preflight: run check)"
+      ;;
+  esac
+fi
+
 [ -f "$cfg" ] || die_code not-configured "no .flightdirector/config.json at repo root ($repo_root)"
 
 # Named tracker routing (schema 3, #197). Issue and label verbs — and `auth check`
@@ -831,7 +837,49 @@ fi
 # adapters never choose a tracker. PR and CI verbs keep using `code`.
 tracker_json=""
 if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
-	tracker_tool validate --config "$cfg" ${cfg_tmp:+--tracked "$cfg_tracked"} || die_code not-configured "(in $cfg_rel${cfg_tmp:+ merged with its config.local.json}) — fix the config before any issue operation"
+	# ONE helper launch validates the config and, for a verb that acts on a tracker,
+	# resolves its issue id and selects the tracker (FJ-301): it used to be up to three
+	# launches of tracker-config.sh, and a fresh bash is the dearest process on Windows.
+	# Verbs that hand off or fan out (copy, deps, --all-trackers) only validate here;
+	# their helpers and per-tracker dispatches route for themselves.
+	route_args=(); route_identity=""; route_tracker=""
+	case "$group/$verb" in
+		issues/copy | issues/resync | issues/block | issues/unblock | issues/blockers | issues/blocking) ;;
+		issues/resolve)
+			[ "${1:-}" = --number ] && [ $# -eq 2 ] || die "usage: flight issues resolve --number INPUT [--tracker REF]"
+			route_args=(--number "$2") ;;
+		*)
+			if [ "$all_trackers" != 1 ]; then
+				route_args=(--select)
+				# An issue id picks the tracker (and becomes the adapter's native id) unless
+				# an explicit --tracker disagrees, which is an error rather than a guess.
+				if [ "$group" = issues ] && [ "$verb" != tracker ]; then
+					issue_input=""; want_number=0
+					for route_arg in "$@"; do
+						if [ "$want_number" = 1 ]; then issue_input="$route_arg"; want_number=0
+						elif [ "$route_arg" = --number ]; then want_number=1
+						fi
+					done
+					[ "$want_number" = 0 ] || die "issues $verb: --number needs a value"
+					[ -z "$issue_input" ] || route_args+=(--number "$issue_input")
+				fi
+			fi ;;
+	esac
+	route_err="$(mktemp "${TMPDIR:-/tmp}/flight-tracker.XXXXXX")"
+	route_rc=0
+	route_out="$(tracker_tool route --config "$cfg" ${cfg_tmp:+--tracked "$cfg_tracked"} \
+		${tracker_selector:+--tracker "$tracker_selector"} ${route_args[@]+"${route_args[@]}"} 2>"$route_err")" || route_rc=$?
+	cat "$route_err" >&2
+	case "$route_rc" in
+		0) rm -f "$route_err" ;;
+		3) rm -f "$route_err"
+		   die_code not-configured "(in $cfg_rel${cfg_tmp:+ merged with its config.local.json}) — fix the config before any issue operation" ;;
+		*) record_error not-found "$(awk 'NF { l = $0 } END { print l }' "$route_err")"
+		   rm -f "$route_err"; exit 1 ;;
+	esac
+	# `$(…)` dropped the trailing empty line(s), so a read may meet EOF: not an error.
+	{ IFS= read -r route_identity || true; IFS= read -r route_tracker || true; } <<<"$route_out"
+	unset route_out route_err route_rc
 
 	# config.local.json arrays replace wholesale: a local issueTrackers array that lacks
 	# a tracker the tracked config has hides that tracker on this machine. Warn once per
@@ -912,8 +960,7 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 	# `issues resolve --number INPUT [--tracker REF]` — the canonical identity JSON
 	# every workflow retains: {tracker, number (native id), qualified, branchPrefix}.
 	if [ "$group" = issues ] && [ "$verb" = resolve ]; then
-		[ "${1:-}" = --number ] && [ $# -eq 2 ] || die "usage: flight issues resolve --number INPUT [--tracker REF]"
-		tracker_coded not-found resolve --config "$cfg" --number "$2" ${tracker_selector:+--tracker "$tracker_selector"}
+		printf '%s\n' "$route_identity"   # resolved by the route call above
 		exit 0
 	fi
 
@@ -921,7 +968,7 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 	# secrets), e.g. to read its label map: `… | jq -r '.labels.status["to-test"]'`.
 	if [ "$group" = issues ] && [ "$verb" = tracker ]; then
 		[ $# -eq 0 ] || die "usage: flight issues tracker [--tracker REF]"
-		tracker_coded not-found select --config "$cfg" ${tracker_selector:+--tracker "$tracker_selector"}
+		printf '%s\n' "$route_tracker"    # selected by the route call above
 		exit 0
 	fi
 
@@ -949,31 +996,19 @@ if [ "$runtime_schema" -eq "$TRACKER_SCHEMA" ] && [ "$axis" = issues ]; then
 		esac
 	fi
 
-	# An issue id picks the tracker (and becomes the adapter's native id) unless an
-	# explicit --tracker disagrees, which is an error rather than a guess.
-	if [ "$group" = issues ]; then
-		issue_input=""; want_number=0
-		for route_arg in "$@"; do
-			if [ "$want_number" = 1 ]; then issue_input="$route_arg"; want_number=0
-			elif [ "$route_arg" = --number ]; then want_number=1
+	# The route call above resolved any --number; hand the adapter its native id.
+	if [ -n "$route_identity" ]; then
+		IFS=$'\t' read -r tracker_selector native_number <<<"$(jq -r '[.tracker, .number] | @tsv' <<<"$route_identity")"
+		routed=()
+		while [ $# -gt 0 ]; do
+			if [ "$1" = --number ]; then routed+=(--number "$native_number"); shift 2
+			else routed+=("$1"); shift
 			fi
 		done
-		[ "$want_number" = 0 ] || die "issues $verb: --number needs a value"
-		if [ -n "$issue_input" ]; then
-			identity_json="$(tracker_coded not-found resolve --config "$cfg" --number "$issue_input" ${tracker_selector:+--tracker "$tracker_selector"})"
-			tracker_selector="$(jq -r '.tracker' <<<"$identity_json")"
-			native_number="$(jq -r '.number' <<<"$identity_json")"
-			routed=()
-			while [ $# -gt 0 ]; do
-				if [ "$1" = --number ]; then routed+=(--number "$native_number"); shift 2
-				else routed+=("$1"); shift
-				fi
-			done
-			set -- ${routed[@]+"${routed[@]}"}
-		fi
+		set -- ${routed[@]+"${routed[@]}"}
 	fi
 
-	tracker_json="$(tracker_coded not-found select --config "$cfg" ${tracker_selector:+--tracker "$tracker_selector"})"
+	tracker_json="$route_tracker"
 fi
 
 # Loud, every-run warning if the secrets file is tracked by git (it holds a token).
@@ -981,32 +1016,27 @@ if [ -f "$sec" ] && git -C "$repo_root" ls-files --error-unmatch "$sec_rel" >/de
   echo "flight: WARNING — $sec_rel is tracked by git; it must be gitignored (it contains a token)." >&2
 fi
 
-# Resolve a selected tracker field in schema 3. Legacy schemas keep the old
-# issues → code inheritance until reconcile converts them.
-cfg_get() {
-	if [ -n "$tracker_json" ]; then
-		printf '%s' "$tracker_json" | jq -r --arg f "$1" '.[$f] // empty'
-	else
-		jq -r --arg a "$axis" --arg f "$1" '(.[$a][$f]) // (.code[$f]) // empty' "$cfg"
-	fi
-}
+# Every field this run reads, in ONE jq rather than eight (FJ-301): the selected
+# tracker's fields in schema 3 (legacy schemas keep the old issues → code inheritance
+# until reconcile converts them), the trunk, and the label map. Joined with \x1f, the
+# unit separator: unlike a tab it is not IFS whitespace, so an empty field cannot
+# collapse into its neighbour and shift the rest.
+if [ -n "$tracker_json" ]; then trk_arg="$tracker_json"; else trk_arg=null; fi
+cfg_fields="$(jq -r --arg a "$axis" --argjson t "$trk_arg" '
+	def field($f): (if $t != null then ($t | .[$f]) else (.[$a][$f]) // (.code[$f]) end) // "" | tostring;
+	[field("backend"), field("api"), field("owner"), field("repo"), field("project"), field("email"),
+	 ((.code.trunkBranch) // (.code.stages[0].name) // "" | tostring),
+	 ((if $t != null then $t.labels else .labels end) // {} | tojson)] | join("\u001f")' "$cfg")" \
+	|| die "could not read $cfg_rel"
+IFS=$'\x1f' read -r backend LS_API LS_OWNER LS_REPO LS_PROJECT cfg_email LS_TRUNK LS_LABELS_JSON <<<"$cfg_fields"
+unset trk_arg cfg_fields
 
-backend="$(cfg_get backend)"
 [ -n "$backend" ] || die_code not-configured "no backend configured for axis '$axis' (set code.backend or ${axis}.backend in $cfg_rel)"
 
-LS_API="$(cfg_get api)"
-LS_OWNER="$(cfg_get owner)"
-LS_REPO="$(cfg_get repo)"
-# Generic passthroughs (backend-agnostic; empty unless the config sets them).
+# LS_API, LS_OWNER, LS_REPO, LS_TRUNK and LS_LABELS_JSON were read above, with the
+# generic passthroughs (backend-agnostic; empty unless the config sets them):
 # `project` is a first-class coordinate for backends like Jira (the project key);
 # `email` is needed by backends that use email:token HTTP Basic auth (Jira).
-LS_PROJECT="$(cfg_get project)"
-LS_TRUNK="$(jq -r '(.code.trunkBranch) // (.code.stages[0].name) // empty' "$cfg")"
-if [ -n "$tracker_json" ]; then
-	LS_LABELS_JSON="$(printf '%s' "$tracker_json" | jq -c '.labels // {}')"
-else
-	LS_LABELS_JSON="$(jq -c '.labels // {}' "$cfg")"
-fi
 
 # `issues list --status ROLE` (#253) — a status ROLE filter, mapped through the
 # selected tracker's label map to its label name. Dispatcher-owned, so one call can
@@ -1166,17 +1196,17 @@ fi
 # Email (for email:token Basic auth): env override, then config, then secrets. A
 # tracker with its own credential takes its email only from its own entry.
 if [ -n "$credential_ref" ] && [ "$credential_ref" != code ]; then
-	LS_EMAIL="$(cfg_get email)"
+	LS_EMAIL="$cfg_email"
 	if [ -z "$LS_EMAIL" ] && [ -f "$sec" ]; then
 		LS_EMAIL="$(jq -r --arg c "$credential_ref" '.issueTrackers[$c].email // empty' "$sec")"
 	fi
 elif [ -n "$credential_ref" ]; then
-	LS_EMAIL="${LS_EMAIL:-$(cfg_get email)}"
+	LS_EMAIL="${LS_EMAIL:-$cfg_email}"
 	if [ -z "$LS_EMAIL" ] && [ -f "$sec" ]; then
 		LS_EMAIL="$(jq -r '.code.email // empty' "$sec")"
 	fi
 else
-	LS_EMAIL="${LS_EMAIL:-$(cfg_get email)}"
+	LS_EMAIL="${LS_EMAIL:-$cfg_email}"
 	if [ -z "$LS_EMAIL" ] && [ -f "$sec" ]; then
 		LS_EMAIL="$(jq -r --arg a "$axis" '(.[$a].email) // (.code.email) // empty' "$sec")"
 	fi

@@ -5,7 +5,7 @@
 set -euo pipefail
 ADAPTER_NAME="gitlab/ci"
 # shellcheck source-path=SCRIPTDIR source=_common.sh
-source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+source "${0%/*}/_common.sh"
 
 verb="${1:-}"; shift || true
 
@@ -84,13 +84,23 @@ case "$verb" in
       # newest `web` pipeline (manual "run pipeline") supersedes ALL earlier
       # pipelines for the sha — a human explicitly re-ran it. A missing source
       # falls back to the pipeline's own id, i.e. no collapse.
+      # A canceled branch/MR pipeline is superseded too (FJ-313) when its twin
+      # wasn't canceled: pushing a commit and opening an MR on it starts a
+      # `push` and a `merge_request_event` pipeline, and auto-cancel stops one.
+      # The twin carries the verdict. Only that pair stands in for each other —
+      # GitLab has no workflow dimension, so a canceled pipeline from any other
+      # source (a schedule, a trigger) still counts.
       metrics="$(printf '%s' "$body" | jq -r \
         --argjson pend "$_PENDING" --argjson pass "$_PASSED" --argjson skip "$_SKIPPED" \
         --argjson canc "$_CANCELED" '
         [.[]?]
         | (if length == 0 then []
            elif (max_by(.id).source // "") == "web" then [max_by(.id)]
-           else group_by(.source // .id) | map(max_by(.id)) end) as $r
+           else group_by(.source // .id) | map(max_by(.id)) end)
+        | ["push","merge_request_event"] as $twins
+        | (any(.[]; (.source // "") as $o | ($twins | index($o)) and (.status as $s | $canc | index($s) | not))) as $twin_live
+        | [.[] | select(($twin_live and ((.source // "") as $o | $twins | index($o))
+                         and (.status as $s | $canc | index($s))) | not)] as $r
         | ($r|length) as $total
         | ([$r[] | select(.status as $s | $pend | index($s))] | length) as $pending
         | ([$r[] | select(.status as $s | ($pend | index($s)) | not)

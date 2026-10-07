@@ -22,7 +22,7 @@ set -euo pipefail
 
 # Windows shims (jq CRLF, path form); a no-op elsewhere.
 # shellcheck source-path=SCRIPTDIR source=_portable.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_portable.sh"
+source "${BASH_SOURCE[0]%/*}/_portable.sh"
 
 : "${FLIGHT_REPO_ROOT:?FLIGHT_REPO_ROOT not set (dispatcher must export it)}"
 : "${FLIGHT_SELF:?FLIGHT_SELF not set (dispatcher must export it)}"

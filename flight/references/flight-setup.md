@@ -335,14 +335,20 @@ reader treats exactly like an absent key.
 }
 ```
 
-- `code.preflight` — a **shell command string**, run with `sh -c`. Read it with:
+- `code.preflight` — a **shell command string**. Skills never run it themselves: they call
+  `flight preflight run`, which reads the key, runs the command with `sh -c` inside the
+  dispatcher, and reports (FJ-307):
   ```
-  PREFLIGHT="$(flight config '.code.preflight // empty')"
-  [ -n "$PREFLIGHT" ] || echo "no preflight configured"   # absent and null both land here
+  flight preflight run --worktree "$WT" --log "$SCRATCH/preflight.log" [--verdict FILE]
   ```
+  An agent's own `sh -c "$GATE"` is exactly what Claude Code's Bash safety check cannot read,
+  so it may stop to ask, and an unattended session cannot answer. The verb keeps the agent's
+  command to one plain line. `flight preflight check --worktree DIR --verdict FILE` then asks
+  whether that verdict allows the commit now checked out (see the contract's
+  [`preflight`](adapter-contract.md#preflight-dispatcher-owned) section).
   **Working directory:** always the checkout that holds the code being gated, passed explicitly
-  (`sh -c "$PREFLIGHT"` run from that path, never from whatever directory the shell has wandered
-  into). That is the feature worktree `$WT` in `working-an-issue` and `promoting-a-branch`, each feature worktree in
+  as `--worktree`, never whatever directory the shell has wandered into. That is the feature
+  worktree `$WT` in `working-an-issue` and `promoting-a-branch`, each feature worktree in
   `promoting-branches`, the integration worktree on a `pr` group, and each issue worktree
   (`.worktrees/<ref>-<N>-<slug>`) in `queue-batches`. Write the command so it works from a repo
   root that is not the main checkout — a hard-coded absolute path defeats the point.
@@ -352,7 +358,8 @@ reader treats exactly like an absent key.
   the commit the gate ran on and never reuses it: every promotion runs the gate again, and the
   merge (or `pr open`) goes ahead only on a pass for the exact commit being promoted. So if the
   branch moves between the gate and the merge, or a promotion tries to lean on an earlier run,
-  it stops with *"preflight gate is not green"* even though the last run you saw was green.
+  it stops with *"the verdict is for <sha>, not the current <sha>"* even though the last run you
+  saw was green.
   That is not a false red: the gate has not seen that commit. Promote again and it will.
   **Where it runs:** `working-an-issue` before moving the issue to `to-test` (a failure leaves
   it `in-progress`); `promoting-a-branch` before the merge on a `direct` hop and before

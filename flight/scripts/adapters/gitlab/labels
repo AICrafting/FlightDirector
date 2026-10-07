@@ -5,7 +5,7 @@
 set -euo pipefail
 ADAPTER_NAME="gitlab/labels"
 # shellcheck source-path=SCRIPTDIR source=_common.sh
-source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+source "${0%/*}/_common.sh"
 
 verb="${1:-}"; shift || true
 
@@ -27,6 +27,7 @@ case "$verb" in
       *) die "labels resolve: unknown arg '$1'" ;;
     esac; done
     [ ${#names[@]} -gt 0 ] || die "labels resolve: at least one --name required"
+    labels_load
     for n in "${names[@]}"; do
       printf '%s\t%s\n' "$n" "$(label_id "$n")"
     done

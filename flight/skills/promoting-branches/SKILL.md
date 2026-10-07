@@ -56,13 +56,14 @@ MAIN="$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd)")"
 
 BASE="$("$DISP" config '.code.stages[0].name')"
 MERGE="$("$DISP" config '.code.stages[0].merge // "direct"')"   # direct | pr
-PREFLIGHT="$("$DISP" config '.code.preflight // empty')"        # repo gate; empty = not configured
 ```
 
-`BASE` is the first-hop target; `MERGE` decides direct-merge vs one-PR-per-group. `PREFLIGHT` is
-the repo's own check command ([flight-setup.md](../../references/flight-setup.md) → *Repo
-preflight gate*); when it is empty every preflight step below is skipped and the run behaves
-exactly as it did before the key existed.
+`BASE` is the first-hop target; `MERGE` decides direct-merge vs one-PR-per-group. The repo's own
+check command, `code.preflight` ([flight-setup.md](../../references/flight-setup.md) → *Repo
+preflight gate*), is run below with `"$DISP" preflight run`, which reads the key itself and
+succeeds at once when the repo has none. Never run the gate yourself as `sh -c "$GATE"`: Claude
+Code's safety check cannot read inside a `sh -c` string and may stop to ask, which an unattended
+batch cannot answer (FJ-307).
 
 ## Step 2: Find candidate branches
 
@@ -145,10 +146,11 @@ for each candidate (branch "$B", identity fields from Step 2) in the group:
     # $B is feature/<prefix>-<slug> (legacy: feature/<N>-<slug>); its worktree is .worktrees/${B#feature/}.
     # Repo gate, per branch, in that branch's own worktree — before its merge, so a failure
     # costs a skip rather than a merge commit nobody can take back off the stage.
-    if [ -n "$PREFLIGHT" ]; then
-        ( cd "$MAIN/.worktrees/${B#feature/}" && sh -c "$PREFLIGHT" ) \
-          >"$SCRATCH/preflight-$QUALIFIED.log" 2>&1 \
-          || { tail -40 "$SCRATCH/preflight-$QUALIFIED.log"; record SKIPPED($DISPLAY, preflight); continue; }
+    # On a failure it prints the log's tail and path itself.
+    if ! "$DISP" preflight run --worktree "$MAIN/.worktrees/${B#feature/}" \
+            --log "$SCRATCH/preflight-$QUALIFIED.log"; then
+        record SKIPPED($DISPLAY, preflight)
+        continue
     fi
     # The merge message names the issue by its qualified id — never a bare #N, which the forge
     # would read as the code repository's own issue N.
@@ -160,10 +162,12 @@ for each candidate (branch "$B", identity fields from Step 2) in the group:
 #     states as above; behind → the push is a non-fast-forward, so fast-forward is not
 #     possible with merges already stacked on top — STOP and report rather than pulling.
 git -C "$MAIN" fetch -q origin "$BASE"
-[ "$(git -C "$MAIN" rev-parse "origin/$BASE")" = \
-  "$(git -C "$MAIN" merge-base "$BASE" "origin/$BASE")" ] || {
-    echo "origin/$BASE moved during the batch — STOP and report; do not pull" >&2; }
-git -C "$MAIN" push   # once, after the group's merges
+if [ "$(git -C "$MAIN" rev-parse "origin/$BASE")" = \
+     "$(git -C "$MAIN" merge-base "$BASE" "origin/$BASE")" ]; then
+    git -C "$MAIN" push   # once, after the group's merges
+else
+    echo "origin/$BASE moved during the batch — not pushing; report it, do not pull" >&2
+fi
 ```
 
 **If `MERGE` = pr** — one PR per group via an integration branch. Three blocks, in order, once
@@ -187,42 +191,27 @@ for each candidate (branch "$B") in the group:
 
 **Gate** — the repo gate on the assembled group, in the integration worktree, before anything
 reaches origin: the branches are merged here but nothing is pushed, so a red gate costs a re-run,
-not a revert. The verdict goes to a **file** under `$SCRATCH`, stamped with the integration
-branch's commit, exactly as `promoting-a-branch` Step 4b does it. A shell variable is gone by the
+not a revert. Run it for every group, gated repo or not. The verdict goes to a **file** under
+`$SCRATCH`, stamped with the integration branch's commit (`pass`, `fail`, or `none` when the repo
+has no gate), exactly as `promoting-a-branch` Step 4b does it. A shell variable is gone by the
 next tool call, and a `continue` here has no loop to continue (the per-group iteration is prose,
-not a construct in the block), so neither can stop the push that follows.
+not a construct in the block), so neither could stop the push that follows.
 
 ```bash
-# Clear the old verdict first: until this run finishes there is no verdict at all.
-VERDICT="$SCRATCH/preflight-verdict-<zone>"
-rm -f "$VERDICT"
-if ! GATE="$("$DISP" config '.code.preflight // empty')"; then
-    echo "could not read code.preflight: no verdict for <zone>" >&2
-elif [ -n "$GATE" ]; then
-    INT_SHA="$(git -C "$SCRATCH/int-<zone>" rev-parse HEAD)"
-    if ( cd "$SCRATCH/int-<zone>" && sh -c "$GATE" ) >"$SCRATCH/preflight-<zone>.log" 2>&1; then
-        echo "pass $INT_SHA" >"$VERDICT"
-        echo "preflight: passed for <zone> ($GATE)"
-    else
-        tail -40 "$SCRATCH/preflight-<zone>.log"
-        echo "fail $INT_SHA" >"$VERDICT"    # the publish block below reads this back
-        echo "FAILED(<zone>, preflight) — full output: $SCRATCH/preflight-<zone>.log" >&2
-    fi
-fi
+"$DISP" preflight run --worktree "$SCRATCH/int-<zone>" \
+    --log "$SCRATCH/preflight-<zone>.log" \
+    --verdict "$SCRATCH/preflight-verdict-<zone>" \
+    || echo "FAILED(<zone>, preflight) — the publish block will skip this group" >&2
 ```
 
-**Publish** — reads the config inline (an unbound `$PREFLIGHT` looks exactly like "no gate
-configured") and the verdict file, and does nothing else unless the repo is ungated or the file
-says `pass` for the integration branch's current commit. A gate that failed, never ran, judged an
-older commit, or could not be asked about all land in a branch that **says** the group was skipped
-and why: a guard that declines in silence is indistinguishable from a group that quietly did
-nothing. Other groups carry on either way.
+**Publish** — asks `preflight check` about the verdict file and does nothing else unless it says
+`pass` or `none` for the integration branch's current commit. A gate that failed, never ran,
+judged an older commit, or could not read its config all land in a branch that **says** the group
+was skipped and why (`preflight check` prints the reason): a guard that declines in silence is
+indistinguishable from a group that quietly did nothing. Other groups carry on either way.
 
 ```bash
-if ! GATE="$("$DISP" config '.code.preflight // empty')"; then
-    echo "could not read code.preflight: group <zone> skipped — no push, no PR; $INT kept for a retry" >&2
-elif [ -z "$GATE" ] || [ "$(cat "$SCRATCH/preflight-verdict-<zone>" 2>/dev/null)" \
-                         = "pass $(git -C "$SCRATCH/int-<zone>" rev-parse HEAD)" ]; then
+if "$DISP" preflight check --worktree "$SCRATCH/int-<zone>" --verdict "$SCRATCH/preflight-verdict-<zone>"; then
     git -C "$SCRATCH/int-<zone>" push -u origin "$INT"
     # Decide stage closure before assembling the PR body; this value also drives
     # the explicit tracker lifecycle updates in Step 5.
@@ -266,7 +255,7 @@ elif [ -z "$GATE" ] || [ "$(cat "$SCRATCH/preflight-verdict-<zone>" 2>/dev/null)
     # `flight branches`' default patterns, so `cleaning-up-branches` finds it once its PR is
     # merged — don't hand-delete it here.
 else
-    echo "preflight gate is not green for <zone> — group skipped: no push, no PR (log: $SCRATCH/preflight-<zone>.log)" >&2
+    echo "group <zone> skipped: no push, no PR (gate log: $SCRATCH/preflight-<zone>.log)" >&2
     # record FAILED(<zone>, preflight). Take the branch as well as the worktree. $INT was never
     # pushed, so there is no PR for cleaning-up-branches to collect it behind — a bare
     # `worktree remove` strands a local batch/* ref forever. It also frees the name: if <short>

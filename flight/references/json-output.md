@@ -21,11 +21,11 @@ Neither probe needs a repository, a config, a token or the network.
 
 ```
 $ flight --version
-flight 0.17.2
+flight 0.18.0
 $ flight --version --json
-{"plugin":"flight","version":"0.17.2"}
+{"plugin":"flight","version":"0.18.0"}
 $ flight capabilities --json
-{"plugin":"flight","version":"0.17.2","capabilities":["version","capabilities", …]}
+{"plugin":"flight","version":"0.18.0","capabilities":["version","capabilities", …]}
 ```
 
 `flight capabilities` without `--json` prints one token per line.
@@ -41,6 +41,8 @@ $ flight capabilities --json
 | `issues-paging` | `issues list --json` pages with `--per-page M [--cursor C]` (below) |
 | `issues-copy` | `issues copy` and `issues resync` exist |
 | `issues-deps` | `issues block`, `unblock`, `blockers`, `blocking`, and `blocked_by` on `issues get --json` |
+| `preflight` | `preflight run` and `preflight check` run and check the repo's `code.preflight` gate (FJ-307) |
+| `issues-attach-check` | `issues attach --check` asks whether the tracker's backend can upload attachments (FJ-311) |
 
 ## Which verbs take `--json`
 
@@ -90,7 +92,7 @@ their own meaning: `prompt-log summary --json` predates this and is unchanged.
   "comments": 3,             // comment count, or null where the backend doesn't give one cheaply
   "url": "https://…/issues/81",        // web link
   "body": "markdown…",       // without the flight signature; null in list rows
-  "signature": {"plugin": "flight", "version": "0.17.2", "model": "Opus/5.5"},  // or null
+  "signature": {"plugin": "flight", "version": "0.18.0", "model": "Opus/5.5"},  // or null
   "blocked_by": [{"id": "GH-3", "title": "…", "state": "open", "via": "text"}]  // issues get only; null in list rows and when the lookup failed
 }
 ```
@@ -200,7 +202,7 @@ stderr still carries the human sentence, as without `--json`. `message` is for d
 | `network` | the server couldn't be reached (curl itself failed) |
 | `backend` | the server answered with any other error (5xx, an unexpected 4xx), or the call failed in a way nothing classified |
 | `usage` | bad flags or arguments, or `--json` on a verb without a JSON form |
-| `unsupported` | an adapter's `dep-*` verb: the backend can't record a dependency here. `issues block` handles it by falling back to comments |
+| `unsupported` | an adapter's `dep-*` verb: the backend can't record a dependency here, and `issues block` handles it by falling back to comments. Also `issues attach` (and `attach --check`) on a backend that can't upload: GitHub and Jira |
 | `already-copied` | `issues copy`: the ledger already records a copy of this issue on that tracker; use `issues resync`, or `--force` for a second copy |
 
 The code is decided where the cause is known, and never by matching message text. The dispatcher

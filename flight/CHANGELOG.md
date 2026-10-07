@@ -15,6 +15,99 @@ the plugin aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 _Nothing yet._
 
+## [0.18.0] - 2026-10-06
+
+### Added
+- **Rules for the shell in skill blocks** (FJ-226). `references/skill-shell-blocks.md` lists the six
+  shapes that skill shell has gone wrong in: a branch name used as a file name, a STOP that stops
+  nothing, a guard missed at one site, a `continue` with no loop, a command run from a string,
+  and bash 4 features. A new contract test checks every fenced shell block in the plugin against
+  each rule. Each check is first shown to fire on the defect it exists for.
+- **`flight issues attach --check`** (FJ-311). Asks whether the tracker's backend can upload a
+  file to an issue, without sending anything. It exits 0 on Forgejo and GitLab. On GitHub (whose
+  REST API has no issue-attachment endpoint) and Jira it fails with the `unsupported` error code,
+  which those backends' `issues attach` now uses too, where it used to report `usage`. Advertised
+  as the `issues-attach-check` capability. `filing-issues` Step 7 now checks first and never
+  embeds an image link when the upload didn't happen. On GitHub, an agent following it used to
+  post `![…]()` comments that claimed screenshots that weren't there.
+- **`flight preflight run` and `flight preflight check`** (FJ-307). The skills used to run the
+  repo's `code.preflight` gate themselves as `sh -c "$GATE"`. Claude Code's Bash safety check
+  cannot read inside a `sh -c` string, so it sometimes stopped to ask, and an unattended session
+  that could not answer had the step denied at the very check the workflow depends on. The
+  dispatcher now runs the gate: `preflight run --worktree DIR [--log FILE] [--verdict FILE]`
+  reports pass, fail (with the log's tail) or "none configured", and records a verdict for the
+  commit it judged. `preflight check` accepts only a pass or none for the commit now checked out,
+  and says why otherwise. `working-an-issue`, `promoting-a-branch`, `promoting-branches` and
+  `queue-batches` (including its agent prompt) all use it, and each guard is now a one-line
+  `if flight preflight check …`. Promotions now run the gate step in ungated repos too (it records
+  `none` in a moment), since the guards read that verdict instead of re-reading the config.
+  `runtime.md` gains short rules for the commands agents write: no computed `-c`/`eval` strings,
+  no `rm` on globs or possibly-empty paths, and one readable statement per line.
+
+### Fixed
+- **Two promotion guards that only printed now stop** (FJ-226). On a `pr` hop,
+  `promoting-a-branch` checked whether the local branch was ahead of origin, in a block of its
+  own. If it was, the block printed "push first" and the next block opened the PR anyway. The
+  check now sits in front of `pr open`, in the same block. In `promoting-branches`, the re-check
+  before a `direct` hop's push printed STOP when origin had moved, and the push still ran. The
+  push is now inside the check.
+- **Label lookups fetch the repo's label list once per command** (FJ-301). The list was meant to
+  be cached, but the cache was filled in a subshell and lost every time. Every lookup re-fetched
+  the whole paged list: once per configured status role on `issues set-status` and
+  `clear-status`, and once per `--label` on `create`, `label-add` and `label-remove`. On Forgejo,
+  GitHub and GitLab those commands now make one label-list request. A Forgejo status change
+  against a repo with several pages of labels drops from a dozen or more requests to a handful.
+- **The repo's own Windows CI leg no longer spends ~10 minutes on one test** (FJ-295). The fake
+  `curl` in `tracker-lifecycle.test.sh` matched GitHub's label list with `*page=1*`, which
+  `per_page=100` also matches, so every page came back full and the adapter paged to its
+  1000-page cap. The error was swallowed by `|| true`, so the test passed. The pattern is now
+  anchored on `[?&]page=1` at the end of the URL in that test and three others that had copied
+  it, and a new check fails if the label list is paged more than a few times. Test-only:
+  plugin behavior is unchanged.
+- **`branches sync-down` says why a push was refused, and runs it where hooks can pass**
+  (FJ-312). A push refused by the repo's own pre-push hook used to be reported as `push of
+  develop was rejected (origin moved?)`, and the hook's output was thrown away. A refusal now
+  names its cause: origin really moved during the sync (confirmed by a re-fetch), the server
+  refused it, or the pre-push hook did. The row quotes the last lines of the push's output and
+  gives the path of the full log. Separately, any uncommitted change in the checkout holding the
+  lower stage used to send the merge to a throwaway worktree, where hooks that need installed
+  dependencies (eslint without `node_modules`) fail. A fast-forward that doesn't touch the dirty
+  paths now happens in the checkout itself, which is the usual sync-down case. When the
+  throwaway is still needed, a hook failure there says so.
+- **`ci watch` no longer reports `cancelled` for a PR whose checks all passed** (FJ-313). Opening
+  a PR on a commit you just pushed starts each workflow twice, once for the `push` and once for
+  the `pull_request`. A workflow with a concurrency group then cancels the `push` run. Every
+  backend scored those cancelled runs next to their green twins, so the verdict came out
+  `cancelled`, and `promoting-a-branch` and `branches sync-down` refused to merge a PR that had
+  been fully verified. A cancelled run no longer counts when the same workflow has a run on that
+  commit under another trigger that wasn't cancelled. The twin decides, whether it passed or
+  failed. On GitLab, which has no per-workflow runs, the same rule applies between a commit's
+  `push` and `merge_request_event` pipelines. A cancellation with no such twin still reports
+  `cancelled`.
+
+- **`branches sync-down` resumes a cascade whose sync PR is still open** (FJ-299). On a `pr`
+  sync hop the verb always opened a new PR. When an earlier run had stopped and deliberately
+  left that PR open (a CI watch timeout, red CI), the re-run got `HTTP 409: pull request already
+  exists` and stopped again. The hop then had to be driven by hand. The verb now looks for an
+  open PR with the same head and base first, and watches and merges that one. A `pr open`
+  refused because one already exists falls back to the same lookup. The row reads
+  `#298 (reused)` so a resume is visible, and a watch timeout names the re-run as the way to
+  resume.
+
+### Changed
+- **The repo's own Windows CI leg runs only on pull requests into `qa` and `main`** (FJ-305), plus
+  manual dispatches; the `main` → `qa` sync-down skips it. Feature PRs into `develop` and pushes to `develop` no longer wait ~11
+  minutes for it, so a Windows-only failure first shows up at promotion. Repo CI only: plugin
+  behavior is unchanged.
+- **Faster dispatcher on Windows** (FJ-301). Git Bash ran every `jq` call through a `tr` pipe
+  to strip the CRs that a native `jq.exe` writes, which cost three processes per call. Flight
+  now uses jq's own `-b` flag, which writes LF directly, and keeps the pipe only for a jq older
+  than 1.6. Start-up also does less work on every platform: helpers are located without
+  `dirname`, and the config and the selected tracker's fields are each read with a single `jq`.
+  Each command validates its config and selects its tracker in one launch of the tracker helper
+  instead of up to three. Result pages are processed with one `jq` each. A status change starts
+  well under half as many processes as before.
+
 ## [0.17.2] - 2026-10-04
 
 ### Added
